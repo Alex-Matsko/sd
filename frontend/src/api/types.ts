@@ -248,6 +248,11 @@ export interface EmailChannelConfig {
   poll_interval_seconds?: number;
 }
 
+export interface MaxChannelConfig {
+  base_url?: string;
+  poll_timeout_seconds?: number;
+}
+
 export interface Attachment {
   id: number;
   filename: string;

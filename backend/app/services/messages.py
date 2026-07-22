@@ -66,12 +66,17 @@ def add_message(
     db.commit()
     db.refresh(message)
 
-    # Engineer replies on an email-channel ticket go out over SMTP (section
-    # 2.3: "Ответ уходит в канал обращения"). Deferred import - email_channel
-    # imports this module to post the inbound side of the same conversation.
-    if payload.direction == MessageDirection.OUTBOUND and channel == Channel.EMAIL:
-        from app.services import email_channel
+    # Engineer replies go out over the ticket's own channel (section 2.3:
+    # "Ответ уходит в канал обращения"). Deferred imports - both channel
+    # modules import this one to post the inbound side of the conversation.
+    if payload.direction == MessageDirection.OUTBOUND:
+        if channel == Channel.EMAIL:
+            from app.services import email_channel
 
-        email_channel.try_send_outbound(db, ticket, message, _resolve_recipient_email(ticket))
+            email_channel.try_send_outbound(db, ticket, message, _resolve_recipient_email(ticket))
+        elif channel == Channel.MAX:
+            from app.services import max_channel
+
+            max_channel.try_send_outbound(db, ticket, message)
 
     return message

@@ -72,6 +72,13 @@ class Ticket(Base, TimestampMixin):
     sla_resolution_met: Mapped[bool | None] = mapped_column()
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # CSAT (section 2.1: "оценка после закрытия (1-5)"); full reporting is
+    # Stage 9, but the messenger bots request/capture the rating now, so the
+    # column exists ahead of that stage the same way the SLA ones did.
+    csat_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    csat_rating: Mapped[int | None] = mapped_column(Integer)
+    csat_rated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     organization: Mapped["Organization"] = relationship()
     contact: Mapped["Contact"] = relationship()
     contract: Mapped["Contract"] = relationship()

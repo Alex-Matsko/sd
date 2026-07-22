@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listIntegrationSettings, updateIntegrationSetting } from "../../api/endpoints";
 import { ErrorBanner, Loading } from "../../components/ui";
 import { formatDateTime } from "../../lib/labels";
-import type { Channel, EmailChannelConfig, IntegrationSetting } from "../../api/types";
+import type { Channel, EmailChannelConfig, IntegrationSetting, MaxChannelConfig } from "../../api/types";
 
 const CHANNEL_TITLES: Partial<Record<Channel, string>> = {
   email: "Email",
@@ -219,6 +219,84 @@ function EmailChannelCard({ setting }: { setting: IntegrationSetting }) {
   );
 }
 
+function MaxChannelCard({ setting }: { setting: IntegrationSetting }) {
+  const qc = useQueryClient();
+  const cfg = setting.config as MaxChannelConfig;
+
+  const [isEnabled, setIsEnabled] = useState(setting.is_enabled);
+  const [baseUrl, setBaseUrl] = useState(cfg.base_url ?? "");
+  const [pollTimeout, setPollTimeout] = useState(cfg.poll_timeout_seconds ?? 20);
+  const [botToken, setBotToken] = useState("");
+  const [botTokenCleared, setBotTokenCleared] = useState(false);
+
+  const isTokenSet = setting.secret_keys_set.includes("bot_token");
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const secrets: Record<string, string | null> = {};
+      if (botTokenCleared) secrets.bot_token = null;
+      else if (botToken) secrets.bot_token = botToken;
+
+      return updateIntegrationSetting("max", {
+        is_enabled: isEnabled,
+        config: {
+          base_url: baseUrl || undefined,
+          poll_timeout_seconds: Number(pollTimeout),
+        },
+        secrets: Object.keys(secrets).length > 0 ? secrets : undefined,
+      });
+    },
+    onSuccess: () => {
+      setBotToken("");
+      setBotTokenCleared(false);
+      qc.invalidateQueries({ queryKey: ["integration-settings"] });
+    },
+  });
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>MAX</h2>
+        <div className="spacer" />
+        <label className="form-row-inline" style={{ marginBottom: 0 }}>
+          <input type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} />
+          Канал включён
+        </label>
+      </div>
+      <p className="muted">
+        Приём и отправка сообщений — long polling через Bot API MAX. Идентификация клиента — по MAX ID контакта;
+        нераспознанные обращения попадают в организацию «Неизвестные». Изменено: {formatDateTime(setting.updated_at)}.
+      </p>
+
+      <div className="form-grid">
+        <SecretField
+          label="Токен бота"
+          isSet={isTokenSet}
+          value={botToken}
+          onChange={setBotToken}
+          onClear={() => setBotTokenCleared(true)}
+          cleared={botTokenCleared}
+        />
+        <div className="form-row">
+          <label className="form-label">Таймаут long polling, сек</label>
+          <input type="number" min={5} max={90} value={pollTimeout} onChange={(e) => setPollTimeout(Number(e.target.value))} />
+        </div>
+      </div>
+      <div className="form-row">
+        <label className="form-label">Базовый URL API (обычно не требуется менять)</label>
+        <input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://platform-api2.max.ru" />
+      </div>
+
+      {saveMutation.isError && <ErrorBanner message={(saveMutation.error as Error).message} />}
+      <div className="modal-foot" style={{ padding: 0, borderTop: "none", justifyContent: "flex-start" }}>
+        <button className="btn btn-primary" disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PlaceholderChannelCard({ setting }: { setting: IntegrationSetting }) {
   const qc = useQueryClient();
   const [isEnabled, setIsEnabled] = useState(setting.is_enabled);
@@ -263,7 +341,8 @@ export function ChannelsSettingsPage() {
 
   const settings = settingsQuery.data ?? [];
   const email = settings.find((s) => s.channel === "email");
-  const others = settings.filter((s) => s.channel !== "email");
+  const max = settings.find((s) => s.channel === "max");
+  const others = settings.filter((s) => s.channel !== "email" && s.channel !== "max");
 
   return (
     <div className="view">
@@ -278,6 +357,7 @@ export function ChannelsSettingsPage() {
       </p>
 
       {email && <EmailChannelCard key={email.updated_at + "email"} setting={email} />}
+      {max && <MaxChannelCard key={max.updated_at + "max"} setting={max} />}
       {others.map((s) => (
         <PlaceholderChannelCard key={s.channel} setting={s} />
       ))}

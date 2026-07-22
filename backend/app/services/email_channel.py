@@ -23,7 +23,6 @@ from app.core.enums import (
     Channel,
     MessageDirection,
     OPEN_TICKET_STATUSES,
-    OrganizationStatus,
     Priority,
     TicketType,
 )
@@ -37,11 +36,11 @@ from app.services import attachments as attachments_service
 from app.services import integration_settings
 from app.services import messages as messages_service
 from app.services import tickets as tickets_service
+from app.services.unknown_queue import UNKNOWN_ORGANIZATION_NAME, get_or_create_unknown_organization
 
 logger = logging.getLogger("app.email_channel")
 
 TICKET_TAG_RE = re.compile(r"\[#OH-(\d+)\]", re.IGNORECASE)
-UNKNOWN_ORGANIZATION_NAME = "Неизвестные"
 
 
 @dataclass
@@ -151,21 +150,6 @@ def parse_message(raw: bytes) -> ParsedEmail:
         references=references,
         attachments=parsed_attachments,
     )
-
-
-def get_or_create_unknown_organization(db: Session) -> Organization:
-    """Placeholder organization for the "Неизвестные" queue (section 2, rule 4):
-    senders that match neither an existing contact nor a registered corporate
-    domain land here so a dispatcher can re-triage them, without inventing a
-    parallel "unassigned contact" concept alongside the existing Organization
-    model. Looked up by name each time rather than a dedicated flag column -
-    same pattern as the default tariff's reserved `code` (services/contracts.py)."""
-    org = db.query(Organization).filter(Organization.name == UNKNOWN_ORGANIZATION_NAME).first()
-    if org is None:
-        org = Organization(name=UNKNOWN_ORGANIZATION_NAME, status=OrganizationStatus.ACTIVE)
-        db.add(org)
-        db.flush()
-    return org
 
 
 def resolve_sender(db: Session, parsed: ParsedEmail) -> tuple[Contact, bool]:

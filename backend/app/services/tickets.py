@@ -120,6 +120,14 @@ def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, act
     ticket.status = new_status
     db.add(ticket)
 
+    if new_status == TicketStatus.CLOSED:
+        # Messenger CSAT request (section 2.1/2.2, "оценка после закрытия") -
+        # a no-op for channels without a messenger bot behind them yet.
+        # Deferred import: max_channel imports tickets_service.create_ticket.
+        from app.services import max_channel
+
+        max_channel.request_csat(db, ticket)
+
     audit.record(
         db,
         entity_type="ticket",

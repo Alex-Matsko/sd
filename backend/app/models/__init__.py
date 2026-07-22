@@ -17,6 +17,7 @@ from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.notification import Notification
 from app.models.integration_setting import IntegrationSetting
+from app.models.channel_conversation_state import ChannelConversationState
 
 __all__ = [
     "Base",
@@ -47,4 +48,5 @@ __all__ = [
     "RefreshToken",
     "Notification",
     "IntegrationSetting",
+    "ChannelConversationState",
 ]
