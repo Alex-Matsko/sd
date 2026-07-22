@@ -4,8 +4,10 @@ import type {
   ContractStatus,
   ImpactUrgencyLevel,
   MessageDirection,
+  NotificationType,
   OrganizationStatus,
   Priority,
+  SlaTimerState,
   TicketStatus,
   TicketType,
   UserRole,
@@ -93,6 +95,22 @@ export const USER_ROLE_LABELS: Record<UserRole, string> = {
   dispatcher: "Диспетчер",
   manager: "Менеджер",
   admin: "Администратор",
+};
+
+export const SLA_STATE_LABELS: Record<SlaTimerState, string> = {
+  no_rule: "Без SLA",
+  ok: "В норме",
+  warning: "Риск (75%+)",
+  breached: "Нарушен",
+  met: "Выполнен",
+  paused: "На паузе",
+};
+
+export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
+  sla_reaction_warning: "Риск по реакции",
+  sla_reaction_breach: "Нарушение реакции",
+  sla_resolution_warning: "Риск по решению",
+  sla_resolution_breach: "Нарушение решения",
 };
 
 export function formatDateTime(value: string | null | undefined): string {

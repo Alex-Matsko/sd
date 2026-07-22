@@ -13,6 +13,7 @@ from app.models.organization import PublicEmailDomain
 from app.models.priority import ImpactUrgencyRule
 from app.models.tariff import Tariff, TariffSlaRule
 from app.models.user import User
+from app.services import sla
 
 # Nominal federal-holiday dates for RF, calendar year of first deploy. The
 # government shifts a few of these around weekends via yearly decree - verify
@@ -128,6 +129,10 @@ def seed(db) -> None:
         print(f"[seed] Создан администратор {settings.seed_admin_email} - смените пароль после первого входа")
 
     db.commit()
+
+    backfilled = sla.backfill_missing_deadlines(db)
+    if backfilled:
+        print(f"[seed] Заполнены SLA-сроки для {backfilled} заявок, созданных до Этапа 3")
 
 
 def main() -> None:

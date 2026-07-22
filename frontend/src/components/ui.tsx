@@ -1,5 +1,5 @@
-import type { Channel, Priority, TicketStatus } from "../api/types";
-import { CHANNEL_LABELS, PRIORITY_LABELS, STATUS_LABELS } from "../lib/labels";
+import type { Channel, Priority, SlaTimerState, TicketSlaView, TicketStatus } from "../api/types";
+import { CHANNEL_LABELS, PRIORITY_LABELS, SLA_STATE_LABELS, STATUS_LABELS } from "../lib/labels";
 import { IconAlertTriangle } from "./icons";
 
 export function Avatar({ name, size = 28 }: { name: string; size?: number }) {
@@ -59,6 +59,49 @@ export function StatusTag({ status }: { status: TicketStatus }) {
 
 export function ChannelTag({ channel }: { channel: Channel }) {
   return <span className="channel-tag">{CHANNEL_LABELS[channel]}</span>;
+}
+
+// Worst-of-both-timers dot for the queue's SLA column (section 8: зелёный/жёлтый/красный).
+// Priority when both timers are active: a breach always wins, then a warning, then paused.
+const SLA_DOT_ORDER: SlaTimerState[] = ["breached", "warning", "paused", "ok", "met", "no_rule"];
+const SLA_DOT_CLASS: Record<SlaTimerState, string> = {
+  no_rule: "sla-dot-none",
+  ok: "sla-dot-ok",
+  warning: "sla-dot-warning",
+  breached: "sla-dot-breached",
+  met: "sla-dot-ok",
+  paused: "sla-dot-paused",
+};
+
+function worstSlaState(sla: TicketSlaView): SlaTimerState {
+  const states = [sla.reaction.state, sla.resolution.state];
+  for (const candidate of SLA_DOT_ORDER) {
+    if (states.includes(candidate)) return candidate;
+  }
+  return "no_rule";
+}
+
+export function SlaTag({ sla }: { sla: TicketSlaView | null | undefined }) {
+  if (!sla) return <span className="muted">—</span>;
+  const state = worstSlaState(sla);
+  return (
+    <span className={`sla-tag ${SLA_DOT_CLASS[state]}`} title={SLA_STATE_LABELS[state]}>
+      <span className="dot" />
+      {SLA_STATE_LABELS[state]}
+    </span>
+  );
+}
+
+const SLA_TIMER_CLASS: Record<SlaTimerState, string> = SLA_DOT_CLASS;
+
+export function SlaTimerBadge({ label, timer }: { label: string; timer: { state: SlaTimerState; progress_pct: number | null } }) {
+  return (
+    <span className={`sla-tag ${SLA_TIMER_CLASS[timer.state]}`}>
+      <span className="dot" />
+      {label}: {SLA_STATE_LABELS[timer.state]}
+      {timer.progress_pct !== null && timer.state !== "met" ? ` (${timer.progress_pct}%)` : ""}
+    </span>
+  );
 }
 
 export function EmptyState({ text }: { text: string }) {

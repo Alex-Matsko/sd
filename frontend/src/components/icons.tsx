@@ -156,3 +156,12 @@ export const IconCheck = (p: IconProps) => base(<path d="M4 12l5 5L20 6" />, p);
 
 export const IconPaperclip = (p: IconProps) =>
   base(<path d="M21 11.5 12.4 20a4.7 4.7 0 0 1-6.6-6.6L14.6 4.6a3.1 3.1 0 0 1 4.4 4.4l-9 8.9a1.5 1.5 0 0 1-2.1-2.1l7.9-7.9" />, p);
+
+export const IconBell = (p: IconProps) =>
+  base(
+    <>
+      <path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z" />
+      <path d="M10 19a2 2 0 0 0 4 0" />
+    </>,
+    p
+  );

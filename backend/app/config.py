@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     default_tariff_code: str = "default"
     default_ticket_attachment_limit_mb: int = 25
 
+    sla_warning_threshold: float = 0.75
+    worker_interval_seconds: int = 60
+
     attachments_dir: str = "/data/attachments"
 
     cors_origins: list[str] = ["*"]

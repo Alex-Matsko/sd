@@ -8,7 +8,7 @@ from app.models.message import Message
 from app.models.ticket import Ticket
 from app.models.user import User
 from app.schemas.message import MessageCreate
-from app.services import audit
+from app.services import audit, sla
 
 
 def add_message(
@@ -32,8 +32,9 @@ def add_message(
     db.add(message)
     db.flush()
 
+    # First outbound reply fixes the reaction SLA outcome permanently.
     if payload.direction == MessageDirection.OUTBOUND and ticket.first_response_at is None:
-        ticket.first_response_at = datetime.now(timezone.utc)
+        sla.register_first_response(ticket, datetime.now(timezone.utc))
         db.add(ticket)
 
     # Client reply glues the dialog back to work (section 4.2): from

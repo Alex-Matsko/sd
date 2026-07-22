@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/AuthContext";
 import { Avatar } from "../components/ui";
+import { listNotifications, markAllNotificationsRead, markNotificationRead } from "../api/endpoints";
 import {
+  IconBell,
   IconBuilding,
   IconChevronDown,
   IconChevronRight,
@@ -18,7 +21,7 @@ import {
   IconTicket,
   IconUsers,
 } from "../components/icons";
-import { USER_ROLE_LABELS } from "../lib/labels";
+import { NOTIFICATION_TYPE_LABELS, USER_ROLE_LABELS, formatDateTime } from "../lib/labels";
 
 interface NavGroup {
   key: string;
@@ -51,6 +54,78 @@ const GROUPS: NavGroup[] = [
     ],
   },
 ];
+
+function NotificationBell() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const notificationsQuery = useQuery({
+    queryKey: ["notifications"],
+    queryFn: () => listNotifications(),
+    refetchInterval: 30_000,
+  });
+
+  const readMutation = useMutation({
+    mutationFn: (id: number) => markNotificationRead(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+  const readAllMutation = useMutation({
+    mutationFn: markAllNotificationsRead,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const notifications = notificationsQuery.data ?? [];
+  const unreadCount = notifications.filter((n) => !n.read_at).length;
+
+  return (
+    <div className="notification-bell" ref={ref}>
+      <button className="icon-btn" title="Уведомления" onClick={() => setOpen((v) => !v)}>
+        <IconBell size={18} />
+        {unreadCount > 0 && <span className="notification-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>}
+      </button>
+      {open && (
+        <div className="notification-dropdown">
+          <div className="notification-dropdown-head">
+            <span>Уведомления</span>
+            {unreadCount > 0 && (
+              <button className="btn-link" onClick={() => readAllMutation.mutate()}>
+                Прочитать все
+              </button>
+            )}
+          </div>
+          <div className="notification-list">
+            {notifications.length === 0 && <p className="muted" style={{ padding: "12px 14px" }}>Уведомлений нет</p>}
+            {notifications.map((n) => (
+              <button
+                key={n.id}
+                className={`notification-row ${n.read_at ? "" : "unread"}`}
+                onClick={() => {
+                  if (!n.read_at) readMutation.mutate(n.id);
+                  if (n.ticket_id) navigate(`/tickets/${n.ticket_id}`);
+                  setOpen(false);
+                }}
+              >
+                <span className="notification-type">{NOTIFICATION_TYPE_LABELS[n.type]}</span>
+                <span className="notification-title">{n.title}</span>
+                <span className="muted notification-time">{formatDateTime(n.created_at)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Layout() {
   const { user, logout } = useAuth();
@@ -117,6 +192,7 @@ export function Layout() {
             <span>Служба поддержки</span>
           </div>
           <div className="spacer" />
+          <NotificationBell />
           {user && (
             <div className="topbar-user">
               <Avatar name={user.full_name} />

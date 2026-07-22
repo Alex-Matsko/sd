@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from app.core.enums import Channel, ImpactUrgencyLevel, Priority, TicketStatus, TicketType
+from app.core.enums import Channel, ImpactUrgencyLevel, Priority, SlaTimerState, TicketStatus, TicketType
 
 
 class TicketCreate(BaseModel):
@@ -40,6 +40,19 @@ class TicketUpdate(BaseModel):
     manual_priority_reason: str | None = None
 
 
+class SlaTimerView(BaseModel):
+    due_at: datetime | None
+    met: bool | None
+    state: SlaTimerState
+    progress_pct: int | None
+
+
+class TicketSlaView(BaseModel):
+    reaction: SlaTimerView
+    resolution: SlaTimerView
+    paused: bool
+
+
 class TicketRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -66,6 +79,7 @@ class TicketRead(BaseModel):
     parent_ticket_id: int | None
     sla_reaction_due_at: datetime | None
     sla_resolution_due_at: datetime | None
+    sla_paused_at: datetime | None
     first_response_at: datetime | None
     sla_reaction_met: bool | None
     resolved_at: datetime | None
@@ -73,3 +87,5 @@ class TicketRead(BaseModel):
     closed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    # Computed by services/sla.compute_view in the tickets router; not a model column.
+    sla: TicketSlaView | None = None

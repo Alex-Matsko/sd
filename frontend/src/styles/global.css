@@ -385,6 +385,103 @@ h3 {
   margin-left: 4px;
 }
 
+.notification-bell {
+  position: relative;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+
+.notification-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 340px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  z-index: 40;
+  overflow: hidden;
+}
+
+.notification-dropdown-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.notification-list {
+  overflow-y: auto;
+}
+
+.notification-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.notification-row:hover {
+  background: var(--bg-sunken);
+}
+
+.notification-row.unread {
+  background: var(--accent-soft);
+}
+
+.notification-type {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.notification-title {
+  font-size: 13px;
+}
+
+.notification-time {
+  font-size: 11px;
+}
+
 /* ---------- Generic view layout ---------- */
 
 .view {
@@ -599,6 +696,41 @@ a.list-row:hover {
   background: var(--neutral-bg);
   color: var(--text-muted);
   font-weight: 500;
+}
+
+.sla-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sla-tag .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.sla-dot-ok {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.sla-dot-warning {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.sla-dot-breached {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.sla-dot-paused,
+.sla-dot-none {
+  background: var(--neutral-bg);
+  color: var(--text-faint);
 }
 
 .tag-row {

@@ -56,6 +56,16 @@ class Ticket(Base, TimestampMixin):
     sla_resolution_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_paused_minutes_total: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Pause total in *working* minutes of the tariff calendar - the resolution
+    # deadline is always created_at + working(resolution_minutes + this total).
+    sla_paused_working_minutes_total: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # One-shot escalation stamps (75% warning / 100% breach, per timer) so the
+    # worker sweep never notifies twice; reset when a priority change moves the
+    # deadline (services/sla.py).
+    sla_reaction_warned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sla_reaction_escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sla_resolution_warned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sla_resolution_escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     first_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_reaction_met: Mapped[bool | None] = mapped_column()
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -14,7 +14,7 @@ import {
   listUsers,
   updateTicket,
 } from "../api/endpoints";
-import { ErrorBanner, Loading, PriorityTag, StatusTag, ChannelTag, WhoMini } from "../components/ui";
+import { ErrorBanner, Loading, PriorityTag, SlaTimerBadge, StatusTag, ChannelTag, WhoMini } from "../components/ui";
 import {
   CHANNEL_LABELS,
   MESSAGE_DIRECTION_LABELS,
@@ -34,7 +34,12 @@ export function TicketDetailPage() {
   const [timeMinutes, setTimeMinutes] = useState(30);
   const [timeComment, setTimeComment] = useState("");
 
-  const ticketQuery = useQuery({ queryKey: ["ticket", id], queryFn: () => getTicket(id), enabled: Number.isFinite(id) });
+  const ticketQuery = useQuery({
+    queryKey: ["ticket", id],
+    queryFn: () => getTicket(id),
+    enabled: Number.isFinite(id),
+    refetchInterval: 30_000,
+  });
   const messagesQuery = useQuery({ queryKey: ["ticket", id, "messages"], queryFn: () => listMessages(id), enabled: Number.isFinite(id) });
   const timeEntriesQuery = useQuery({ queryKey: ["ticket", id, "time"], queryFn: () => listTimeEntries(id), enabled: Number.isFinite(id) });
   const historyQuery = useQuery({ queryKey: ["ticket", id, "history"], queryFn: () => getTicketHistory(id), enabled: Number.isFinite(id) });
@@ -99,6 +104,24 @@ export function TicketDetailPage() {
 
       <div className="ticket-layout">
         <div className="ticket-main">
+          {ticket.sla && (
+            <div className="panel">
+              <div className="panel-head">
+                <h2>SLA</h2>
+              </div>
+              <div className="tag-row">
+                <SlaTimerBadge label="Реакция" timer={ticket.sla.reaction} />
+                <SlaTimerBadge label="Решение" timer={ticket.sla.resolution} />
+              </div>
+              <dl className="props-list">
+                <dt>Срок реакции</dt>
+                <dd>{formatDateTime(ticket.sla_reaction_due_at)}</dd>
+                <dt>Срок решения</dt>
+                <dd>{formatDateTime(ticket.sla_resolution_due_at)}</dd>
+              </dl>
+            </div>
+          )}
+
           <div className="panel">
             <div className="panel-head">
               <h2>Переписка</h2>
@@ -205,10 +228,6 @@ export function TicketDetailPage() {
               </dd>
               <dt>Договор</dt>
               <dd>{ticket.has_no_active_contract ? "Нет активного договора (тариф по умолчанию)" : "Активный договор"}</dd>
-              <dt>Срок реакции</dt>
-              <dd>{formatDateTime(ticket.sla_reaction_due_at)}</dd>
-              <dt>Срок решения</dt>
-              <dd>{formatDateTime(ticket.sla_resolution_due_at)}</dd>
               <dt>Решена</dt>
               <dd>{formatDateTime(ticket.resolved_at)}</dd>
             </dl>

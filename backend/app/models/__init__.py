@@ -15,6 +15,7 @@ from app.models.message import Message, Attachment
 from app.models.time_entry import TimeEntry
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
+from app.models.notification import Notification
 
 __all__ = [
     "Base",
@@ -43,4 +44,5 @@ __all__ = [
     "TimeEntry",
     "AuditLog",
     "RefreshToken",
+    "Notification",
 ]

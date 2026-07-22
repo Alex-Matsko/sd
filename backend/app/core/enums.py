@@ -89,3 +89,19 @@ class OrganizationStatus(str, Enum):
     ACTIVE = "active"
     SUSPENDED = "suspended"
     ARCHIVED = "archived"
+
+
+class NotificationType(str, Enum):
+    SLA_REACTION_WARNING = "sla_reaction_warning"
+    SLA_REACTION_BREACH = "sla_reaction_breach"
+    SLA_RESOLUTION_WARNING = "sla_resolution_warning"
+    SLA_RESOLUTION_BREACH = "sla_resolution_breach"
+
+
+class SlaTimerState(str, Enum):
+    NO_RULE = "no_rule"  # tariff has no SLA rule for the ticket's priority
+    OK = "ok"
+    WARNING = "warning"  # >= 75% of the budget consumed
+    BREACHED = "breached"
+    MET = "met"
+    PAUSED = "paused"

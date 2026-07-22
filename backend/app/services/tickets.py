@@ -7,7 +7,7 @@ from app.models.contact import Contact
 from app.models.ticket import Ticket
 from app.models.user import User
 from app.schemas.ticket import TicketCreate, TicketUpdate
-from app.services import audit, priority as priority_service, routing
+from app.services import audit, priority as priority_service, routing, sla
 from app.services.contracts import resolve_contract_and_tariff
 
 # Allowed status transitions (section 4.2). CLOSED and CANCELLED are terminal.
@@ -64,6 +64,7 @@ def create_ticket(db: Session, payload: TicketCreate, actor: User | None) -> Tic
     )
     db.add(ticket)
     db.flush()
+    sla.set_initial_deadlines(db, ticket)
 
     if payload.initial_message:
         from app.core.enums import MessageDirection
@@ -105,12 +106,14 @@ def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, act
     elif was_paused and not will_be_paused and ticket.sla_paused_at is not None:
         elapsed_minutes = int((now - ticket.sla_paused_at).total_seconds() // 60)
         ticket.sla_paused_minutes_total = (ticket.sla_paused_minutes_total or 0) + elapsed_minutes
+        sla.apply_resume(db, ticket, now)
         ticket.sla_paused_at = None
 
     # First resolution is fixed permanently - reopening never overwrites it
     # (docs/decisions.md: "SLA при переоткрытии заявки клиентом").
     if new_status == TicketStatus.RESOLVED and ticket.resolved_at is None:
         ticket.resolved_at = now
+        sla.register_resolution(ticket, now)
     if new_status == TicketStatus.CLOSED:
         ticket.closed_at = now
 
@@ -171,6 +174,9 @@ def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: Use
             changed["priority"] = {"from": ticket.priority, "to": new_priority.value}
             ticket.priority = new_priority
             ticket.priority_override_reason = None
+
+    if "priority" in changed:
+        sla.recompute_after_priority_change(db, ticket)
 
     if changed:
         audit.record(

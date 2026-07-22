@@ -13,20 +13,21 @@
 |------|------------|--------|
 | 1 | Ядро: модель данных, миграции, REST API, аутентификация, CRUD, статусная модель заявок, Docker Compose | ✅ Готов |
 | 2 | Интерфейс сотрудника: очередь, карточка заявки, справочники, настройки | ✅ Готов |
-| 3 | SLA-движок: таймеры, календари, паузы, эскалации | ⬜ Следующий |
-| 4–10 | Email, Telegram/MAX, Plusofon, биллинг, портал клиента, отчёты, стабилизация | ⬜ |
+| 3 | SLA-движок: таймеры, календари, паузы, эскалации 75%/100%, in-app уведомления | ✅ Готов |
+| 4 | Email (вход/выход) + уведомления инженеров в Telegram | ⬜ Следующий |
+| 5–10 | Telegram/MAX для клиентов, Plusofon, биллинг, портал клиента, отчёты, стабилизация | ⬜ |
 
 ## Стек
 
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy 2, Alembic, PostgreSQL 16
 - **Frontend:** React 18 + TypeScript, Vite, React Router, TanStack Query
-- **Инфраструктура:** Docker Compose (app, db, nginx; с этапа 3 добавятся worker и redis), nginx как обратный прокси
+- **Инфраструктура:** Docker Compose (app, worker, db, nginx), nginx как обратный прокси. Worker — отдельный процесс на том же образе backend, раз в минуту считает SLA-эскалации (`app/worker.py`); Redis появится, когда понадобится (websocket pub-sub, очереди каналов — этапы 4+)
 
 ## Структура проекта
 
 ```
 sd/
-├── docker-compose.yml        # Сервисы: db (PostgreSQL 16), app (backend), nginx
+├── docker-compose.yml        # Сервисы: db (PostgreSQL 16), app (backend), worker (SLA-эскалации), nginx
 ├── .env.example              # Шаблон конфигурации (скопировать в .env)
 ├── nginx/
 │   └── nginx.conf            # Обратный прокси → app:8000
@@ -34,33 +35,39 @@ sd/
 │   ├── TZ.md                 # Техническое задание
 │   └── decisions.md          # Журнал решений по ходу разработки
 ├── backend/
-│   ├── Dockerfile            # python:3.12-slim; при старте: alembic upgrade → seed → uvicorn
+│   ├── Dockerfile            # python:3.12-slim; при старте (app): alembic upgrade → seed → uvicorn;
+│   │                         #   worker переопределяет CMD на `python -m app.worker`
 │   ├── requirements.txt      # Зависимости приложения
 │   ├── requirements-dev.txt  # + pytest, httpx (для тестов)
 │   ├── alembic.ini
 │   ├── alembic/
-│   │   └── versions/         # Миграции БД
+│   │   └── versions/         # Миграции БД (initial schema; stage3 sla engine)
 │   ├── app/
 │   │   ├── main.py           # FastAPI-приложение, подключение роутеров
 │   │   ├── config.py         # Настройки (pydantic-settings, читает .env)
 │   │   ├── db.py             # Engine и сессии SQLAlchemy
 │   │   ├── seed.py           # Идемпотентный сид: справочники, календари, матрица
-│   │   │                     #   приоритетов, тариф по умолчанию, первый админ
+│   │   │                     #   приоритетов, тариф по умолчанию, первый админ,
+│   │   │                     #   докатка SLA-сроков для заявок до Этапа 3
+│   │   ├── worker.py         # Фоновый процесс: раз в минуту запускает SLA-эскалации
 │   │   ├── core/             # Перечисления (enums), безопасность (JWT, bcrypt)
 │   │   ├── models/           # SQLAlchemy-модели: organization, contact, contract,
 │   │   │                     #   tariff, calendar, priority, category, asset, team,
-│   │   │                     #   routing, ticket, message, time_entry, user, audit, auth
+│   │   │                     #   routing, ticket, message, time_entry, user, audit,
+│   │   │                     #   auth, notification
 │   │   ├── schemas/          # Pydantic-схемы (зеркалят models)
 │   │   ├── api/
 │   │   │   ├── deps.py       # Зависимости: текущий пользователь, роли, сессия БД
 │   │   │   └── routers/      # REST-роутеры: auth, users, organizations, contacts,
 │   │   │                     #   contracts, tariffs, calendars, priority_matrix,
-│   │   │                     #   categories, assets, teams, routing_rules, tickets
+│   │   │                     #   categories, assets, teams, routing_rules, tickets,
+│   │   │                     #   notifications
 │   │   └── services/         # Бизнес-логика: tickets (статусная модель), routing,
 │   │                         #   priority, billing, time_entries, messages,
-│   │                         #   contracts, audit
+│   │                         #   contracts, audit, calendar_math (рабочее время
+│   │                         #   по бизнес-календарю), sla (SLA-движок Этапа 3)
 │   └── tests/                # pytest: приоритеты, маршрутизация, биллинг,
-│                             #   договоры, статусы заявок, безопасность
+│                             #   договоры, статусы заявок, безопасность, SLA-движок
 └── frontend/
     ├── package.json          # Скрипты: dev / build / lint
     ├── vite.config.ts
@@ -68,13 +75,13 @@ sd/
         ├── main.tsx, App.tsx # Точка входа, маршруты
         ├── api/              # HTTP-клиент, типы, эндпоинты
         ├── auth/             # Контекст аутентификации
-        ├── layout/           # Каркас интерфейса (навигация)
-        ├── components/       # UI-примитивы, иконки
-        ├── lib/              # Русские подписи статусов/приоритетов и пр.
+        ├── layout/           # Каркас интерфейса (навигация, колокольчик уведомлений)
+        ├── components/       # UI-примитивы (статус/приоритет/SLA-теги), иконки
+        ├── lib/              # Русские подписи статусов/приоритетов/SLA и пр.
         ├── styles/           # Глобальные стили
         └── pages/
-            ├── LoginPage, DashboardPage, TicketsPage,
-            │   TicketDetailPage, NewTicketPage
+            ├── LoginPage, DashboardPage, TicketsPage (SLA-колонка, фильтр риска),
+            │   TicketDetailPage (панель SLA), NewTicketPage
             ├── directory/    # Организации, контакты, договоры, активы
             └── settings/     # Категории, матрица приоритетов,
                               #   правила маршрутизации, тарифы
@@ -124,5 +131,7 @@ docker compose exec app sh -c "pip install -q -r requirements-dev.txt && python 
 | `JWT_SECRET` | Секрет подписи токенов | `change-me` — обязательно сменить |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Первый администратор | `admin@o-horizons.com` / `ChangeMe123!` |
 | `DEFAULT_TICKET_ATTACHMENT_LIMIT_MB` | Лимит размера вложения | `25` |
+| `SLA_WARNING_THRESHOLD` | Доля бюджета SLA для эскалации-предупреждения | `0.75` |
+| `WORKER_INTERVAL_SECONDS` | Периодичность прохода воркера SLA-эскалаций | `60` |
 
 Полный список настроек — в [backend/app/config.py](backend/app/config.py).

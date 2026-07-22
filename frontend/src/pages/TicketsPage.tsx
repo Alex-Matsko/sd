@@ -2,9 +2,15 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { listOrganizations, listTickets, listUsers } from "../api/endpoints";
-import { EmptyState, ErrorBanner, Loading, PriorityTag, StatusTag, ChannelTag } from "../components/ui";
+import { EmptyState, ErrorBanner, Loading, PriorityTag, SlaTag, StatusTag, ChannelTag } from "../components/ui";
 import { formatDateTime } from "../lib/labels";
 import type { Priority, TicketStatus } from "../api/types";
+
+const SLA_RISK_OPTIONS: { value: "" | "warning" | "breached"; label: string }[] = [
+  { value: "", label: "Любой SLA-риск" },
+  { value: "warning", label: "Риск (75%+)" },
+  { value: "breached", label: "Нарушен" },
+];
 
 const STATUS_OPTIONS: { value: TicketStatus | ""; label: string }[] = [
   { value: "", label: "Все статусы" },
@@ -31,19 +37,22 @@ export function TicketsPage() {
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
   const [organizationFilter, setOrganizationFilter] = useState<number | "">("");
   const [assigneeFilter, setAssigneeFilter] = useState<number | "">("");
+  const [slaRiskFilter, setSlaRiskFilter] = useState<"" | "warning" | "breached">("");
   const [search, setSearch] = useState("");
 
   const orgsQuery = useQuery({ queryKey: ["organizations"], queryFn: listOrganizations });
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: listUsers });
   const ticketsQuery = useQuery({
-    queryKey: ["tickets", statusFilter, priorityFilter, organizationFilter, assigneeFilter],
+    queryKey: ["tickets", statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter],
     queryFn: () =>
       listTickets({
         status_filter: statusFilter || undefined,
         priority: priorityFilter || undefined,
         organization_id: organizationFilter || undefined,
         assigned_engineer_id: assigneeFilter || undefined,
+        sla_risk: slaRiskFilter || undefined,
       }),
+    refetchInterval: 30_000,
   });
 
   const orgsById = new Map((orgsQuery.data ?? []).map((o) => [o.id, o]));
@@ -112,6 +121,13 @@ export function TicketsPage() {
             </option>
           ))}
         </select>
+        <select value={slaRiskFilter} onChange={(e) => setSlaRiskFilter(e.target.value as "" | "warning" | "breached")}>
+          {SLA_RISK_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {ticketsQuery.isLoading && <Loading />}
@@ -119,20 +135,21 @@ export function TicketsPage() {
       {ticketsQuery.isSuccess && filtered.length === 0 && <EmptyState text="Заявок по заданным фильтрам не найдено" />}
       {ticketsQuery.isSuccess && filtered.length > 0 && (
         <div className="list">
-          <div className="list-head" style={{ gridTemplateColumns: "90px 2fr 1fr 1fr 1fr 1.2fr 1fr 1fr" }}>
+          <div className="list-head" style={{ gridTemplateColumns: "90px 2fr 1fr 1fr 1fr 1.2fr 1fr 1fr 1fr" }}>
             <span>№</span>
             <span>Тема</span>
             <span>Организация</span>
             <span>Канал</span>
             <span>Приоритет</span>
             <span>Статус</span>
+            <span>SLA</span>
             <span>Исполнитель</span>
             <span>Создана</span>
           </div>
           {filtered.map((t) => (
             <Link
               className="list-row"
-              style={{ gridTemplateColumns: "90px 2fr 1fr 1fr 1fr 1.2fr 1fr 1fr" }}
+              style={{ gridTemplateColumns: "90px 2fr 1fr 1fr 1fr 1.2fr 1fr 1fr 1fr" }}
               key={t.id}
               to={`/tickets/${t.id}`}
             >
@@ -147,6 +164,9 @@ export function TicketsPage() {
               </span>
               <span>
                 <StatusTag status={t.status} />
+              </span>
+              <span>
+                <SlaTag sla={t.sla} />
               </span>
               <span className="muted">
                 {t.assigned_engineer_id ? usersById.get(t.assigned_engineer_id)?.full_name ?? "—" : "Не назначено"}

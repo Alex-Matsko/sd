@@ -28,6 +28,14 @@ export type RoutingRuleType = "organization_to_engineer" | "category_to_team";
 
 export type OrganizationStatus = "active" | "suspended" | "archived";
 
+export type SlaTimerState = "no_rule" | "ok" | "warning" | "breached" | "met" | "paused";
+
+export type NotificationType =
+  | "sla_reaction_warning"
+  | "sla_reaction_breach"
+  | "sla_resolution_warning"
+  | "sla_resolution_breach";
+
 export interface User {
   id: number;
   full_name: string;
@@ -160,6 +168,19 @@ export interface ImpactUrgencyRule {
   priority: Priority;
 }
 
+export interface SlaTimerView {
+  due_at: string | null;
+  met: boolean | null;
+  state: SlaTimerState;
+  progress_pct: number | null;
+}
+
+export interface TicketSlaView {
+  reaction: SlaTimerView;
+  resolution: SlaTimerView;
+  paused: boolean;
+}
+
 export interface Ticket {
   id: number;
   number: number;
@@ -184,6 +205,7 @@ export interface Ticket {
   parent_ticket_id: number | null;
   sla_reaction_due_at: string | null;
   sla_resolution_due_at: string | null;
+  sla_paused_at: string | null;
   first_response_at: string | null;
   sla_reaction_met: boolean | null;
   resolved_at: string | null;
@@ -191,6 +213,16 @@ export interface Ticket {
   closed_at: string | null;
   created_at: string;
   updated_at: string;
+  sla: TicketSlaView | null;
+}
+
+export interface Notification {
+  id: number;
+  ticket_id: number | null;
+  type: NotificationType;
+  title: string;
+  created_at: string;
+  read_at: string | null;
 }
 
 export interface Attachment {

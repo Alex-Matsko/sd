@@ -1,8 +1,10 @@
 import uuid
 from datetime import date
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -20,6 +22,7 @@ from app.schemas.ticket import TicketCreate, TicketRead, TicketUpdate
 from app.schemas.time_entry import TimeEntryCreate, TimeEntryRead, TimeEntryUpdate
 from app.services import audit as audit_service
 from app.services import messages as messages_service
+from app.services import sla as sla_service
 from app.services import time_entries as time_entries_service
 from app.services import tickets as tickets_service
 
@@ -33,6 +36,12 @@ def _get_ticket_or_404(db: Session, ticket_id: int) -> Ticket:
     return ticket
 
 
+def _read_with_sla(db: Session, ticket: Ticket, cache: sla_service.SlaCache | None = None) -> TicketRead:
+    view = TicketRead.model_validate(ticket)
+    view.sla = sla_service.compute_view(db, ticket, cache)
+    return view
+
+
 @router.get("", response_model=list[TicketRead])
 def list_tickets(
     status_filter: TicketStatus | None = None,
@@ -40,9 +49,10 @@ def list_tickets(
     assigned_engineer_id: int | None = None,
     priority: Priority | None = None,
     channel: Channel | None = None,
+    sla_risk: Literal["warning", "breached"] | None = None,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> list[Ticket]:
+) -> list[TicketRead]:
     query = db.query(Ticket)
     if status_filter is not None:
         query = query.filter(Ticket.status == status_filter)
@@ -54,22 +64,36 @@ def list_tickets(
         query = query.filter(Ticket.priority == priority)
     if channel is not None:
         query = query.filter(Ticket.channel == channel)
-    return query.order_by(Ticket.created_at.desc()).all()
+    # SLA risk relies on the worker's escalation stamps: "warning" = the 75%
+    # notification fired and the outcome is still open, "breached" = a fixed
+    # violation on either timer.
+    if sla_risk == "breached":
+        query = query.filter(or_(Ticket.sla_reaction_met.is_(False), Ticket.sla_resolution_met.is_(False)))
+    elif sla_risk == "warning":
+        query = query.filter(
+            or_(
+                and_(Ticket.sla_reaction_warned_at.isnot(None), Ticket.sla_reaction_met.is_(None)),
+                and_(Ticket.sla_resolution_warned_at.isnot(None), Ticket.sla_resolution_met.is_(None)),
+            )
+        )
+    tickets = query.order_by(Ticket.created_at.desc()).all()
+    cache = sla_service.SlaCache()
+    return [_read_with_sla(db, t, cache) for t in tickets]
 
 
 @router.post("", response_model=TicketRead, status_code=status.HTTP_201_CREATED)
 def create_ticket(
     payload: TicketCreate, db: Session = Depends(get_db), actor: User = Depends(get_current_user)
-) -> Ticket:
+) -> TicketRead:
     try:
-        return tickets_service.create_ticket(db, payload, actor)
+        return _read_with_sla(db, tickets_service.create_ticket(db, payload, actor))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.get("/{ticket_id}", response_model=TicketRead)
-def get_ticket(ticket_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> Ticket:
-    return _get_ticket_or_404(db, ticket_id)
+def get_ticket(ticket_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> TicketRead:
+    return _read_with_sla(db, _get_ticket_or_404(db, ticket_id))
 
 
 @router.patch("/{ticket_id}", response_model=TicketRead)
@@ -78,10 +102,10 @@ def update_ticket(
     payload: TicketUpdate,
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
-) -> Ticket:
+) -> TicketRead:
     ticket = _get_ticket_or_404(db, ticket_id)
     try:
-        return tickets_service.update_ticket(db, ticket, payload, actor)
+        return _read_with_sla(db, tickets_service.update_ticket(db, ticket, payload, actor))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 

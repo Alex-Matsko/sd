@@ -9,6 +9,7 @@ import type {
   Contract,
   ImpactUrgencyRule,
   Message,
+  Notification,
   Organization,
   OrganizationUsage,
   Priority,
@@ -183,6 +184,7 @@ export interface TicketFilters {
   assigned_engineer_id?: number;
   priority?: Priority;
   channel?: Channel;
+  sla_risk?: "warning" | "breached";
 }
 export function listTickets(filters: TicketFilters = {}) {
   return apiRequest<Ticket[]>("/tickets", { query: filters as Record<string, string | number | undefined> });
@@ -228,4 +230,15 @@ export function updateTimeEntry(ticketId: number, entryId: number, payload: Part
 }
 export function getTicketHistory(ticketId: number) {
   return apiRequest<AuditLogEntry[]>(`/tickets/${ticketId}/history`);
+}
+
+// --- Notifications ---
+export function listNotifications(unreadOnly = false) {
+  return apiRequest<Notification[]>("/notifications", { query: { unread_only: unreadOnly } });
+}
+export function markNotificationRead(id: number) {
+  return apiRequest<Notification>(`/notifications/${id}/read`, { method: "POST" });
+}
+export function markAllNotificationsRead() {
+  return apiRequest<void>("/notifications/read-all", { method: "POST" });
 }
