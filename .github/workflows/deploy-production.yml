@@ -1,0 +1,33 @@
+name: Deploy to production
+
+# Manual only - never triggered by a push. Pick the branch/tag to deploy
+# from the "Run workflow" dropdown in the Actions tab. Configure a
+# "production" GitHub Environment (Settings → Environments) with required
+# reviewers so this needs an explicit approval click before it runs.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or tag to deploy (e.g. main, v1.2.0)"
+        required: true
+        default: "main"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_SSH_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            cd ${{ secrets.PRODUCTION_APP_DIR }}
+            git fetch origin
+            git checkout ${{ github.event.inputs.ref }}
+            git reset --hard "origin/${{ github.event.inputs.ref }}" 2>/dev/null || true
+            docker compose up -d --build
+            sleep 5
+            curl -sf http://localhost:${HTTP_PORT:-80}/health || (echo "::error::production /health check failed after deploy" && exit 1)
