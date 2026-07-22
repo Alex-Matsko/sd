@@ -9,13 +9,16 @@ from app.api.deps import get_current_user
 from app.config import settings
 from app.core.enums import Channel, Priority, TicketStatus
 from app.db import get_db
+from app.models.audit import AuditLog
 from app.models.message import Attachment, Message
 from app.models.ticket import Ticket
 from app.models.time_entry import TimeEntry
 from app.models.user import User
+from app.schemas.audit import AuditLogRead
 from app.schemas.message import AttachmentRead, MessageCreate, MessageRead
 from app.schemas.ticket import TicketCreate, TicketRead, TicketUpdate
 from app.schemas.time_entry import TimeEntryCreate, TimeEntryRead, TimeEntryUpdate
+from app.services import audit as audit_service
 from app.services import messages as messages_service
 from app.services import time_entries as time_entries_service
 from app.services import tickets as tickets_service
@@ -143,6 +146,14 @@ async def upload_attachment(
     db.commit()
     db.refresh(attachment)
     return attachment
+
+
+@router.get("/{ticket_id}/history", response_model=list[AuditLogRead])
+def get_ticket_history(
+    ticket_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> list[AuditLog]:
+    _get_ticket_or_404(db, ticket_id)
+    return audit_service.get_ticket_history(db, ticket_id)
 
 
 @router.get("/{ticket_id}/time-entries", response_model=list[TimeEntryRead])

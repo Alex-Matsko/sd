@@ -6,3 +6,8 @@ backend/__pycache__/
 .pytest_cache/
 data/attachments/
 .DS_Store
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/tsconfig.tsbuildinfo
