@@ -2,13 +2,21 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.core.enums import MessageDirection, TicketStatus
+from app.core.enums import Channel, MessageDirection, TicketStatus
 from app.models.contact import Contact
 from app.models.message import Message
 from app.models.ticket import Ticket
 from app.models.user import User
 from app.schemas.message import MessageCreate
 from app.services import audit, sla
+
+
+def _resolve_recipient_email(ticket: Ticket) -> str | None:
+    contact = ticket.contact
+    if contact is None or not contact.emails:
+        return None
+    primary = next((e.email for e in contact.emails if e.is_primary), None)
+    return primary or contact.emails[0].email
 
 
 def add_message(
@@ -57,4 +65,13 @@ def add_message(
     )
     db.commit()
     db.refresh(message)
+
+    # Engineer replies on an email-channel ticket go out over SMTP (section
+    # 2.3: "Ответ уходит в канал обращения"). Deferred import - email_channel
+    # imports this module to post the inbound side of the same conversation.
+    if payload.direction == MessageDirection.OUTBOUND and channel == Channel.EMAIL:
+        from app.services import email_channel
+
+        email_channel.try_send_outbound(db, ticket, message, _resolve_recipient_email(ticket))
+
     return message

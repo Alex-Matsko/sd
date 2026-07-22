@@ -225,6 +225,29 @@ export interface Notification {
   read_at: string | null;
 }
 
+export interface IntegrationSetting {
+  channel: Channel;
+  is_enabled: boolean;
+  config: Record<string, unknown>;
+  secret_keys_set: string[];
+  updated_at: string;
+}
+
+export interface EmailChannelConfig {
+  imap_host?: string;
+  imap_port?: number;
+  imap_use_ssl?: boolean;
+  imap_username?: string;
+  imap_folder?: string;
+  smtp_host?: string;
+  smtp_port?: number;
+  smtp_use_tls?: boolean;
+  smtp_username?: string;
+  from_address?: string;
+  from_display_name?: string;
+  poll_interval_seconds?: number;
+}
+
 export interface Attachment {
   id: number;
   filename: string;

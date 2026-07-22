@@ -16,6 +16,7 @@ from app.models.time_entry import TimeEntry
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.notification import Notification
+from app.models.integration_setting import IntegrationSetting
 
 __all__ = [
     "Base",
@@ -45,4 +46,5 @@ __all__ = [
     "AuditLog",
     "RefreshToken",
     "Notification",
+    "IntegrationSetting",
 ]

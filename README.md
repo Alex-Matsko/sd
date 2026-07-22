@@ -14,7 +14,7 @@
 | 1 | Ядро: модель данных, миграции, REST API, аутентификация, CRUD, статусная модель заявок, Docker Compose | ✅ Готов |
 | 2 | Интерфейс сотрудника: очередь, карточка заявки, справочники, настройки | ✅ Готов |
 | 3 | SLA-движок: таймеры, календари, паузы, эскалации 75%/100%, in-app уведомления | ✅ Готов |
-| 4 | Email (вход/выход) + уведомления инженеров в Telegram | ⬜ Следующий |
+| 4 | Email (вход/выход, склейка диалога) + универсальные настройки каналов | 🟡 Email готов; уведомления инженерам в Telegram — остаток этапа |
 | 5–10 | Telegram/MAX для клиентов, Plusofon, биллинг, портал клиента, отчёты, стабилизация | ⬜ |
 
 ## Стек
@@ -27,7 +27,7 @@
 
 ```
 sd/
-├── docker-compose.yml        # Сервисы: db (PostgreSQL 16), app (backend), worker (SLA-эскалации), nginx
+├── docker-compose.yml        # Сервисы: db (PostgreSQL 16), app (backend), worker (SLA + email), nginx
 ├── .env.example              # Шаблон конфигурации (скопировать в .env)
 ├── nginx/
 │   └── nginx.conf            # Обратный прокси → app:8000
@@ -41,33 +41,43 @@ sd/
 │   ├── requirements-dev.txt  # + pytest, httpx (для тестов)
 │   ├── alembic.ini
 │   ├── alembic/
-│   │   └── versions/         # Миграции БД (initial schema; stage3 sla engine)
+│   │   └── versions/         # Миграции БД (initial schema; stage3 sla engine;
+│   │                         #   stage4 email channel)
 │   ├── app/
 │   │   ├── main.py           # FastAPI-приложение, подключение роутеров
-│   │   ├── config.py         # Настройки (pydantic-settings, читает .env)
+│   │   ├── config.py         # Настройки (pydantic-settings, читает .env) — только
+│   │   │                     #   инфраструктурные параметры; интеграции каналов
+│   │   │                     #   теперь в БД (integration_settings), см. ниже
 │   │   ├── db.py             # Engine и сессии SQLAlchemy
 │   │   ├── seed.py           # Идемпотентный сид: справочники, календари, матрица
 │   │   │                     #   приоритетов, тариф по умолчанию, первый админ,
 │   │   │                     #   докатка SLA-сроков для заявок до Этапа 3
-│   │   ├── worker.py         # Фоновый процесс: раз в минуту запускает SLA-эскалации
-│   │   ├── core/             # Перечисления (enums), безопасность (JWT, bcrypt)
+│   │   ├── worker.py         # Фоновый процесс: SLA-эскалации (раз в минуту) +
+│   │   │                     #   опрос почтового ящика (интервал из настроек канала)
+│   │   ├── core/             # Перечисления (enums), безопасность (JWT, bcrypt),
+│   │   │                     #   crypto (шифрование секретов интеграций)
 │   │   ├── models/           # SQLAlchemy-модели: organization, contact, contract,
 │   │   │                     #   tariff, calendar, priority, category, asset, team,
 │   │   │                     #   routing, ticket, message, time_entry, user, audit,
-│   │   │                     #   auth, notification
+│   │   │                     #   auth, notification, integration_setting
 │   │   ├── schemas/          # Pydantic-схемы (зеркалят models)
 │   │   ├── api/
 │   │   │   ├── deps.py       # Зависимости: текущий пользователь, роли, сессия БД
 │   │   │   └── routers/      # REST-роутеры: auth, users, organizations, contacts,
 │   │   │                     #   contracts, tariffs, calendars, priority_matrix,
 │   │   │                     #   categories, assets, teams, routing_rules, tickets,
-│   │   │                     #   notifications
+│   │   │                     #   notifications, integration_settings
 │   │   └── services/         # Бизнес-логика: tickets (статусная модель), routing,
 │   │                         #   priority, billing, time_entries, messages,
 │   │                         #   contracts, audit, calendar_math (рабочее время
-│   │                         #   по бизнес-календарю), sla (SLA-движок Этапа 3)
+│   │                         #   по бизнес-календарю), sla (SLA-движок Этапа 3),
+│   │                         #   integration_settings (универсальное хранилище
+│   │                         #   настроек каналов), email_channel (IMAP/SMTP,
+│   │                         #   склейка диалога), attachments (общее хранилище
+│   │                         #   вложений для ручной загрузки и писем)
 │   └── tests/                # pytest: приоритеты, маршрутизация, биллинг,
-│                             #   договоры, статусы заявок, безопасность, SLA-движок
+│                             #   договоры, статусы заявок, безопасность,
+│                             #   SLA-движок, email-канал
 └── frontend/
     ├── package.json          # Скрипты: dev / build / lint
     ├── vite.config.ts
@@ -84,7 +94,9 @@ sd/
             │   TicketDetailPage (панель SLA), NewTicketPage
             ├── directory/    # Организации, контакты, договоры, активы
             └── settings/     # Категории, матрица приоритетов,
-                              #   правила маршрутизации, тарифы
+                              #   правила маршрутизации, тарифы, каналы
+                              #   (Email — рабочая форма; Telegram/MAX/
+                              #   телефония — заглушки под будущие этапы)
 ```
 
 При изменении структуры проекта (новые каталоги, сервисы, контейнеры) — обновлять этот раздел.
@@ -133,5 +145,12 @@ docker compose exec app sh -c "pip install -q -r requirements-dev.txt && python 
 | `DEFAULT_TICKET_ATTACHMENT_LIMIT_MB` | Лимит размера вложения | `25` |
 | `SLA_WARNING_THRESHOLD` | Доля бюджета SLA для эскалации-предупреждения | `0.75` |
 | `WORKER_INTERVAL_SECONDS` | Периодичность прохода воркера SLA-эскалаций | `60` |
+| `SETTINGS_ENCRYPTION_KEY` | Ключ шифрования секретов интеграций (Fernet, urlsafe-base64 32 байта) | небезопасный dev-ключ — сгенерировать свой перед вводом реальных учётных данных |
 
 Полный список настроек — в [backend/app/config.py](backend/app/config.py).
+
+## Настройка каналов (Email и далее)
+
+Учётные данные интеграций (IMAP/SMTP ящика поддержки, в будущем — токен Telegram-бота, ключи MAX/Plusofon) задаются **в интерфейсе**, не в `.env`: Настройки → Каналы (`/settings/channels`, роль руководитель/администратор). Хранятся в таблице `integration_settings` — несекретные поля в открытом виде, пароли/токены зашифрованы `SETTINGS_ENCRYPTION_KEY` (см. выше) и никогда не возвращаются через API в открытом виде (только флаг «задан»). Это сделано специально, чтобы новый канал не требовал перевыпуска `.env` и передеплоя — только запись в БД через форму.
+
+Email: приём — IMAP-опрос (интервал задаётся в настройках канала, независим от интервала SLA-эскалаций), отправка — SMTP с тегом `[#OH-<номер>]` в теме письма. Правила склейки диалога и очереди «Неизвестные» — раздел 2.3 ТЗ и [docs/decisions.md](docs/decisions.md).

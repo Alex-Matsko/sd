@@ -8,6 +8,7 @@ import type {
   Contact,
   Contract,
   ImpactUrgencyRule,
+  IntegrationSetting,
   Message,
   Notification,
   Organization,
@@ -241,4 +242,15 @@ export function markNotificationRead(id: number) {
 }
 export function markAllNotificationsRead() {
   return apiRequest<void>("/notifications/read-all", { method: "POST" });
+}
+
+// --- Integration settings (Настройки → Каналы) ---
+export function listIntegrationSettings() {
+  return apiRequest<IntegrationSetting[]>("/settings/integrations");
+}
+export function updateIntegrationSetting(
+  channel: string,
+  payload: { is_enabled?: boolean; config?: Record<string, unknown>; secrets?: Record<string, string | null> }
+) {
+  return apiRequest<IntegrationSetting>(`/settings/integrations/${channel}`, { method: "PUT", body: payload });
 }

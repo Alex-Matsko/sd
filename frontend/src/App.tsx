@@ -15,6 +15,7 @@ import { PriorityMatrixPage } from "./pages/settings/PriorityMatrixPage";
 import { TariffsPage } from "./pages/settings/TariffsPage";
 import { CategoriesPage } from "./pages/settings/CategoriesPage";
 import { RoutingRulesPage } from "./pages/settings/RoutingRulesPage";
+import { ChannelsSettingsPage } from "./pages/settings/ChannelsSettingsPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { user, isLoading } = useAuth();
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="settings/tariffs" element={<TariffsPage />} />
         <Route path="settings/categories" element={<CategoriesPage />} />
         <Route path="settings/routing" element={<RoutingRulesPage />} />
+        <Route path="settings/channels" element={<ChannelsSettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

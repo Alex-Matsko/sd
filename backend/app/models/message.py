@@ -19,6 +19,12 @@ class Message(Base):
     author_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     author_contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
     body: Mapped[str] = mapped_column(Text)
+    # Email threading (section 2.3): the RFC 5322 Message-ID this message was
+    # sent/received with, and the In-Reply-To header of an inbound message -
+    # used to attach a client's reply to the right ticket ahead of the
+    # [#ID]-in-subject fallback (services/email_channel.py).
+    email_message_id: Mapped[str | None] = mapped_column(String(998))
+    email_in_reply_to: Mapped[str | None] = mapped_column(String(998))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     ticket: Mapped["Ticket"] = relationship(back_populates="messages")

@@ -8,6 +8,7 @@ from app.api.routers import (
     categories,
     contacts,
     contracts,
+    integration_settings,
     notifications,
     organizations,
     priority_matrix,
@@ -43,6 +44,7 @@ app.include_router(teams.router)
 app.include_router(routing_rules.router)
 app.include_router(tickets.router)
 app.include_router(notifications.router)
+app.include_router(integration_settings.router)
 
 
 @app.get("/health")

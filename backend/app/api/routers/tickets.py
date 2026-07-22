@@ -1,6 +1,3 @@
-import uuid
-from datetime import date
-from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
@@ -8,7 +5,6 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
-from app.config import settings
 from app.core.enums import Channel, Priority, TicketStatus
 from app.db import get_db
 from app.models.audit import AuditLog
@@ -20,6 +16,7 @@ from app.schemas.audit import AuditLogRead
 from app.schemas.message import AttachmentRead, MessageCreate, MessageRead
 from app.schemas.ticket import TicketCreate, TicketRead, TicketUpdate
 from app.schemas.time_entry import TimeEntryCreate, TimeEntryRead, TimeEntryUpdate
+from app.services import attachments as attachments_service
 from app.services import audit as audit_service
 from app.services import messages as messages_service
 from app.services import sla as sla_service
@@ -145,27 +142,11 @@ async def upload_attachment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Сообщение не найдено")
 
     content = await file.read()
-    limit_bytes = settings.default_ticket_attachment_limit_mb * 1024 * 1024
-    if len(content) > limit_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Файл превышает лимит {settings.default_ticket_attachment_limit_mb} МБ",
-        )
+    try:
+        attachment = attachments_service.store_attachment(message.id, file.filename or "", content, file.content_type)
+    except attachments_service.AttachmentTooLarge as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc))
 
-    today = date.today()
-    directory = Path(settings.attachments_dir) / str(today.year) / f"{today.month:02d}"
-    directory.mkdir(parents=True, exist_ok=True)
-    stored_name = f"{uuid.uuid4().hex}_{file.filename}"
-    stored_path = directory / stored_name
-    stored_path.write_bytes(content)
-
-    attachment = Attachment(
-        message_id=message.id,
-        filename=file.filename or stored_name,
-        stored_path=str(stored_path),
-        size_bytes=len(content),
-        mime_type=file.content_type,
-    )
     db.add(attachment)
     db.commit()
     db.refresh(attachment)

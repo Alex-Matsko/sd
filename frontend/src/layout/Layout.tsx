@@ -51,6 +51,7 @@ const GROUPS: NavGroup[] = [
       { to: "/settings/tariffs", label: "Тарифы и SLA", icon: <IconFileText size={15} /> },
       { to: "/settings/categories", label: "Категории", icon: <IconGrid size={15} /> },
       { to: "/settings/routing", label: "Маршрутизация", icon: <IconRoute size={15} /> },
+      { to: "/settings/channels", label: "Каналы", icon: <IconInbox size={15} /> },
     ],
   },
 ];
