@@ -29,3 +29,8 @@ class ChannelConversationState(Base, TimestampMixin):
     active_ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"))
     awaiting_ticket_choice: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     awaiting_new_ticket_text: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Client picked a closed/cancelled ticket from "Мои заявки" ("поднять
+    # старую"): CLOSED is terminal (ALLOWED_TRANSITIONS), so we don't reopen
+    # it - the next message becomes a new ticket linked via parent_ticket_id.
+    awaiting_revive_text: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    revive_parent_ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"))

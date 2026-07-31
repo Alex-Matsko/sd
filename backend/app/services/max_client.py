@@ -54,18 +54,44 @@ def get_updates(
     return data.get("updates", []), data.get("marker")
 
 
-def send_message(base_url: str, token: str, chat_id: str, text: str, buttons: list[list[dict]] | None = None) -> dict:
+def send_message(
+    base_url: str,
+    token: str,
+    chat_id: str,
+    text: str,
+    buttons: list[list[dict]] | None = None,
+    reply_to_mid: str | None = None,
+) -> dict:
     """POST /messages?chat_id=... - the recipient is a query parameter, not a
     body field (verified against a live bot: putting chat_id in the JSON body
     - as the public docs suggested - gets a 200-looking-shaped but actually
     400 "Unknown recipient" every time). Body carries only the content: text,
     optionally an inline_keyboard attachment (buttons: rows of
-    {"type": "callback", "text": ..., "payload": ...})."""
+    {"type": "callback", "text": ..., "payload": ...}), optionally a `link`
+    marking this message as a native reply to an earlier one (reply_to_mid).
+    The exact `link` shape isn't in the public NewMessageBody docs beyond
+    "object NewMessageLink" with no field list - docs/decisions.md records
+    what was verified live; correcting it is a one-line change here."""
     payload: dict = {"text": text}
     if buttons:
         payload["attachments"] = [{"type": "inline_keyboard", "payload": {"buttons": buttons}}]
+    if reply_to_mid:
+        payload["link"] = {"type": "reply", "mid": reply_to_mid}
     with httpx.Client(base_url=base_url, timeout=15, verify=VERIFY) as client:
         response = client.post("/messages", params={"chat_id": chat_id}, json=payload, headers=_headers(token))
     if response.status_code not in (200, 201):
         raise MaxApiError(f"POST /messages -> {response.status_code}: {response.text[:500]}")
+    return response.json()
+
+
+def set_commands(base_url: str, token: str, commands: list[dict]) -> dict:
+    """PATCH /me/commands - registers the bot's persistent command list (shown
+    by MAX clients near the input field, independent of scroll position -
+    unlike inline_keyboard buttons, which are attached to one message and
+    scroll away with it). Body: {"commands": [{"name": ..., "description":
+    ...}]}, max 32 entries, full replace each call."""
+    with httpx.Client(base_url=base_url, timeout=15, verify=VERIFY) as client:
+        response = client.patch("/me/commands", json={"commands": commands}, headers=_headers(token))
+    if response.status_code not in (200, 201):
+        raise MaxApiError(f"PATCH /me/commands -> {response.status_code}: {response.text[:500]}")
     return response.json()

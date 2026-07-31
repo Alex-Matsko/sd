@@ -28,6 +28,12 @@ def add_message(
 ) -> Message:
     from app.services.tickets import transition_status
 
+    reply_to_message_id = None
+    if payload.reply_to_message_id is not None:
+        parent = db.get(Message, payload.reply_to_message_id)
+        if parent is not None and parent.ticket_id == ticket.id:
+            reply_to_message_id = parent.id
+
     channel = payload.channel or ticket.channel
     message = Message(
         ticket_id=ticket.id,
@@ -36,6 +42,7 @@ def add_message(
         author_user_id=author_user.id if author_user else None,
         author_contact_id=author_contact.id if author_contact else None,
         body=payload.body,
+        reply_to_message_id=reply_to_message_id,
     )
     db.add(message)
     db.flush()

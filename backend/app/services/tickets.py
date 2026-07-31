@@ -61,6 +61,7 @@ def create_ticket(db: Session, payload: TicketCreate, actor: User | None) -> Tic
         status=status,
         assigned_engineer_id=engineer_id,
         team_id=team_id,
+        parent_ticket_id=payload.parent_ticket_id,
     )
     db.add(ticket)
     db.flush()
@@ -120,13 +121,14 @@ def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, act
     ticket.status = new_status
     db.add(ticket)
 
-    if new_status == TicketStatus.CLOSED:
-        # Messenger CSAT request (section 2.1/2.2, "оценка после закрытия") -
-        # a no-op for channels without a messenger bot behind them yet.
-        # Deferred import: max_channel imports tickets_service.create_ticket.
-        from app.services import max_channel
+    # Messenger notifications (section 2.1/2.2) - no-op for channels without a
+    # messenger bot behind them yet. Deferred import: max_channel imports
+    # tickets_service.create_ticket.
+    from app.services import max_channel
 
+    if new_status == TicketStatus.CLOSED:
         max_channel.request_csat(db, ticket)
+    max_channel.notify_status_change(db, ticket, new_status)
 
     audit.record(
         db,
@@ -150,6 +152,10 @@ def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: Use
     if payload.assigned_engineer_id is not None and payload.assigned_engineer_id != ticket.assigned_engineer_id:
         changed["assigned_engineer_id"] = {"from": ticket.assigned_engineer_id, "to": payload.assigned_engineer_id}
         ticket.assigned_engineer_id = payload.assigned_engineer_id
+
+        from app.services import max_channel
+
+        max_channel.notify_assignment_change(db, ticket, db.get(User, payload.assigned_engineer_id))
 
     if payload.team_id is not None and payload.team_id != ticket.team_id:
         changed["team_id"] = {"from": ticket.team_id, "to": payload.team_id}

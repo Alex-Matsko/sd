@@ -23,7 +23,12 @@ import {
   formatDateTime,
   formatMinutes,
 } from "../lib/labels";
-import type { MessageDirection, TicketStatus } from "../api/types";
+import type { Message, MessageDirection, TicketStatus } from "../api/types";
+
+function truncate(text: string, max: number): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length > max ? `${collapsed.slice(0, max)}…` : collapsed;
+}
 
 export function TicketDetailPage() {
   const { ticketId } = useParams();
@@ -31,6 +36,7 @@ export function TicketDetailPage() {
   const qc = useQueryClient();
   const [replyBody, setReplyBody] = useState("");
   const [replyDirection, setReplyDirection] = useState<MessageDirection>("outbound");
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [timeMinutes, setTimeMinutes] = useState(30);
   const [timeComment, setTimeComment] = useState("");
 
@@ -40,7 +46,12 @@ export function TicketDetailPage() {
     enabled: Number.isFinite(id),
     refetchInterval: 30_000,
   });
-  const messagesQuery = useQuery({ queryKey: ["ticket", id, "messages"], queryFn: () => listMessages(id), enabled: Number.isFinite(id) });
+  const messagesQuery = useQuery({
+    queryKey: ["ticket", id, "messages"],
+    queryFn: () => listMessages(id),
+    enabled: Number.isFinite(id),
+    refetchInterval: 5_000,
+  });
   const timeEntriesQuery = useQuery({ queryKey: ["ticket", id, "time"], queryFn: () => listTimeEntries(id), enabled: Number.isFinite(id) });
   const historyQuery = useQuery({ queryKey: ["ticket", id, "history"], queryFn: () => getTicketHistory(id), enabled: Number.isFinite(id) });
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: listUsers });
@@ -62,9 +73,11 @@ export function TicketDetailPage() {
   });
 
   const messageMutation = useMutation({
-    mutationFn: () => createMessage(id, { direction: replyDirection, body: replyBody.trim() }),
+    mutationFn: () =>
+      createMessage(id, { direction: replyDirection, body: replyBody.trim(), reply_to_message_id: replyTo?.id ?? null }),
     onSuccess: () => {
       setReplyBody("");
+      setReplyTo(null);
       qc.invalidateQueries({ queryKey: ["ticket", id, "messages"] });
       qc.invalidateQueries({ queryKey: ["ticket", id] });
     },
@@ -127,21 +140,44 @@ export function TicketDetailPage() {
               <h2>Переписка</h2>
             </div>
             <div className="message-thread">
-              {(messagesQuery.data ?? []).map((m) => (
-                <div key={m.id} className={`message message-${m.direction}`}>
-                  <div className="message-head">
-                    <span className="message-direction">{MESSAGE_DIRECTION_LABELS[m.direction]}</span>
-                    <span className="muted">{CHANNEL_LABELS[m.channel]}</span>
-                    <span className="spacer" />
-                    <span className="muted">{formatDateTime(m.created_at)}</span>
+              {(messagesQuery.data ?? []).map((m) => {
+                const quoted = m.reply_to_message_id
+                  ? (messagesQuery.data ?? []).find((candidate) => candidate.id === m.reply_to_message_id)
+                  : undefined;
+                return (
+                  <div key={m.id} className={`message message-${m.direction}`}>
+                    <div className="message-head">
+                      <span className="message-direction">{MESSAGE_DIRECTION_LABELS[m.direction]}</span>
+                      <span className="muted">{CHANNEL_LABELS[m.channel]}</span>
+                      <span className="spacer" />
+                      <span className="muted">{formatDateTime(m.created_at)}</span>
+                      <button className="btn-link" onClick={() => setReplyTo(m)}>
+                        Ответить
+                      </button>
+                    </div>
+                    {quoted && (
+                      <div className="message-quote">
+                        <span className="message-quote-label">{MESSAGE_DIRECTION_LABELS[quoted.direction]}:</span>{" "}
+                        {truncate(quoted.body, 140)}
+                      </div>
+                    )}
+                    <div className="message-body">{m.body}</div>
                   </div>
-                  <div className="message-body">{m.body}</div>
-                </div>
-              ))}
+                );
+              })}
               {messagesQuery.isSuccess && (messagesQuery.data ?? []).length === 0 && <p className="muted">Сообщений пока нет</p>}
             </div>
 
             <div className="reply-box">
+              {replyTo && (
+                <div className="message-quote message-quote-active">
+                  <span className="message-quote-label">Ответ на «{MESSAGE_DIRECTION_LABELS[replyTo.direction]}»:</span>{" "}
+                  {truncate(replyTo.body, 140)}
+                  <button className="btn-link" onClick={() => setReplyTo(null)}>
+                    ✕
+                  </button>
+                </div>
+              )}
               <div className="form-row-inline">
                 <label>
                   <input type="radio" checked={replyDirection === "outbound"} onChange={() => setReplyDirection("outbound")} /> Ответ клиенту

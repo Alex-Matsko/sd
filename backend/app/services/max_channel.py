@@ -1,14 +1,14 @@
 """MAX messenger channel (section 2.2: "Аналогично Telegram") - client-side
-identification, dialog gluing, "Мои заявки", explicit new-ticket creation, and
+identification, dialog gluing, "Мои заявки" (ticket menu incl. reviving a
+closed ticket), explicit new-ticket creation, reply-to-message quoting, and
 post-closure CSAT (section 2.1's bot feature list, mirrored for MAX).
 
-Update/Message JSON shapes are transcribed from the public MAX Bot API docs
-(dev.max.ru/docs-api) as of 2026-07-22 - the customer's own prior MAX bridge
-was never finished and unavailable as a reference, and no live bot token was
-available during development to verify shapes against a real server. All
-inbound parsing is isolated in `_extract_incoming` so a field-name correction,
-once verified against a real bot, is a one-function fix - see
-docs/decisions.md, "Технические примечания по Этапу 5".
+Update/Message JSON shapes were originally transcribed from the public MAX
+Bot API docs (dev.max.ru/docs-api, 2026-07-22) with no live bot to verify
+against; verified end-to-end against a real bot token on 2026-07-31 (inbound
++ outbound messages, the reply `link` shape, chat_id-as-query-param) - see
+docs/decisions.md. All inbound parsing is isolated in `_extract_incoming` so
+any remaining field-name gap is a one-function fix.
 """
 
 import logging
@@ -30,6 +30,7 @@ from app.models.channel_conversation_state import ChannelConversationState
 from app.models.contact import Contact
 from app.models.message import Message
 from app.models.ticket import Ticket
+from app.models.user import User
 from app.schemas.message import MessageCreate
 from app.schemas.ticket import TicketCreate
 from app.services import attachments as attachments_service
@@ -47,6 +48,11 @@ WELCOME_TEXT = (
 )
 NEW_TICKET_COMMANDS = {"/new", "новая заявка", "создать заявку", "создать новую"}
 MY_TICKETS_COMMANDS = {"/tickets", "мои заявки", "мои обращения"}
+# `bot_started` only fires once, the first time a user ever opens the bot
+# (verified against a live bot: typing "/start" again in an existing dialog
+# arrives as an ordinary message_created, not a fresh bot_started) - so a
+# returning client needs a text command to bring the menu back up too.
+START_COMMANDS = {"/start", "start", "старт", "меню", "/menu"}
 
 _STATUS_LABELS_RU = {
     TicketStatus.NEW: "новая",
@@ -76,6 +82,27 @@ class ParsedUpdate:
     text: str = ""
     callback_payload: str = ""
     attachments: list[dict] = field(default_factory=list)
+    mid: str | None = None
+    reply_to_mid: str | None = None
+
+
+def _main_menu_buttons() -> list[list[dict]]:
+    return [
+        [{"type": "callback", "text": "Мои заявки", "payload": "cmd:my_tickets"}],
+        [{"type": "callback", "text": "Создать новую", "payload": "cmd:new_ticket"}],
+    ]
+
+
+def _extract_link_mid(link: dict) -> str | None:
+    """Reads a reply reference off an incoming message's `link` field.
+    Confirmed live (2026-07-31, docs/decisions.md): MAX nests the original
+    message under `link.message.mid`, not a flat `link.mid` - the flat form
+    is kept as a fallback rather than assumed, in case a future update shape
+    (e.g. from a different client) differs."""
+    if not link or link.get("type") not in (None, "reply"):
+        return None
+    inner = link.get("message") or {}
+    return inner.get("mid") or link.get("mid")
 
 
 def load_max_config(db: Session) -> MaxConfig | None:
@@ -130,6 +157,8 @@ def _extract_incoming(update: dict) -> ParsedUpdate | None:
             display_name=sender.get("name") or sender.get("username") or "",
             text=(body.get("text") or "").strip(),
             attachments=body.get("attachments") or [],
+            mid=body.get("mid"),
+            reply_to_mid=_extract_link_mid(message.get("link") or {}),
         )
 
     if update_type == "message_callback":
@@ -243,13 +272,27 @@ def _store_max_attachment(db: Session, message: Message, attachment: dict) -> No
     db.add(attachments_service.store_attachment(message.id, filename, content, None))
 
 
+def _resolve_reply_target(db: Session, ticket_id: int, reply_to_mid: str | None) -> int | None:
+    if not reply_to_mid:
+        return None
+    parent = db.query(Message).filter(Message.max_message_id == reply_to_mid, Message.ticket_id == ticket_id).first()
+    return parent.id if parent else None
+
+
 def _append_message(db: Session, ticket: Ticket, contact: Contact, parsed: ParsedUpdate, ambiguous: bool = False) -> Message:
     message = messages_service.add_message(
         db,
         ticket,
-        MessageCreate(direction=MessageDirection.INBOUND, body=parsed.text, channel=Channel.MAX),
+        MessageCreate(
+            direction=MessageDirection.INBOUND,
+            body=parsed.text,
+            channel=Channel.MAX,
+            reply_to_message_id=_resolve_reply_target(db, ticket.id, parsed.reply_to_mid),
+        ),
         author_contact=contact,
     )
+    message.max_message_id = parsed.mid
+    db.add(message)
     for att in parsed.attachments:
         _store_max_attachment(db, message, att)
     if ambiguous:
@@ -268,7 +311,14 @@ def _append_message(db: Session, ticket: Ticket, contact: Contact, parsed: Parse
     return message
 
 
-def _create_ticket_from_text(db: Session, config: MaxConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> Ticket:
+def _create_ticket_from_text(
+    db: Session,
+    config: MaxConfig,
+    state: ChannelConversationState,
+    contact: Contact,
+    parsed: ParsedUpdate,
+    parent_ticket_id: int | None = None,
+) -> Ticket:
     subject = parsed.text[:200] if parsed.text else "Обращение из MAX"
     payload = TicketCreate(
         contact_id=contact.id,
@@ -277,18 +327,23 @@ def _create_ticket_from_text(db: Session, config: MaxConfig, state: ChannelConve
         subject=subject,
         manual_priority=Priority.P3,
         manual_priority_reason="Автоматически создано из MAX - приоритет уточняется диспетчером",
+        parent_ticket_id=parent_ticket_id,
     )
     ticket = tickets_service.create_ticket(db, payload, actor=None)
     message = messages_service.add_message(
         db, ticket, MessageCreate(direction=MessageDirection.INBOUND, body=parsed.text, channel=Channel.MAX), author_contact=contact
     )
+    message.max_message_id = parsed.mid
+    db.add(message)
     for att in parsed.attachments:
         _store_max_attachment(db, message, att)
 
     state.active_ticket_id = ticket.id
     db.add(state)
     db.commit()
-    _send(config, parsed.chat_id, f"Заявка {ticket.display_number} создана, мы уже работаем над ней.")
+    parent = db.get(Ticket, parent_ticket_id) if parent_ticket_id is not None else None
+    parent_note = f" и связана с {parent.display_number}" if parent else ""
+    _send(config, parsed.chat_id, f"Заявка {ticket.display_number} создана{parent_note}, мы уже работаем над ней.")
     return ticket
 
 
@@ -303,32 +358,75 @@ def _send_my_tickets(db: Session, config: MaxConfig, contact: Contact, chat_id: 
     if not tickets:
         _send(config, chat_id, "У вас пока нет заявок.")
         return
+    # Structured for scanability: active tickets first (most likely to be
+    # tapped), history below - a flat "created_at desc" list buried an open
+    # ticket under recently-closed ones once there were more than a couple.
+    open_tickets = [t for t in tickets if TicketStatus(t.status) in OPEN_TICKET_STATUSES]
+    closed_tickets = [t for t in tickets if TicketStatus(t.status) not in OPEN_TICKET_STATUSES]
     buttons = [
-        [{"type": "callback", "text": f"{t.display_number} — {_STATUS_LABELS_RU.get(TicketStatus(t.status), t.status)}", "payload": f"ticket:{t.id}"}]
-        for t in tickets
+        [
+            {
+                "type": "callback",
+                "text": f"{t.display_number} — {t.subject[:30]} ({_STATUS_LABELS_RU.get(TicketStatus(t.status), t.status)})",
+                "payload": f"ticket:{t.id}",
+            }
+        ]
+        for t in open_tickets + closed_tickets
     ]
-    _send(config, chat_id, "Ваши заявки:", buttons=buttons)
+    _send(config, chat_id, f"Ваши заявки (открытых: {len(open_tickets)} из {len(tickets)}):", buttons=buttons)
+
+
+def _cancel_pending_ticket_flow(state: ChannelConversationState) -> None:
+    """Reset to a clean slate before honouring a recognized command. Without
+    this, typing e.g. "/start" while the bot was waiting for a problem
+    description got swallowed verbatim as that description - creating a
+    ticket literally titled "/start" and silently switching the active
+    ticket to it (found live: docs/decisions.md)."""
+    state.awaiting_ticket_choice = False
+    state.awaiting_new_ticket_text = False
+    state.awaiting_revive_text = False
+    state.revive_parent_ticket_id = None
 
 
 def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> None:
     text_lower = parsed.text.strip().lower()
 
-    if state.awaiting_new_ticket_text:
-        state.awaiting_new_ticket_text = False
+    # Recognized commands always win over a pending "describe the problem"
+    # prompt - see _cancel_pending_ticket_flow.
+    if text_lower in START_COMMANDS:
+        _cancel_pending_ticket_flow(state)
         db.add(state)
-        _create_ticket_from_text(db, config, state, contact, parsed)
+        db.commit()
+        _send(config, parsed.chat_id, WELCOME_TEXT, buttons=_main_menu_buttons())
         return
 
     if text_lower in MY_TICKETS_COMMANDS:
+        _cancel_pending_ticket_flow(state)
+        db.add(state)
+        db.commit()
         _send_my_tickets(db, config, contact, parsed.chat_id)
         return
 
     if text_lower in NEW_TICKET_COMMANDS:
+        _cancel_pending_ticket_flow(state)
         state.awaiting_new_ticket_text = True
-        state.awaiting_ticket_choice = False
         db.add(state)
         db.commit()
         _send(config, parsed.chat_id, "Опишите проблему одним сообщением - я создам заявку.")
+        return
+
+    if state.awaiting_revive_text:
+        state.awaiting_revive_text = False
+        parent_ticket_id = state.revive_parent_ticket_id
+        state.revive_parent_ticket_id = None
+        db.add(state)
+        _create_ticket_from_text(db, config, state, contact, parsed, parent_ticket_id=parent_ticket_id)
+        return
+
+    if state.awaiting_new_ticket_text:
+        state.awaiting_new_ticket_text = False
+        db.add(state)
+        _create_ticket_from_text(db, config, state, contact, parsed)
         return
 
     # Dialog gluing rule (section 2, item 3): stick to the client's active
@@ -386,7 +484,11 @@ def _record_csat(db: Session, config: MaxConfig, ticket_id: int, rating: int, ch
 def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> None:
     payload = parsed.callback_payload
 
-    if payload == "new_ticket":
+    if payload == "cmd:my_tickets":
+        _send_my_tickets(db, config, contact, parsed.chat_id)
+        return
+
+    if payload in ("new_ticket", "cmd:new_ticket"):
         state.awaiting_ticket_choice = False
         state.awaiting_new_ticket_text = True
         db.add(state)
@@ -398,6 +500,21 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
         ticket = db.get(Ticket, int(payload.split(":", 1)[1]))
         if ticket is None or ticket.contact_id != contact.id:
             _send(config, parsed.chat_id, "Заявка не найдена.")
+            return
+        if TicketStatus(ticket.status) not in OPEN_TICKET_STATUSES:
+            # Terminal ticket ("поднять старую"): CLOSED/CANCELLED never
+            # transition back open (ALLOWED_TRANSITIONS), so the next message
+            # becomes a new ticket linked to this one via parent_ticket_id.
+            state.awaiting_ticket_choice = False
+            state.awaiting_revive_text = True
+            state.revive_parent_ticket_id = ticket.id
+            db.add(state)
+            db.commit()
+            _send(
+                config,
+                parsed.chat_id,
+                f"Заявка {ticket.display_number} закрыта. Опишите, что случилось - я создам новую заявку и свяжу её с {ticket.display_number}.",
+            )
             return
         state.active_ticket_id = ticket.id
         state.awaiting_ticket_choice = False
@@ -429,7 +546,7 @@ def handle_update(db: Session, raw_update: dict) -> None:
     db.commit()
 
     if parsed.kind == "bot_started":
-        _send(config, parsed.chat_id, WELCOME_TEXT)
+        _send(config, parsed.chat_id, WELCOME_TEXT, buttons=_main_menu_buttons())
         return
     if parsed.kind == "callback":
         _handle_callback(db, config, state, contact, parsed)
@@ -437,7 +554,33 @@ def handle_update(db: Session, raw_update: dict) -> None:
     _handle_text(db, config, state, contact, parsed)
 
 
+_commands_synced_token: str | None = None
+
+BOT_COMMANDS = [
+    {"name": "start", "description": "Показать меню"},
+    {"name": "tickets", "description": "Мои заявки"},
+    {"name": "new", "description": "Создать новую заявку"},
+]
+
+
+def _ensure_commands_registered(config: MaxConfig) -> None:
+    """PATCH /me/commands once per (process, token) - a persistent command
+    menu the client shows near the input field, so returning users have a
+    tappable alternative to typing "/start" from memory (docs/decisions.md).
+    Cheap to re-check every poll: memoized on the token, so it's a no-op
+    after the first successful call; retried on the next poll if it fails."""
+    global _commands_synced_token
+    if _commands_synced_token == config.token:
+        return
+    try:
+        max_client.set_commands(config.base_url, config.token, BOT_COMMANDS)
+        _commands_synced_token = config.token
+    except Exception:
+        logger.exception("MAX: не удалось зарегистрировать команды бота")
+
+
 def poll_updates(db: Session, config: MaxConfig) -> int:
+    _ensure_commands_registered(config)
     marker = get_marker(db)
     updates, next_marker = max_client.get_updates(config.base_url, config.token, marker, timeout=config.poll_timeout_seconds)
     for update in updates:
@@ -449,6 +592,47 @@ def poll_updates(db: Session, config: MaxConfig) -> int:
     return len(updates)
 
 
+def _find_chat_state(db: Session, contact_id: int) -> ChannelConversationState | None:
+    return (
+        db.query(ChannelConversationState)
+        .filter(ChannelConversationState.channel == Channel.MAX, ChannelConversationState.contact_id == contact_id)
+        .order_by(ChannelConversationState.updated_at.desc())
+        .first()
+    )
+
+
+def notify_status_change(db: Session, ticket: Ticket, new_status: TicketStatus) -> None:
+    """Called on every transition (services/tickets.transition_status) so the
+    client isn't left guessing where their ticket stands. Skipped for CLOSED -
+    request_csat's own message already announces the closure, and skipped
+    for channels other than MAX the same way request_csat is."""
+    if Channel(ticket.channel) != Channel.MAX or new_status == TicketStatus.CLOSED:
+        return
+    config = load_max_config(db)
+    if config is None:
+        return
+    state = _find_chat_state(db, ticket.contact_id)
+    if state is None:
+        return
+    label = _STATUS_LABELS_RU.get(new_status, new_status.value)
+    _send(config, state.chat_id, f"Статус заявки {ticket.display_number} изменён: {label}.")
+
+
+def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None) -> None:
+    """Called from services/tickets.update_ticket when assigned_engineer_id
+    changes - only fires for an actual assignment (there's currently no way
+    to clear it back to None through that endpoint, see update_ticket)."""
+    if Channel(ticket.channel) != Channel.MAX or engineer is None:
+        return
+    config = load_max_config(db)
+    if config is None:
+        return
+    state = _find_chat_state(db, ticket.contact_id)
+    if state is None:
+        return
+    _send(config, state.chat_id, f"Заявку {ticket.display_number} теперь ведёт: {engineer.full_name}.")
+
+
 def request_csat(db: Session, ticket: Ticket) -> None:
     """Called on Ticket -> CLOSED (services/tickets.transition_status) for
     every channel; only acts when the ticket's contact has a known MAX chat."""
@@ -457,12 +641,7 @@ def request_csat(db: Session, ticket: Ticket) -> None:
     config = load_max_config(db)
     if config is None:
         return
-    state = (
-        db.query(ChannelConversationState)
-        .filter(ChannelConversationState.channel == Channel.MAX, ChannelConversationState.contact_id == ticket.contact_id)
-        .order_by(ChannelConversationState.updated_at.desc())
-        .first()
-    )
+    state = _find_chat_state(db, ticket.contact_id)
     if state is None:
         return
     buttons = [[{"type": "callback", "text": str(n), "payload": f"csat:{ticket.id}:{n}"} for n in range(1, 6)]]
@@ -486,16 +665,32 @@ def try_send_outbound(db: Session, ticket: Ticket, message: Message) -> None:
     if config is None:
         logger.warning("Заявка %s: канал MAX не настроен, сообщение не отправлено", ticket.display_number)
         return
-    state = (
-        db.query(ChannelConversationState)
-        .filter(ChannelConversationState.channel == Channel.MAX, ChannelConversationState.contact_id == ticket.contact_id)
-        .order_by(ChannelConversationState.updated_at.desc())
-        .first()
-    )
+    state = _find_chat_state(db, ticket.contact_id)
     if state is None:
         logger.warning("Заявка %s: нет сохранённого MAX-чата для контакта, сообщение не отправлено", ticket.display_number)
         return
+    reply_to_mid = None
+    if message.reply_to_message_id is not None:
+        parent = db.get(Message, message.reply_to_message_id)
+        reply_to_mid = parent.max_message_id if parent else None
     try:
-        max_client.send_message(config.base_url, config.token, state.chat_id, message.body)
+        # MAX doesn't render the registered /me/commands as a visible menu on
+        # every client (confirmed live - docs/decisions.md), so the menu
+        # buttons ride along on every engineer reply instead: the one point
+        # in an ongoing conversation where the client reliably gets a fresh
+        # message to tap on, without a silent ack cluttering routine gluing.
+        response = max_client.send_message(
+            config.base_url,
+            config.token,
+            state.chat_id,
+            message.body,
+            buttons=_main_menu_buttons(),
+            reply_to_mid=reply_to_mid,
+        )
+        sent_mid = ((response.get("message") or {}).get("body") or {}).get("mid")
+        if sent_mid:
+            message.max_message_id = sent_mid
+            db.add(message)
+            db.commit()
     except Exception:
         logger.exception("Заявка %s: ошибка отправки сообщения в MAX", ticket.display_number)

@@ -325,6 +325,7 @@ export interface Message {
   author_user_id: number | null;
   author_contact_id: number | null;
   body: string;
+  reply_to_message_id: number | null;
   created_at: string;
   attachments: Attachment[];
 }

@@ -155,3 +155,32 @@ def test_manual_priority_override_requires_reason(db, contact):
 
     with pytest.raises(ValueError):
         tickets_service.update_ticket(db, ticket, TicketUpdate(manual_priority=Priority.P1), actor=None)
+
+
+def test_reply_to_message_id_links_within_same_ticket(db, contact, engineer_user):
+    ticket = _minimal_ticket(db, contact)
+    original = messages_service.add_message(
+        db, ticket, MessageCreate(direction=MessageDirection.INBOUND, body="Не работает 1С"), author_contact=contact
+    )
+    reply = messages_service.add_message(
+        db,
+        ticket,
+        MessageCreate(direction=MessageDirection.OUTBOUND, body="Уточните версию", reply_to_message_id=original.id),
+        author_user=engineer_user,
+    )
+    assert reply.reply_to_message_id == original.id
+
+
+def test_reply_to_message_id_from_another_ticket_is_ignored(db, contact, engineer_user):
+    ticket_a = _minimal_ticket(db, contact)
+    ticket_b = _minimal_ticket(db, contact)
+    foreign_message = messages_service.add_message(
+        db, ticket_a, MessageCreate(direction=MessageDirection.INBOUND, body="Сообщение в другой заявке"), author_contact=contact
+    )
+    reply = messages_service.add_message(
+        db,
+        ticket_b,
+        MessageCreate(direction=MessageDirection.OUTBOUND, body="Ответ", reply_to_message_id=foreign_message.id),
+        author_user=engineer_user,
+    )
+    assert reply.reply_to_message_id is None

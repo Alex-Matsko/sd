@@ -223,7 +223,10 @@ export function updateTicket(id: number, payload: Record<string, unknown>) {
 export function listMessages(ticketId: number) {
   return apiRequest<Message[]>(`/tickets/${ticketId}/messages`);
 }
-export function createMessage(ticketId: number, payload: { direction: string; body: string; channel?: string | null }) {
+export function createMessage(
+  ticketId: number,
+  payload: { direction: string; body: string; channel?: string | null; reply_to_message_id?: number | null }
+) {
   return apiRequest<Message>(`/tickets/${ticketId}/messages`, { method: "POST", body: payload });
 }
 export function listTimeEntries(ticketId: number) {

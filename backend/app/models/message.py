@@ -25,9 +25,21 @@ class Message(Base):
     # [#ID]-in-subject fallback (services/email_channel.py).
     email_message_id: Mapped[str | None] = mapped_column(String(998))
     email_in_reply_to: Mapped[str | None] = mapped_column(String(998))
+    # Quoting a specific message in the thread (staff UI and MAX both use
+    # this): which other message THIS one is a reply to. Channel-agnostic,
+    # unlike the email_* pair above - set directly on creation via
+    # MessageCreate rather than inferred from a channel-native header.
+    reply_to_message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id"))
+    # MAX's own per-message id (`mid`), stored for both inbound and outbound
+    # messages so a reply in either direction can be resolved: an inbound
+    # native MAX reply references this by mid (-> reply_to_message_id), and
+    # an outbound reply to a message that arrived via MAX needs the parent's
+    # mid to build the native `link` MAX itself renders as a reply.
+    max_message_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     ticket: Mapped["Ticket"] = relationship(back_populates="messages")
+    reply_to: Mapped["Message"] = relationship(remote_side="Message.id")
     attachments: Mapped[list["Attachment"]] = relationship(back_populates="message", cascade="all, delete-orphan")
 
 

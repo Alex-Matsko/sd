@@ -64,6 +64,32 @@ def test_send_message_with_buttons_still_omits_chat_id_from_body(monkeypatch, ca
     assert body["attachments"][0]["type"] == "inline_keyboard"
 
 
+def test_send_message_with_reply_to_mid_sets_link(monkeypatch, captured):
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content
+        return httpx.Response(200, json={"message": {"body": {"text": "ok", "mid": "mid.new"}}})
+
+    monkeypatch.setattr(httpx, "Client", _mock_client_factory(handler))
+
+    max_client.send_message("https://platform-api2.max.ru", "test-token", "42", "Ответ", reply_to_mid="mid.original")
+
+    body = json.loads(captured["body"])
+    assert body["link"] == {"type": "reply", "mid": "mid.original"}
+
+
+def test_send_message_without_reply_to_mid_omits_link(monkeypatch, captured):
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content
+        return httpx.Response(200, json={"message": {"body": {"text": "ok"}}})
+
+    monkeypatch.setattr(httpx, "Client", _mock_client_factory(handler))
+
+    max_client.send_message("https://platform-api2.max.ru", "test-token", "42", "Привет")
+
+    body = json.loads(captured["body"])
+    assert "link" not in body
+
+
 def test_send_message_raises_on_error_status(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(400, json={"code": "proto.payload", "message": "Unknown recipient"})
@@ -72,6 +98,23 @@ def test_send_message_raises_on_error_status(monkeypatch):
 
     with pytest.raises(max_client.MaxApiError, match="Unknown recipient"):
         max_client.send_message("https://platform-api2.max.ru", "test-token", "1", "hi")
+
+
+def test_set_commands_patches_me_commands(monkeypatch, captured):
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["path"] = request.url.path
+        captured["body"] = request.content
+        return httpx.Response(200, json={"commands": []})
+
+    monkeypatch.setattr(httpx, "Client", _mock_client_factory(handler))
+
+    commands = [{"name": "start", "description": "Показать меню"}]
+    max_client.set_commands("https://platform-api2.max.ru", "test-token", commands)
+
+    assert captured["method"] == "PATCH"
+    assert captured["path"] == "/me/commands"
+    assert json.loads(captured["body"]) == {"commands": commands}
 
 
 def test_get_updates_sends_marker_and_parses_response(monkeypatch):

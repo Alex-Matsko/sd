@@ -9,6 +9,7 @@ class MessageCreate(BaseModel):
     direction: MessageDirection
     body: str
     channel: Channel | None = None
+    reply_to_message_id: int | None = None
 
 
 class AttachmentRead(BaseModel):
@@ -31,5 +32,6 @@ class MessageRead(BaseModel):
     author_user_id: int | None
     author_contact_id: int | None
     body: str
+    reply_to_message_id: int | None
     created_at: datetime
     attachments: list[AttachmentRead] = []

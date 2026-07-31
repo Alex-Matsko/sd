@@ -17,6 +17,7 @@ class TicketCreate(BaseModel):
     manual_priority: Priority | None = None
     manual_priority_reason: str | None = None
     initial_message: str | None = None
+    parent_ticket_id: int | None = None
 
     @model_validator(mode="after")
     def _check_priority_source(self) -> "TicketCreate":
