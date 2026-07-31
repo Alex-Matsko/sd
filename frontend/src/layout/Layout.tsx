@@ -10,6 +10,7 @@ import {
   IconBuilding,
   IconChevronDown,
   IconChevronRight,
+  IconClock,
   IconFileText,
   IconGrid,
   IconInbox,
@@ -52,6 +53,7 @@ const GROUPS: NavGroup[] = [
       { to: "/settings/categories", label: "Категории", icon: <IconGrid size={15} /> },
       { to: "/settings/routing", label: "Маршрутизация", icon: <IconRoute size={15} /> },
       { to: "/settings/channels", label: "Каналы", icon: <IconInbox size={15} /> },
+      { to: "/settings/automation", label: "Автоматизация", icon: <IconClock size={15} /> },
     ],
   },
 ];
@@ -162,6 +164,10 @@ export function Layout() {
           <NavLink to="/tickets/new" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
             <IconPlus size={16} />
             <span>Новая заявка</span>
+          </NavLink>
+          <NavLink to="/reports" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
+            <IconFileText size={16} />
+            <span>Отчёты</span>
           </NavLink>
 
           {GROUPS.map((group) => (

@@ -2,6 +2,7 @@ import { apiRequest } from "./client";
 import type {
   Asset,
   AuditLogEntry,
+  AutomationRule,
   BusinessCalendar,
   Category,
   Channel,
@@ -12,8 +13,10 @@ import type {
   Message,
   Notification,
   Organization,
+  OrganizationEmailDomain,
   OrganizationUsage,
   Priority,
+  ReportsOverview,
   RoutingRule,
   Tariff,
   TariffSlaRule,
@@ -44,6 +47,12 @@ export function updateOrganization(id: number, payload: Partial<Organization>) {
 }
 export function getOrganizationUsage(id: number, year?: number, month?: number) {
   return apiRequest<OrganizationUsage>(`/organizations/${id}/usage`, { query: { year, month } });
+}
+export function addOrganizationEmailDomain(id: number, domain: string) {
+  return apiRequest<OrganizationEmailDomain>(`/organizations/${id}/email-domains`, { method: "POST", body: { domain } });
+}
+export function removeOrganizationEmailDomain(id: number, domainId: number) {
+  return apiRequest<void>(`/organizations/${id}/email-domains/${domainId}`, { method: "DELETE" });
 }
 
 // --- Contacts ---
@@ -242,6 +251,19 @@ export function markNotificationRead(id: number) {
 }
 export function markAllNotificationsRead() {
   return apiRequest<void>("/notifications/read-all", { method: "POST" });
+}
+
+// --- Reports ---
+export function getReportsOverview(filters: { date_from?: string; date_to?: string; organization_id?: number }) {
+  return apiRequest<ReportsOverview>("/reports/overview", { query: filters });
+}
+
+// --- Automation rules ---
+export function listAutomationRules() {
+  return apiRequest<AutomationRule[]>("/automation-rules");
+}
+export function updateAutomationRule(id: number, payload: { threshold_days?: number; is_active?: boolean }) {
+  return apiRequest<AutomationRule>(`/automation-rules/${id}`, { method: "PATCH", body: payload });
 }
 
 // --- Integration settings (Настройки → Каналы) ---

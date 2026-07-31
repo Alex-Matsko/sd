@@ -98,6 +98,13 @@ class NotificationType(str, Enum):
     SLA_RESOLUTION_BREACH = "sla_resolution_breach"
 
 
+class AutomationTriggerType(str, Enum):
+    # Section 4.2: "«Решена» → «Закрыта»: автозакрытие через N дней без ответа
+    # клиента". The only trigger type today; more (e.g. time-in-status
+    # escalation moves) can be added later without a schema change.
+    RESOLVED_WITHOUT_REPLY = "resolved_without_reply"
+
+
 class SlaTimerState(str, Enum):
     NO_RULE = "no_rule"  # tariff has no SLA rule for the ticket's priority
     OK = "ok"

@@ -61,7 +61,7 @@ export function AssetsPage() {
   );
 }
 
-function NewAssetModal({
+export function NewAssetModal({
   organizations,
   onClose,
   onCreated,

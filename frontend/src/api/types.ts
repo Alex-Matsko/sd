@@ -216,6 +216,62 @@ export interface Ticket {
   sla: TicketSlaView | null;
 }
 
+export type AutomationTriggerType = "resolved_without_reply";
+
+export interface SlaViolation {
+  ticket_id: number;
+  display_number: string;
+  subject: string;
+  organization: string;
+  priority: Priority;
+  reaction_met: boolean | null;
+  resolution_met: boolean | null;
+}
+
+export interface ReportsOverview {
+  period: { date_from: string; date_to: string };
+  sla: {
+    total: number;
+    reaction_met_pct: number | null;
+    resolution_met_pct: number | null;
+    by_priority: { priority: Priority; total: number; reaction_met_pct: number | null; resolution_met_pct: number | null }[];
+    violations: SlaViolation[];
+  };
+  flow: {
+    total: number;
+    by_channel: { channel: string; count: number }[];
+    by_category: { category: string; count: number }[];
+    by_organization: { organization: string; count: number }[];
+    daily: { date: string; count: number }[];
+  };
+  workload: {
+    engineer_id: number;
+    engineer_name: string;
+    billable_minutes: number;
+    non_billable_minutes: number;
+    resolved_count: number;
+    avg_resolution_minutes: number | null;
+  }[];
+  csat: {
+    average: number | null;
+    count: number;
+    by_engineer: { label: string; average: number; count: number }[];
+    by_organization: { label: string; average: number; count: number }[];
+  };
+  backlog_aging: { bucket: string; count: number }[];
+}
+
+export interface AutomationRule {
+  id: number;
+  name: string;
+  trigger_type: AutomationTriggerType;
+  from_status: TicketStatus;
+  to_status: TicketStatus;
+  threshold_days: number;
+  is_active: boolean;
+  updated_at: string;
+}
+
 export interface Notification {
   id: number;
   ticket_id: number | null;

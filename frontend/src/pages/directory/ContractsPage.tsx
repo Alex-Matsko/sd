@@ -74,7 +74,7 @@ export function ContractsPage() {
   );
 }
 
-function NewContractModal({
+export function NewContractModal({
   organizations,
   tariffs,
   onClose,

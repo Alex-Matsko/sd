@@ -16,6 +16,7 @@ from app.models.time_entry import TimeEntry
 from app.models.audit import AuditLog
 from app.models.auth import RefreshToken
 from app.models.notification import Notification
+from app.models.automation_rule import AutomationRule
 from app.models.integration_setting import IntegrationSetting
 from app.models.channel_conversation_state import ChannelConversationState
 
@@ -49,4 +50,5 @@ __all__ = [
     "Notification",
     "IntegrationSetting",
     "ChannelConversationState",
+    "AutomationRule",
 ]

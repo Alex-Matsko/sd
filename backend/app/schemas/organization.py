@@ -25,6 +25,10 @@ class OrganizationEmailDomainRead(BaseModel):
     domain: str
 
 
+class OrganizationEmailDomainCreate(BaseModel):
+    domain: str
+
+
 class OrganizationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

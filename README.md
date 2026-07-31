@@ -16,7 +16,8 @@
 | 3 | SLA-движок: таймеры, календари, паузы, эскалации 75%/100%, in-app уведомления | ✅ Готов |
 | 4 | Email (вход/выход, склейка диалога) + универсальные настройки каналов | 🟡 Email готов; уведомления инженерам в Telegram — остаток этапа |
 | 5 | Канал MAX для клиентов: идентификация, диалог, «Мои заявки», очередь неопознанных, CSAT | 🟡 MAX готов (не проверен на боевом токене); Telegram-клиент — остаток этапа |
-| 6–10 | Plusofon, биллинг, портал клиента, отчёты, стабилизация | ⬜ |
+| — | Внеплановые доработки (по запросу): канбан-доска очереди с drag-and-drop, движок правил автоматизации статусов (автозакрытие по 4.2), расширенная карточка организации, раздел «Отчёты» (SLA/поток/CSAT/backlog/загрузка инженеров) | ✅ Готово |
+| 6–10 | Plusofon, биллинг (пакеты часов уже частично в карточке организации), портал клиента, дашборд KPI, шаблоны ответов, стабилизация | ⬜ |
 
 ## Стек
 
@@ -43,7 +44,8 @@ sd/
 │   ├── alembic.ini
 │   ├── alembic/
 │   │   └── versions/         # Миграции БД (initial schema; stage3 sla engine;
-│   │                         #   stage4 email channel; stage5 MAX channel)
+│   │                         #   stage4 email channel; stage5 MAX channel;
+│   │                         #   automation rules)
 │   ├── app/
 │   │   ├── main.py           # FastAPI-приложение, подключение роутеров
 │   │   ├── config.py         # Настройки (pydantic-settings, читает .env) — только
@@ -53,27 +55,31 @@ sd/
 │   │   ├── seed.py           # Идемпотентный сид: справочники, календари, матрица
 │   │   │                     #   приоритетов, тариф по умолчанию, первый админ,
 │   │   │                     #   докатка SLA-сроков для заявок до Этапа 3
-│   │   ├── worker.py         # Фоновый процесс: SLA-эскалации (раз в минуту, главный
-│   │   │                     #   цикл) + опрос почты (свой интервал, тот же цикл) +
-│   │   │                     #   long polling MAX (отдельный поток, не блокирует SLA)
+│   │   ├── worker.py         # Фоновый процесс: SLA-эскалации + автоматизация статусов
+│   │   │                     #   (раз в минуту, главный цикл) + опрос почты (свой
+│   │   │                     #   интервал, тот же цикл) + long polling MAX (отдельный
+│   │   │                     #   поток, не блокирует SLA)
 │   │   ├── core/             # Перечисления (enums), безопасность (JWT, bcrypt),
 │   │   │                     #   crypto (шифрование секретов интеграций)
 │   │   ├── models/           # SQLAlchemy-модели: organization, contact, contract,
 │   │   │                     #   tariff, calendar, priority, category, asset, team,
 │   │   │                     #   routing, ticket, message, time_entry, user, audit,
 │   │   │                     #   auth, notification, integration_setting,
-│   │   │                     #   channel_conversation_state
+│   │   │                     #   channel_conversation_state, automation_rule
 │   │   ├── schemas/          # Pydantic-схемы (зеркалят models)
 │   │   ├── api/
 │   │   │   ├── deps.py       # Зависимости: текущий пользователь, роли, сессия БД
-│   │   │   └── routers/      # REST-роутеры: auth, users, organizations, contacts,
-│   │   │                     #   contracts, tariffs, calendars, priority_matrix,
-│   │   │                     #   categories, assets, teams, routing_rules, tickets,
-│   │   │                     #   notifications, integration_settings
+│   │   │   └── routers/      # REST-роутеры: auth, users, organizations (+
+│   │   │                     #   email-domains CRUD), contacts, contracts, tariffs,
+│   │   │                     #   calendars, priority_matrix, categories, assets,
+│   │   │                     #   teams, routing_rules, tickets, notifications,
+│   │   │                     #   integration_settings, automation_rules, reports
 │   │   └── services/         # Бизнес-логика: tickets (статусная модель), routing,
 │   │                         #   priority, billing, time_entries, messages,
 │   │                         #   contracts, audit, calendar_math (рабочее время
 │   │                         #   по бизнес-календарю), sla (SLA-движок Этапа 3),
+│   │                         #   automation (движок правил автостатусов, раздел 4.2),
+│   │                         #   reports (агрегации для раздела «Отчёты»),
 │   │                         #   integration_settings (универсальное хранилище
 │   │                         #   настроек каналов), email_channel (IMAP/SMTP,
 │   │                         #   склейка диалога), max_client + max_channel (Bot API
@@ -82,7 +88,8 @@ sd/
 │   │                         #   attachments (общее хранилище вложений)
 │   └── tests/                # pytest: приоритеты, маршрутизация, биллинг,
 │                             #   договоры, статусы заявок, безопасность,
-│                             #   SLA-движок, email-канал, MAX-канал
+│                             #   SLA-движок, email-канал, MAX-канал, автоматизация,
+│                             #   отчёты
 └── frontend/
     ├── package.json          # Скрипты: dev / build / lint
     ├── vite.config.ts
@@ -95,13 +102,19 @@ sd/
         ├── lib/              # Русские подписи статусов/приоритетов/SLA и пр.
         ├── styles/           # Глобальные стили
         └── pages/
-            ├── LoginPage, DashboardPage, TicketsPage (SLA-колонка, фильтр риска),
-            │   TicketDetailPage (панель SLA), NewTicketPage
-            ├── directory/    # Организации, контакты, договоры, активы
+            ├── LoginPage, DashboardPage, TicketsPage (список/канбан-переключатель,
+            │   SLA-колонка, фильтр риска), KanbanBoard (drag-and-drop + FLIP-анимация
+            │   авто-переезда), TicketDetailPage (панель SLA), NewTicketPage,
+            │   ReportsPage (SLA/поток/CSAT/backlog/загрузка инженеров)
+            ├── directory/    # Организации (список + карточка: реквизиты,
+            │                 #   ответственный, домены почты, контакты, договоры,
+            │                 #   активы, заявки, расход пакета), контакты, договоры,
+            │                 #   активы
             └── settings/     # Категории, матрица приоритетов,
                               #   правила маршрутизации, тарифы, каналы
                               #   (Email и MAX — рабочие формы; Telegram/
-                              #   телефония — заглушки под будущие этапы)
+                              #   телефония — заглушки под будущие этапы),
+                              #   автоматизация (правила авто-перевода статусов)
 ```
 
 При изменении структуры проекта (новые каталоги, сервисы, контейнеры) — обновлять этот раздел.

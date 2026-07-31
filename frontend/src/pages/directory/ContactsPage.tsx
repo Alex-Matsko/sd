@@ -66,7 +66,7 @@ export function ContactsPage() {
   );
 }
 
-function NewContactModal({
+export function NewContactModal({
   organizations,
   onClose,
   onCreated,

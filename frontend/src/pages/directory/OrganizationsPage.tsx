@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { listOrganizations } from "../../api/endpoints";
 import { EmptyState, ErrorBanner, Loading } from "../../components/ui";
 import { ORGANIZATION_STATUS_LABELS } from "../../lib/labels";
@@ -37,7 +38,12 @@ export function OrganizationsPage() {
             <span>Домены почты</span>
           </div>
           {organizations.map((o) => (
-            <div className="list-row" style={{ gridTemplateColumns: "2fr 1.6fr 1fr 1.4fr" }} key={o.id}>
+            <Link
+              className="list-row"
+              style={{ gridTemplateColumns: "2fr 1.6fr 1fr 1.4fr" }}
+              key={o.id}
+              to={`/directory/organizations/${o.id}`}
+            >
               <span className="subject">{o.name}</span>
               <span>{o.legal_name ?? "—"}</span>
               <span>
@@ -47,7 +53,7 @@ export function OrganizationsPage() {
                 </span>
               </span>
               <span className="muted">{o.email_domains.map((d) => d.domain).join(", ") || "—"}</span>
-            </div>
+            </Link>
           ))}
         </div>
       )}

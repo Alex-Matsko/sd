@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { listOrganizations, listTickets, listUsers } from "../api/endpoints";
 import { EmptyState, ErrorBanner, Loading, PriorityTag, SlaTag, StatusTag, ChannelTag } from "../components/ui";
 import { formatDateTime } from "../lib/labels";
+import { KanbanBoard } from "./KanbanBoard";
 import type { Priority, TicketStatus } from "../api/types";
 
 const SLA_RISK_OPTIONS: { value: "" | "warning" | "breached"; label: string }[] = [
@@ -33,12 +34,16 @@ const PRIORITY_OPTIONS: { value: Priority | ""; label: string }[] = [
 ];
 
 export function TicketsPage() {
+  const [searchParams] = useSearchParams();
+  const initialOrgId = searchParams.get("organization_id");
+
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">("");
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
-  const [organizationFilter, setOrganizationFilter] = useState<number | "">("");
+  const [organizationFilter, setOrganizationFilter] = useState<number | "">(initialOrgId ? Number(initialOrgId) : "");
   const [assigneeFilter, setAssigneeFilter] = useState<number | "">("");
   const [slaRiskFilter, setSlaRiskFilter] = useState<"" | "warning" | "breached">("");
   const [search, setSearch] = useState("");
+  const [view, setView] = useState<"list" | "kanban">("list");
 
   const orgsQuery = useQuery({ queryKey: ["organizations"], queryFn: listOrganizations });
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: listUsers });
@@ -72,6 +77,14 @@ export function TicketsPage() {
           Очередь заявок
         </h1>
         <div className="spacer" />
+        <div className="view-toggle">
+          <button className={view === "list" ? "active" : ""} onClick={() => setView("list")}>
+            Список
+          </button>
+          <button className={view === "kanban" ? "active" : ""} onClick={() => setView("kanban")}>
+            Канбан
+          </button>
+        </div>
         <Link to="/tickets/new" className="btn btn-primary">
           Новая заявка
         </Link>
@@ -133,7 +146,10 @@ export function TicketsPage() {
       {ticketsQuery.isLoading && <Loading />}
       {ticketsQuery.isError && <ErrorBanner message={(ticketsQuery.error as Error).message} />}
       {ticketsQuery.isSuccess && filtered.length === 0 && <EmptyState text="Заявок по заданным фильтрам не найдено" />}
-      {ticketsQuery.isSuccess && filtered.length > 0 && (
+      {ticketsQuery.isSuccess && filtered.length > 0 && view === "kanban" && (
+        <KanbanBoard tickets={filtered} orgsById={orgsById} usersById={usersById} />
+      )}
+      {ticketsQuery.isSuccess && filtered.length > 0 && view === "list" && (
         <div className="list">
           <div className="list-head" style={{ gridTemplateColumns: "90px 2fr 1fr 1fr 1fr 1.2fr 1fr 1fr 1fr" }}>
             <span>№</span>

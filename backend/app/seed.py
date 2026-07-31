@@ -5,9 +5,10 @@ container start (see Dockerfile) - everything is check-then-insert."""
 from datetime import date, time
 
 from app.config import settings
-from app.core.enums import ImpactUrgencyLevel, Priority, UserRole
+from app.core.enums import AutomationTriggerType, ImpactUrgencyLevel, Priority, TicketStatus, UserRole
 from app.core.security import hash_password
 from app.db import SessionLocal
+from app.models.automation_rule import AutomationRule
 from app.models.calendar import BusinessCalendar, BusinessCalendarWindow, Holiday
 from app.models.organization import PublicEmailDomain
 from app.models.priority import ImpactUrgencyRule
@@ -116,6 +117,18 @@ def seed(db) -> None:
     for domain in PUBLIC_EMAIL_DOMAINS:
         if domain not in existing_domains:
             db.add(PublicEmailDomain(domain=domain))
+
+    if db.query(AutomationRule).filter(AutomationRule.trigger_type == AutomationTriggerType.RESOLVED_WITHOUT_REPLY).first() is None:
+        db.add(
+            AutomationRule(
+                name="Автозакрытие решённых заявок",
+                trigger_type=AutomationTriggerType.RESOLVED_WITHOUT_REPLY,
+                from_status=TicketStatus.RESOLVED,
+                to_status=TicketStatus.CLOSED,
+                threshold_days=3,  # section 4.2 default
+                is_active=True,
+            )
+        )
 
     if db.query(User).filter(User.email == settings.seed_admin_email).first() is None:
         db.add(

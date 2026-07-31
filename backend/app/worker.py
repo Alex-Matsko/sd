@@ -19,7 +19,7 @@ import traceback
 
 from app.config import settings
 from app.db import SessionLocal
-from app.services import email_channel, max_channel, sla
+from app.services import automation, email_channel, max_channel, sla
 
 TICK_SECONDS = 5
 EMAIL_POLL_FALLBACK_SECONDS = 30  # used while the email channel isn't configured/enabled
@@ -30,6 +30,14 @@ def run_sla_sweep() -> int:
     db = SessionLocal()
     try:
         return sla.run_escalations(db)
+    finally:
+        db.close()
+
+
+def run_automation_sweep() -> int:
+    db = SessionLocal()
+    try:
+        return automation.run_automation_rules(db)
     finally:
         db.close()
 
@@ -89,6 +97,12 @@ def main() -> None:
                 touched = run_sla_sweep()
                 if touched:
                     print(f"[worker] эскалации: обновлено заявок - {touched}", flush=True)
+            except Exception:
+                traceback.print_exc()
+            try:
+                closed = run_automation_sweep()
+                if closed:
+                    print(f"[worker] автоматизация: обновлено заявок - {closed}", flush=True)
             except Exception:
                 traceback.print_exc()
             next_sla_run = now + settings.worker_interval_seconds

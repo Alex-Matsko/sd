@@ -1,13 +1,17 @@
 import { useState } from "react";
-import { createOrganization } from "../../api/endpoints";
+import { useQuery } from "@tanstack/react-query";
+import { createOrganization, listUsers } from "../../api/endpoints";
 import { ErrorBanner } from "../../components/ui";
 
 export function NewOrganizationModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [legalName, setLegalName] = useState("");
+  const [accountManagerId, setAccountManagerId] = useState<number | "">("");
   const [emailDomains, setEmailDomains] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const usersQuery = useQuery({ queryKey: ["users"], queryFn: listUsers });
 
   async function handleSubmit() {
     if (!name.trim()) {
@@ -20,6 +24,7 @@ export function NewOrganizationModal({ onClose, onCreated }: { onClose: () => vo
       await createOrganization({
         name: name.trim(),
         legal_name: legalName.trim() || null,
+        account_manager_id: accountManagerId || null,
         email_domains: emailDomains
           .split(",")
           .map((d) => d.trim().toLowerCase())
@@ -51,6 +56,17 @@ export function NewOrganizationModal({ onClose, onCreated }: { onClose: () => vo
           <div className="form-row">
             <label className="form-label">Юридическое лицо</label>
             <input type="text" style={{ width: "100%" }} value={legalName} onChange={(e) => setLegalName(e.target.value)} />
+          </div>
+          <div className="form-row">
+            <label className="form-label">Ответственный менеджер</label>
+            <select value={accountManagerId} onChange={(e) => setAccountManagerId(e.target.value ? Number(e.target.value) : "")}>
+              <option value="">Не назначен</option>
+              {(usersQuery.data ?? []).map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="form-row">
             <label className="form-label">Домены почты (через запятую)</label>

@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routers import (
     assets,
     auth,
+    automation_rules,
     calendars,
     categories,
     contacts,
@@ -12,6 +13,7 @@ from app.api.routers import (
     notifications,
     organizations,
     priority_matrix,
+    reports,
     routing_rules,
     tariffs,
     teams,
@@ -45,6 +47,8 @@ app.include_router(routing_rules.router)
 app.include_router(tickets.router)
 app.include_router(notifications.router)
 app.include_router(integration_settings.router)
+app.include_router(automation_rules.router)
+app.include_router(reports.router)
 
 
 @app.get("/health")

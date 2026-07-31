@@ -5,9 +5,15 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_dispatcher_or_above
 from app.db import get_db
-from app.models.organization import Organization, OrganizationEmailDomain
+from app.models.organization import Organization, OrganizationEmailDomain, PublicEmailDomain
 from app.models.user import User
-from app.schemas.organization import OrganizationCreate, OrganizationRead, OrganizationUpdate
+from app.schemas.organization import (
+    OrganizationCreate,
+    OrganizationEmailDomainCreate,
+    OrganizationEmailDomainRead,
+    OrganizationRead,
+    OrganizationUpdate,
+)
 from app.services import billing
 from app.services.contracts import get_active_contract
 
@@ -66,6 +72,49 @@ def update_organization(
     db.commit()
     db.refresh(org)
     return org
+
+
+@router.post(
+    "/{organization_id}/email-domains", response_model=OrganizationEmailDomainRead, status_code=status.HTTP_201_CREATED
+)
+def add_email_domain(
+    organization_id: int,
+    payload: OrganizationEmailDomainCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_dispatcher_or_above),
+) -> OrganizationEmailDomain:
+    org = db.get(Organization, organization_id)
+    if org is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Организация не найдена")
+    domain = payload.domain.strip().lower()
+    if not domain:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите домен")
+    if db.get(PublicEmailDomain, domain) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Это публичный почтовый домен - его нельзя зарегистрировать как корпоративный",
+        )
+    if db.query(OrganizationEmailDomain).filter(OrganizationEmailDomain.domain == domain).first() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Этот домен уже зарегистрирован")
+    record = OrganizationEmailDomain(organization_id=organization_id, domain=domain)
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+@router.delete("/{organization_id}/email-domains/{domain_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_email_domain(
+    organization_id: int,
+    domain_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_dispatcher_or_above),
+) -> None:
+    record = db.get(OrganizationEmailDomain, domain_id)
+    if record is None or record.organization_id != organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Домен не найден")
+    db.delete(record)
+    db.commit()
 
 
 @router.get("/{organization_id}/usage")
