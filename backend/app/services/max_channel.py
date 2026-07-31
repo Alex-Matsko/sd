@@ -93,6 +93,24 @@ def _main_menu_buttons() -> list[list[dict]]:
     ]
 
 
+#  RESOLVED is deliberately not in OPEN_TICKET_STATUSES (it's not "open" for
+#  gluing/routing purposes - see add_message's reopen check), but it's very
+#  much still closeable - in fact the one state CLOSED is directly reachable
+#  from, so a client-initiated close needs its own, wider set here.
+_CLOSEABLE_STATUSES = OPEN_TICKET_STATUSES | {TicketStatus.RESOLVED}
+
+
+def _menu_buttons_for(ticket: Ticket | None) -> list[list[dict]]:
+    """Main menu plus a "Закрыть заявку" row when there's a concrete
+    still-open ticket in context (client-initiated close, section 2
+    request) - the bare welcome message and the "Мои заявки" listing have
+    no single ticket to close, so they stay with `_main_menu_buttons()`."""
+    buttons = _main_menu_buttons()
+    if ticket is not None and TicketStatus(ticket.status) in _CLOSEABLE_STATUSES:
+        buttons.append([{"type": "callback", "text": "Закрыть заявку", "payload": f"close:{ticket.id}"}])
+    return buttons
+
+
 def _extract_link_mid(link: dict) -> str | None:
     """Reads a reply reference off an incoming message's `link` field.
     Confirmed live (2026-07-31, docs/decisions.md): MAX nests the original
@@ -279,6 +297,17 @@ def _resolve_reply_target(db: Session, ticket_id: int, reply_to_mid: str | None)
     return parent.id if parent else None
 
 
+def _acknowledge_gluing(config: MaxConfig, chat_id: str, ticket: Ticket) -> None:
+    """The silent-gluing path used to send nothing back at all, leaving the
+    client with no visible confirmation the message arrived and no way to
+    tell they could switch away - the exact confusion flagged live testing
+    ("как выйти из диалога заявки, как снова открыть список заявок",
+    docs/decisions.md). A one-line ack + the same main menu buttons used
+    everywhere else fixes both without a special "exit" concept: switching
+    tickets already works via "Мои заявки", it just needed to stay visible."""
+    _send(config, chat_id, f"Принято по заявке {ticket.display_number}.", buttons=_menu_buttons_for(ticket))
+
+
 def _append_message(db: Session, ticket: Ticket, contact: Contact, parsed: ParsedUpdate, ambiguous: bool = False) -> Message:
     message = messages_service.add_message(
         db,
@@ -343,7 +372,12 @@ def _create_ticket_from_text(
     db.commit()
     parent = db.get(Ticket, parent_ticket_id) if parent_ticket_id is not None else None
     parent_note = f" и связана с {parent.display_number}" if parent else ""
-    _send(config, parsed.chat_id, f"Заявка {ticket.display_number} создана{parent_note}, мы уже работаем над ней.")
+    _send(
+        config,
+        parsed.chat_id,
+        f"Заявка {ticket.display_number} создана{parent_note}, мы уже работаем над ней.",
+        buttons=_menu_buttons_for(ticket),
+    )
     return ticket
 
 
@@ -436,6 +470,7 @@ def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState
         if active is not None and TicketStatus(active.status) in OPEN_TICKET_STATUSES:
             _append_message(db, active, contact, parsed)
             db.commit()
+            _acknowledge_gluing(config, parsed.chat_id, active)
             return
         state.active_ticket_id = None
 
@@ -445,6 +480,7 @@ def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState
         db.add(state)
         _append_message(db, open_tickets[0], contact, parsed)
         db.commit()
+        _acknowledge_gluing(config, parsed.chat_id, open_tickets[0])
         return
 
     if len(open_tickets) > 1:
@@ -457,6 +493,7 @@ def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState
             db.add(state)
             _append_message(db, open_tickets[0], contact, parsed, ambiguous=True)
             db.commit()
+            _acknowledge_gluing(config, parsed.chat_id, open_tickets[0])
             return
         state.awaiting_ticket_choice = True
         db.add(state)
@@ -481,11 +518,49 @@ def _record_csat(db: Session, config: MaxConfig, ticket_id: int, rating: int, ch
     _send(config, chat_id, "Спасибо за оценку!")
 
 
+_PRE_RESOLUTION_STATUSES = (
+    TicketStatus.NEW,
+    TicketStatus.ASSIGNED,
+    TicketStatus.WAITING_CUSTOMER,
+    TicketStatus.WAITING_THIRD_PARTY,
+)
+
+
+def _close_via_client(db: Session, ticket: Ticket) -> Ticket:
+    """Client-initiated close ("Закрыть заявку" в MAX, по запросу заказчика).
+    CLOSED is reachable only from RESOLVED (ALLOWED_TRANSITIONS), so this
+    chains the same one-hop transitions transition_status already validates
+    - IN_PROGRESS -> RESOLVED -> CLOSED, hopping through IN_PROGRESS first
+    if needed - rather than a special-cased jump that would bypass SLA/audit
+    bookkeeping. Accepted trade-off: the client sees each hop's own status
+    notification plus the CSAT request, not one single message."""
+    status = TicketStatus(ticket.status)
+    if status in _PRE_RESOLUTION_STATUSES:
+        ticket = tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
+        status = TicketStatus.IN_PROGRESS
+    if status == TicketStatus.IN_PROGRESS:
+        ticket = tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
+    if TicketStatus(ticket.status) == TicketStatus.RESOLVED:
+        ticket = tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
+    return ticket
+
+
 def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> None:
     payload = parsed.callback_payload
 
     if payload == "cmd:my_tickets":
         _send_my_tickets(db, config, contact, parsed.chat_id)
+        return
+
+    if payload.startswith("close:"):
+        ticket = db.get(Ticket, int(payload.split(":", 1)[1]))
+        if ticket is None or ticket.contact_id != contact.id:
+            _send(config, parsed.chat_id, "Заявка не найдена.")
+            return
+        if TicketStatus(ticket.status) not in _CLOSEABLE_STATUSES:
+            _send(config, parsed.chat_id, f"Заявка {ticket.display_number} уже закрыта.")
+            return
+        _close_via_client(db, ticket)
         return
 
     if payload in ("new_ticket", "cmd:new_ticket"):
@@ -520,7 +595,12 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
         state.awaiting_ticket_choice = False
         db.add(state)
         db.commit()
-        _send(config, parsed.chat_id, f"Переключено на {ticket.display_number} — {ticket.subject}. Пишите сюда.")
+        _send(
+            config,
+            parsed.chat_id,
+            f"Переключено на {ticket.display_number} — {ticket.subject}. Пишите сюда.",
+            buttons=_menu_buttons_for(ticket),
+        )
         return
 
     if payload.startswith("csat:"):
@@ -676,15 +756,14 @@ def try_send_outbound(db: Session, ticket: Ticket, message: Message) -> None:
     try:
         # MAX doesn't render the registered /me/commands as a visible menu on
         # every client (confirmed live - docs/decisions.md), so the menu
-        # buttons ride along on every engineer reply instead: the one point
-        # in an ongoing conversation where the client reliably gets a fresh
-        # message to tap on, without a silent ack cluttering routine gluing.
+        # buttons ride along on every engineer reply too, same as the
+        # gluing ack (_acknowledge_gluing).
         response = max_client.send_message(
             config.base_url,
             config.token,
             state.chat_id,
             message.body,
-            buttons=_main_menu_buttons(),
+            buttons=_menu_buttons_for(ticket),
             reply_to_mid=reply_to_mid,
         )
         sent_mid = ((response.get("message") or {}).get("body") or {}).get("mid")

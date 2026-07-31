@@ -257,6 +257,7 @@ def test_first_message_from_new_contact_creates_ticket(db: Session, max_enabled,
 
 def test_second_message_attaches_to_active_ticket(db: Session, max_enabled, _fake_send):
     max_channel.handle_update(db, _text_update(user_id="u11", chat_id="c11", text="Первое сообщение"))
+    _fake_send.clear()
     max_channel.handle_update(db, _text_update(user_id="u11", chat_id="c11", text="Второе сообщение"))
 
     contact = db.query(Contact).filter(Contact.max_id == "u11").first()
@@ -264,6 +265,14 @@ def test_second_message_attaches_to_active_ticket(db: Session, max_enabled, _fak
     assert len(tickets) == 1  # no duplicate ticket created
     messages = db.query(Message).filter(Message.ticket_id == tickets[0].id, Message.direction == MessageDirection.INBOUND).all()
     assert len(messages) == 2
+
+    # Silent gluing used to send nothing back - confusing live testing
+    # ("как выйти из диалога, как снова открыть список", docs/decisions.md).
+    # Now it acks with the main menu so switching stays discoverable.
+    assert len(_fake_send) == 1
+    assert tickets[0].display_number in _fake_send[0]["text"]
+    payloads = {row[0]["payload"] for row in _fake_send[0]["buttons"]}
+    assert payloads == {"cmd:my_tickets", "cmd:new_ticket", f"close:{tickets[0].id}"}
 
 
 def test_multiple_open_tickets_prompts_choice_then_switches(db: Session, max_enabled, contact: Contact, _fake_send):
@@ -533,7 +542,7 @@ def test_try_send_outbound_uses_known_chat(db: Session, max_enabled, contact: Co
     # Menu buttons ride along on every engineer reply - the /me/commands
     # menu isn't visible on every MAX client (docs/decisions.md).
     payloads = {row[0]["payload"] for row in _fake_send[0]["buttons"]}
-    assert payloads == {"cmd:my_tickets", "cmd:new_ticket"}
+    assert payloads == {"cmd:my_tickets", "cmd:new_ticket", f"close:{ticket.id}"}
 
 
 def test_inbound_reply_resolves_to_local_message(db: Session, max_enabled, _fake_send):
@@ -584,3 +593,55 @@ def test_try_send_outbound_without_known_chat_does_not_raise(db: Session, max_en
     db.add(msg)
     db.commit()
     max_channel.try_send_outbound(db, ticket, msg)  # no ChannelConversationState exists - must not raise
+
+
+# --- client-initiated close ("Закрыть заявку") -------------------------------------------------------
+
+
+def test_menu_buttons_offer_close_only_for_closeable_tickets(db: Session, contact: Contact):
+    payload = TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.MAX, subject="Заявка", manual_priority=Priority.P3, manual_priority_reason="test")
+    ticket = tickets_service.create_ticket(db, payload, actor=None)
+
+    payloads = {row[0]["payload"] for row in max_channel._menu_buttons_for(ticket)}
+    assert f"close:{ticket.id}" in payloads
+
+    tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
+    tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
+    payloads = {row[0]["payload"] for row in max_channel._menu_buttons_for(ticket)}
+    assert f"close:{ticket.id}" in payloads  # RESOLVED isn't in OPEN_TICKET_STATUSES but is still closeable
+
+    tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
+    payloads = {row[0]["payload"] for row in max_channel._menu_buttons_for(ticket)}
+    assert f"close:{ticket.id}" not in payloads
+
+    assert max_channel._menu_buttons_for(None) == max_channel._main_menu_buttons()
+
+
+def test_close_callback_chains_new_ticket_all_the_way_to_closed(db: Session, max_enabled, contact: Contact, _fake_send):
+    contact.max_id = "u-close1"
+    db.commit()
+    max_channel.handle_update(db, _text_update(user_id="u-close1", chat_id="c-close1", text="Проблема"))
+    ticket = db.query(Ticket).filter(Ticket.contact_id == contact.id).first()
+    assert TicketStatus(ticket.status) == TicketStatus.NEW
+
+    max_channel.handle_update(db, _callback_update(user_id="u-close1", chat_id="c-close1", payload=f"close:{ticket.id}"))
+
+    db.refresh(ticket)
+    assert TicketStatus(ticket.status) == TicketStatus.CLOSED
+    assert ticket.resolved_at is not None
+    assert ticket.closed_at is not None
+    assert ticket.csat_requested_at is not None  # request_csat fires on the final hop, same as a staff-driven close
+
+
+def test_close_callback_on_already_closed_ticket_is_a_no_op(db: Session, max_enabled, contact: Contact, _fake_send):
+    contact.max_id = "u-close2"
+    db.commit()
+    payload = TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.MAX, subject="Заявка", manual_priority=Priority.P3, manual_priority_reason="test")
+    ticket = tickets_service.create_ticket(db, payload, actor=None)
+    tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
+    tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
+    tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
+
+    max_channel.handle_update(db, _callback_update(user_id="u-close2", chat_id="c-close2", payload=f"close:{ticket.id}"))
+
+    assert any("уже закрыта" in s["text"] for s in _fake_send)
