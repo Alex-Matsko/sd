@@ -2,7 +2,15 @@ FROM python:3.12-slim
 
 WORKDIR /srv
 
-RUN apt-get update && apt-get install -y --no-install-recommends libpq5 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libpq5 ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# MAX Bot API (platform-api2.max.ru, Этап 5) serves a certificate chain
+# rooted at the Russian state CA (Минцифры), which isn't in the standard
+# Mozilla/Debian trust store - without this, every outbound call from
+# services/max_client.py fails TLS verification. The intermediate Sub CA is
+# already sent by the server during the handshake; only the root is needed.
+COPY certs/russian-trusted-root-ca.pem /usr/local/share/ca-certificates/russian-trusted-root-ca.crt
+RUN update-ca-certificates
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

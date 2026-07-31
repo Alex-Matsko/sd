@@ -10,9 +10,23 @@ inbound shapes is isolated in `max_channel.py` so a field-name correction
 there doesn't ripple elsewhere.
 """
 
+import os
+
 import httpx
 
 DEFAULT_BASE_URL = "https://platform-api2.max.ru"
+
+# platform-api2.max.ru's certificate chains to the Russian state CA
+# (Минцифры) - installed into the OS trust store at image build time
+# (Dockerfile: certs/russian-trusted-root-ca.pem + update-ca-certificates).
+# httpx does NOT use the OS store by default - it bundles its own copy of
+# certifi's Mozilla list and verifies against that instead - so it has to be
+# pointed at the OS bundle explicitly or every call here fails with
+# "unable to get local issuer certificate" even though the cert is trusted.
+# Falls back to httpx's default (certifi) outside this Docker image, e.g. a
+# bare local dev run.
+_SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+VERIFY = _SYSTEM_CA_BUNDLE if os.path.exists(_SYSTEM_CA_BUNDLE) else True
 
 
 class MaxApiError(RuntimeError):
@@ -32,7 +46,7 @@ def get_updates(
         params["marker"] = marker
     # A little slack over the server-side long-poll timeout so the HTTP client
     # doesn't cut the connection before MAX itself would time out the poll.
-    with httpx.Client(base_url=base_url, timeout=timeout + 10) as client:
+    with httpx.Client(base_url=base_url, timeout=timeout + 10, verify=VERIFY) as client:
         response = client.get("/updates", params=params, headers=_headers(token))
     if response.status_code != 200:
         raise MaxApiError(f"GET /updates -> {response.status_code}: {response.text[:500]}")
@@ -41,13 +55,17 @@ def get_updates(
 
 
 def send_message(base_url: str, token: str, chat_id: str, text: str, buttons: list[list[dict]] | None = None) -> dict:
-    """POST /messages - plain text, optionally with an inline_keyboard attachment
-    (buttons: rows of {"type": "callback", "text": ..., "payload": ...})."""
-    payload: dict = {"text": text, "chat_id": chat_id}
+    """POST /messages?chat_id=... - the recipient is a query parameter, not a
+    body field (verified against a live bot: putting chat_id in the JSON body
+    - as the public docs suggested - gets a 200-looking-shaped but actually
+    400 "Unknown recipient" every time). Body carries only the content: text,
+    optionally an inline_keyboard attachment (buttons: rows of
+    {"type": "callback", "text": ..., "payload": ...})."""
+    payload: dict = {"text": text}
     if buttons:
         payload["attachments"] = [{"type": "inline_keyboard", "payload": {"buttons": buttons}}]
-    with httpx.Client(base_url=base_url, timeout=15) as client:
-        response = client.post("/messages", json=payload, headers=_headers(token))
+    with httpx.Client(base_url=base_url, timeout=15, verify=VERIFY) as client:
+        response = client.post("/messages", params={"chat_id": chat_id}, json=payload, headers=_headers(token))
     if response.status_code not in (200, 201):
         raise MaxApiError(f"POST /messages -> {response.status_code}: {response.text[:500]}")
     return response.json()

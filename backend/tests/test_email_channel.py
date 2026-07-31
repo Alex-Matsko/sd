@@ -416,17 +416,20 @@ def test_integration_settings_secrets_never_round_trip_plaintext(db: Session):
 
 
 def test_integration_settings_clearing_secret(db: Session):
+    # Channel.PHONE (Plusofon) isn't built/configured yet - unlike MAX, which
+    # may carry a real bot_token in the shared dev database (docs/decisions.md)
+    # and would make secret_keys_set assertions here flaky.
     setting = integration_settings.upsert(
-        db, Channel.MAX, IntegrationSettingUpdate(secrets={"api_key": "value"})
+        db, Channel.PHONE, IntegrationSettingUpdate(secrets={"api_key": "value"})
     )
     assert integration_settings.to_read(setting).secret_keys_set == ["api_key"]
 
-    setting = integration_settings.upsert(db, Channel.MAX, IntegrationSettingUpdate(secrets={"api_key": None}))
+    setting = integration_settings.upsert(db, Channel.PHONE, IntegrationSettingUpdate(secrets={"api_key": None}))
     assert integration_settings.to_read(setting).secret_keys_set == []
 
 
 def test_integration_settings_omitted_secret_key_is_unchanged(db: Session):
-    integration_settings.upsert(db, Channel.MAX, IntegrationSettingUpdate(secrets={"api_key": "value"}))
-    setting = integration_settings.upsert(db, Channel.MAX, IntegrationSettingUpdate(config={"poll_interval_seconds": 15}))
+    integration_settings.upsert(db, Channel.PHONE, IntegrationSettingUpdate(secrets={"api_key": "value"}))
+    setting = integration_settings.upsert(db, Channel.PHONE, IntegrationSettingUpdate(config={"poll_interval_seconds": 15}))
     assert integration_settings.to_read(setting).secret_keys_set == ["api_key"]
     assert integration_settings.decrypt_secret(setting, "api_key") == "value"
