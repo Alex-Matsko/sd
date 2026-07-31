@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContact, listContacts, listOrganizations } from "../../api/endpoints";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createContact, listContacts, listOrganizations, mergeContact } from "../../api/endpoints";
 import { EmptyState, ErrorBanner, Loading } from "../../components/ui";
+import type { Contact } from "../../api/types";
 
 export function ContactsPage() {
   const qc = useQueryClient();
   const [showModal, setShowModal] = useState(false);
+  const [mergingContact, setMergingContact] = useState<Contact | null>(null);
   const orgsQuery = useQuery({ queryKey: ["organizations"], queryFn: listOrganizations });
   const contactsQuery = useQuery({ queryKey: ["contacts-all"], queryFn: () => listContacts() });
 
@@ -30,23 +32,30 @@ export function ContactsPage() {
       {contacts.length === 0 && <EmptyState text="Контактов пока нет" />}
       {contacts.length > 0 && (
         <div className="list">
-          <div className="list-head" style={{ gridTemplateColumns: "1.8fr 1.6fr 1.4fr 1fr 90px" }}>
+          <div className="list-head" style={{ gridTemplateColumns: "1.8fr 1.6fr 1.4fr 1fr 60px 110px" }}>
             <span>Контакт</span>
             <span>Организация</span>
             <span>Email</span>
             <span>Телефон</span>
             <span>VIP</span>
+            <span></span>
           </div>
           {contacts.map((c) => (
-            <div className="list-row" style={{ gridTemplateColumns: "1.8fr 1.6fr 1.4fr 1fr 90px" }} key={c.id}>
+            <div className="list-row" style={{ gridTemplateColumns: "1.8fr 1.6fr 1.4fr 1fr 60px 110px" }} key={c.id}>
               <span className="subject">
                 {c.full_name}
                 {c.position && <span className="muted"> · {c.position}</span>}
+                {!c.is_confirmed && <span className="muted"> · не подтверждён</span>}
               </span>
               <span>{orgsById.get(c.organization_id)?.name ?? "—"}</span>
               <span className="muted">{c.emails[0]?.email ?? "—"}</span>
               <span className="muted">{c.phones[0]?.phone ?? "—"}</span>
               <span>{c.is_vip ? "★" : ""}</span>
+              <span>
+                <button className="btn-link" onClick={() => setMergingContact(c)}>
+                  Объединить
+                </button>
+              </span>
             </div>
           ))}
         </div>
@@ -62,6 +71,75 @@ export function ContactsPage() {
           }}
         />
       )}
+
+      {mergingContact && (
+        <MergeContactModal
+          contact={mergingContact}
+          candidates={contacts.filter((c) => c.id !== mergingContact.id)}
+          onClose={() => setMergingContact(null)}
+          onMerged={() => {
+            setMergingContact(null);
+            qc.invalidateQueries({ queryKey: ["contacts-all"] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function MergeContactModal({
+  contact,
+  candidates,
+  onClose,
+  onMerged,
+}: {
+  contact: Contact;
+  candidates: Contact[];
+  onClose: () => void;
+  onMerged: () => void;
+}) {
+  const [targetId, setTargetId] = useState<number | null>(candidates[0]?.id ?? null);
+
+  const mergeMutation = useMutation({
+    mutationFn: () => mergeContact(contact.id, targetId!),
+    onSuccess: onMerged,
+  });
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3>Объединить контакт</h3>
+          <button className="icon-btn" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <div className="modal-body">
+          <p className="muted">
+            Заявки, сообщения и переписка контакта «{contact.full_name}» будут перенесены на выбранный контакт, а сам
+            он — удалён. Действие необратимо.
+          </p>
+          {mergeMutation.isError && <ErrorBanner message={(mergeMutation.error as Error).message} />}
+          <div className="form-row">
+            <label className="form-label">Объединить с</label>
+            <select value={targetId ?? ""} onChange={(e) => setTargetId(Number(e.target.value))}>
+              {candidates.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.full_name} {c.emails[0] ? `(${c.emails[0].email})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn btn-ghost" onClick={onClose}>
+            Отмена
+          </button>
+          <button className="btn btn-primary" disabled={!targetId || mergeMutation.isPending} onClick={() => mergeMutation.mutate()}>
+            Объединить
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -73,6 +73,9 @@ export function createContact(payload: {
 export function updateContact(id: number, payload: Partial<Contact>) {
   return apiRequest<Contact>(`/contacts/${id}`, { method: "PATCH", body: payload });
 }
+export function mergeContact(contactId: number, intoContactId: number) {
+  return apiRequest<Contact>(`/contacts/${contactId}/merge`, { method: "POST", body: { into_contact_id: intoContactId } });
+}
 
 // --- Contracts ---
 export function listContracts(organizationId?: number) {

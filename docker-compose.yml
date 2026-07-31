@@ -54,6 +54,23 @@ services:
       app:
         condition: service_healthy
 
+  # Static SPA build, served by its own nginx on a separate port - kept
+  # separate from the API's nginx above rather than merged onto the same
+  # port, because the backend's routers all live at root paths (/tickets,
+  # /users, ...) with no /api prefix, which would collide with the SPA's own
+  # client-side routes of the same names (see docs/decisions.md).
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${FRONTEND_API_BASE_URL:-http://localhost:8080}
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8081}:80"
+    depends_on:
+      app:
+        condition: service_healthy
+
 volumes:
   db_data:
   attachments:

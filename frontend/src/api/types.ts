@@ -309,6 +309,11 @@ export interface MaxChannelConfig {
   poll_timeout_seconds?: number;
 }
 
+export interface TelegramChannelConfig {
+  base_url?: string;
+  poll_timeout_seconds?: number;
+}
+
 export interface Attachment {
   id: number;
   filename: string;

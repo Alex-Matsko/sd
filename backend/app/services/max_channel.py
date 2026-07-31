@@ -27,7 +27,7 @@ from app.core.enums import (
     TicketType,
 )
 from app.models.channel_conversation_state import ChannelConversationState
-from app.models.contact import Contact
+from app.models.contact import Contact, ContactPhone
 from app.models.message import Message
 from app.models.ticket import Ticket
 from app.models.user import User
@@ -37,33 +37,18 @@ from app.services import attachments as attachments_service
 from app.services import integration_settings
 from app.services import max_client
 from app.services import messages as messages_service
+from app.services import messenger_common
 from app.services import tickets as tickets_service
+from app.services.messenger_common import (
+    MY_TICKETS_COMMANDS,
+    NEW_TICKET_COMMANDS,
+    START_COMMANDS,
+    STATUS_LABELS_RU as _STATUS_LABELS_RU,
+    WELCOME_TEXT,
+)
 from app.services.unknown_queue import get_or_create_unknown_organization
 
 logger = logging.getLogger("app.max_channel")
-
-WELCOME_TEXT = (
-    "Здравствуйте! Это бот службы поддержки «Открытые Горизонты». Опишите проблему одним сообщением - "
-    "я создам заявку. Команда «Мои заявки» покажет ваши текущие обращения."
-)
-NEW_TICKET_COMMANDS = {"/new", "новая заявка", "создать заявку", "создать новую"}
-MY_TICKETS_COMMANDS = {"/tickets", "мои заявки", "мои обращения"}
-# `bot_started` only fires once, the first time a user ever opens the bot
-# (verified against a live bot: typing "/start" again in an existing dialog
-# arrives as an ordinary message_created, not a fresh bot_started) - so a
-# returning client needs a text command to bring the menu back up too.
-START_COMMANDS = {"/start", "start", "старт", "меню", "/menu"}
-
-_STATUS_LABELS_RU = {
-    TicketStatus.NEW: "новая",
-    TicketStatus.ASSIGNED: "назначена",
-    TicketStatus.IN_PROGRESS: "в работе",
-    TicketStatus.WAITING_CUSTOMER: "ждём вас",
-    TicketStatus.WAITING_THIRD_PARTY: "ждём третью сторону",
-    TicketStatus.RESOLVED: "решена",
-    TicketStatus.CLOSED: "закрыта",
-    TicketStatus.CANCELLED: "отменена",
-}
 
 
 @dataclass
@@ -93,20 +78,13 @@ def _main_menu_buttons() -> list[list[dict]]:
     ]
 
 
-#  RESOLVED is deliberately not in OPEN_TICKET_STATUSES (it's not "open" for
-#  gluing/routing purposes - see add_message's reopen check), but it's very
-#  much still closeable - in fact the one state CLOSED is directly reachable
-#  from, so a client-initiated close needs its own, wider set here.
-_CLOSEABLE_STATUSES = OPEN_TICKET_STATUSES | {TicketStatus.RESOLVED}
-
-
 def _menu_buttons_for(ticket: Ticket | None) -> list[list[dict]]:
     """Main menu plus a "Закрыть заявку" row when there's a concrete
     still-open ticket in context (client-initiated close, section 2
     request) - the bare welcome message and the "Мои заявки" listing have
     no single ticket to close, so they stay with `_main_menu_buttons()`."""
     buttons = _main_menu_buttons()
-    if ticket is not None and TicketStatus(ticket.status) in _CLOSEABLE_STATUSES:
+    if ticket is not None and TicketStatus(ticket.status) in messenger_common.CLOSEABLE_STATUSES:
         buttons.append([{"type": "callback", "text": "Закрыть заявку", "payload": f"close:{ticket.id}"}])
     return buttons
 
@@ -225,6 +203,19 @@ def _get_or_create_state(db: Session, external_user_id: str, chat_id: str) -> Ch
     return state
 
 
+def _create_unconfirmed_contact(db: Session, external_user_id: str, display_name: str) -> Contact:
+    org = get_or_create_unknown_organization(db)
+    contact = Contact(
+        organization_id=org.id,
+        full_name=display_name or "Пользователь MAX",
+        max_id=external_user_id,
+        is_confirmed=False,
+    )
+    db.add(contact)
+    db.flush()
+    return contact
+
+
 def _resolve_contact(db: Session, state: ChannelConversationState, parsed: ParsedUpdate) -> tuple[Contact, bool]:
     if state.contact_id is not None:
         contact = db.get(Contact, state.contact_id)
@@ -237,18 +228,34 @@ def _resolve_contact(db: Session, state: ChannelConversationState, parsed: Parse
         db.add(state)
         return existing, False
 
-    org = get_or_create_unknown_organization(db)
-    contact = Contact(
-        organization_id=org.id,
-        full_name=parsed.display_name or "Пользователь MAX",
-        max_id=parsed.external_user_id,
-        is_confirmed=False,
-    )
-    db.add(contact)
-    db.flush()
+    contact = _create_unconfirmed_contact(db, parsed.external_user_id, parsed.display_name)
     state.contact_id = contact.id
     db.add(state)
     return contact, True
+
+
+def _handle_link_phone_reply(db: Session, config: MaxConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> None:
+    """Cross-channel identity matching (по запросу заказчика), non-blocking
+    variant: unlike gating every first message on a phone number (tried and
+    reverted - would add friction to the overwhelmingly common case of a
+    genuinely new contact, see docs/decisions.md), this only runs when the
+    client explicitly opts in via LINK_PHONE_COMMANDS. A match merges this
+    (possibly already ticket-bearing) contact into the existing one instead
+    of the other way round - the client's current conversation continues
+    against whichever contact survives."""
+    state.awaiting_phone_confirmation = False
+    db.add(state)
+    matched = messenger_common.find_contact_by_phone(db, parsed.text)
+    if matched is not None and matched.id != contact.id:
+        messenger_common.merge_contacts(db, from_contact=contact, into_contact=matched)
+        state.contact_id = matched.id
+        db.add(state)
+        db.commit()
+        _send(config, parsed.chat_id, "Готово! Ваши предыдущие обращения объединены с этой перепиской.")
+        return
+    db.add(ContactPhone(contact_id=contact.id, phone=parsed.text.strip(), is_primary=not contact.phones))
+    db.commit()
+    _send(config, parsed.chat_id, "Спасибо, сохранили номер. Если найдём совпадение с другим каналом — объединим обращения.")
 
 
 def _list_open_tickets(db: Session, contact: Contact) -> list[Ticket]:
@@ -372,10 +379,14 @@ def _create_ticket_from_text(
     db.commit()
     parent = db.get(Ticket, parent_ticket_id) if parent_ticket_id is not None else None
     parent_note = f" и связана с {parent.display_number}" if parent else ""
+    identity_hint = (
+        "" if contact.is_confirmed else
+        "\n\nЕсли вы уже писали нам из другого мессенджера, отправьте «связать телефон» - объединим историю обращений."
+    )
     _send(
         config,
         parsed.chat_id,
-        f"Заявка {ticket.display_number} создана{parent_note}, мы уже работаем над ней.",
+        f"Заявка {ticket.display_number} создана{parent_note}, мы уже работаем над ней.{identity_hint}",
         buttons=_menu_buttons_for(ticket),
     )
     return ticket
@@ -420,6 +431,7 @@ def _cancel_pending_ticket_flow(state: ChannelConversationState) -> None:
     state.awaiting_new_ticket_text = False
     state.awaiting_revive_text = False
     state.revive_parent_ticket_id = None
+    state.awaiting_phone_confirmation = False
 
 
 def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> None:
@@ -447,6 +459,18 @@ def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState
         db.add(state)
         db.commit()
         _send(config, parsed.chat_id, "Опишите проблему одним сообщением - я создам заявку.")
+        return
+
+    if text_lower in messenger_common.LINK_PHONE_COMMANDS:
+        _cancel_pending_ticket_flow(state)
+        state.awaiting_phone_confirmation = True
+        db.add(state)
+        db.commit()
+        _send(config, parsed.chat_id, "Укажите, пожалуйста, номер телефона, под которым вы писали нам ранее.")
+        return
+
+    if state.awaiting_phone_confirmation:
+        _handle_link_phone_reply(db, config, state, contact, parsed)
         return
 
     if state.awaiting_revive_text:
@@ -518,33 +542,6 @@ def _record_csat(db: Session, config: MaxConfig, ticket_id: int, rating: int, ch
     _send(config, chat_id, "Спасибо за оценку!")
 
 
-_PRE_RESOLUTION_STATUSES = (
-    TicketStatus.NEW,
-    TicketStatus.ASSIGNED,
-    TicketStatus.WAITING_CUSTOMER,
-    TicketStatus.WAITING_THIRD_PARTY,
-)
-
-
-def _close_via_client(db: Session, ticket: Ticket) -> Ticket:
-    """Client-initiated close ("Закрыть заявку" в MAX, по запросу заказчика).
-    CLOSED is reachable only from RESOLVED (ALLOWED_TRANSITIONS), so this
-    chains the same one-hop transitions transition_status already validates
-    - IN_PROGRESS -> RESOLVED -> CLOSED, hopping through IN_PROGRESS first
-    if needed - rather than a special-cased jump that would bypass SLA/audit
-    bookkeeping. Accepted trade-off: the client sees each hop's own status
-    notification plus the CSAT request, not one single message."""
-    status = TicketStatus(ticket.status)
-    if status in _PRE_RESOLUTION_STATUSES:
-        ticket = tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
-        status = TicketStatus.IN_PROGRESS
-    if status == TicketStatus.IN_PROGRESS:
-        ticket = tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
-    if TicketStatus(ticket.status) == TicketStatus.RESOLVED:
-        ticket = tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
-    return ticket
-
-
 def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> None:
     payload = parsed.callback_payload
 
@@ -557,10 +554,10 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
         if ticket is None or ticket.contact_id != contact.id:
             _send(config, parsed.chat_id, "Заявка не найдена.")
             return
-        if TicketStatus(ticket.status) not in _CLOSEABLE_STATUSES:
+        if TicketStatus(ticket.status) not in messenger_common.CLOSEABLE_STATUSES:
             _send(config, parsed.chat_id, f"Заявка {ticket.display_number} уже закрыта.")
             return
-        _close_via_client(db, ticket)
+        messenger_common.close_ticket_chain(db, ticket)
         return
 
     if payload in ("new_ticket", "cmd:new_ticket"):

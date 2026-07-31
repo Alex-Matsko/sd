@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_dispatcher_or_above
@@ -6,8 +7,13 @@ from app.db import get_db
 from app.models.contact import Contact, ContactEmail, ContactPhone
 from app.models.user import User
 from app.schemas.contact import ContactCreate, ContactRead, ContactUpdate
+from app.services import messenger_common
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
+
+
+class ContactMergeRequest(BaseModel):
+    into_contact_id: int
 
 
 @router.get("", response_model=list[ContactRead])
@@ -53,6 +59,30 @@ def get_contact(contact_id: int, db: Session = Depends(get_db), _: User = Depend
     if contact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Контакт не найден")
     return contact
+
+
+@router.post("/{contact_id}/merge", response_model=ContactRead)
+def merge_contact(
+    contact_id: int,
+    payload: ContactMergeRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_dispatcher_or_above),
+) -> Contact:
+    """Manual counterpart to the bot's opt-in "связать телефон" flow (по
+    запросу заказчика): a dispatcher who spots two Contact records that are
+    really the same person - e.g. one created automatically per messenger
+    channel before they were linked - merges `contact_id` into
+    `into_contact_id`. Moves tickets/messages/channel state, then removes
+    the now-empty duplicate; see messenger_common.merge_contacts."""
+    if contact_id == payload.into_contact_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Нельзя объединить контакт сам с собой")
+    from_contact = db.get(Contact, contact_id)
+    into_contact = db.get(Contact, payload.into_contact_id)
+    if from_contact is None or into_contact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Контакт не найден")
+    messenger_common.merge_contacts(db, from_contact=from_contact, into_contact=into_contact)
+    db.refresh(into_contact)
+    return into_contact
 
 
 @router.patch("/{contact_id}", response_model=ContactRead)

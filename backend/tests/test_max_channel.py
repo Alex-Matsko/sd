@@ -645,3 +645,41 @@ def test_close_callback_on_already_closed_ticket_is_a_no_op(db: Session, max_ena
     max_channel.handle_update(db, _callback_update(user_id="u-close2", chat_id="c-close2", payload=f"close:{ticket.id}"))
 
     assert any("уже закрыта" in s["text"] for s in _fake_send)
+
+
+# --- cross-channel identity matching ("связать телефон") -------------------------------------------------------
+
+
+def test_link_phone_merges_when_existing_contact_matches(db: Session, max_enabled, contact: Contact, _fake_send):
+    from app.models.contact import ContactPhone
+
+    contact.full_name = "Известный клиент"
+    db.add(ContactPhone(contact_id=contact.id, phone="+7 916 123-45-67", is_primary=True))
+    db.commit()
+
+    max_channel.handle_update(db, _text_update(user_id="u-link1", chat_id="c-link1", text="Проблема с 1С"))
+    new_contact = db.query(Contact).filter(Contact.max_id == "u-link1").first()
+    assert new_contact.id != contact.id
+    ticket = db.query(Ticket).filter(Ticket.contact_id == new_contact.id).first()
+
+    max_channel.handle_update(db, _text_update(user_id="u-link1", chat_id="c-link1", text="связать телефон"))
+    max_channel.handle_update(db, _text_update(user_id="u-link1", chat_id="c-link1", text="89161234567"))
+
+    assert db.get(Contact, new_contact.id) is None  # merged away
+    db.refresh(ticket)
+    assert ticket.contact_id == contact.id
+    db.refresh(contact)
+    assert contact.max_id == "u-link1"
+    assert any("объединены" in s["text"] for s in _fake_send)
+
+
+def test_link_phone_saves_number_when_no_match(db: Session, max_enabled, _fake_send):
+    max_channel.handle_update(db, _text_update(user_id="u-link2", chat_id="c-link2", text="Проблема"))
+    contact = db.query(Contact).filter(Contact.max_id == "u-link2").first()
+
+    max_channel.handle_update(db, _text_update(user_id="u-link2", chat_id="c-link2", text="связать телефон"))
+    max_channel.handle_update(db, _text_update(user_id="u-link2", chat_id="c-link2", text="+7 999 000-00-00"))
+
+    db.refresh(contact)
+    assert len(contact.phones) == 1
+    assert any("сохранили номер" in s["text"] for s in _fake_send)

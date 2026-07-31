@@ -121,14 +121,17 @@ def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, act
     ticket.status = new_status
     db.add(ticket)
 
-    # Messenger notifications (section 2.1/2.2) - no-op for channels without a
-    # messenger bot behind them yet. Deferred import: max_channel imports
-    # tickets_service.create_ticket.
-    from app.services import max_channel
+    # Messenger notifications (section 2.1/2.2) - each channel module no-ops
+    # for tickets on a different channel (see request_csat's own docstring),
+    # so calling both unconditionally is safe. Deferred imports: both channel
+    # modules import tickets_service.create_ticket.
+    from app.services import max_channel, telegram_channel
 
     if new_status == TicketStatus.CLOSED:
         max_channel.request_csat(db, ticket)
+        telegram_channel.request_csat(db, ticket)
     max_channel.notify_status_change(db, ticket, new_status)
+    telegram_channel.notify_status_change(db, ticket, new_status)
 
     audit.record(
         db,
@@ -153,9 +156,11 @@ def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: Use
         changed["assigned_engineer_id"] = {"from": ticket.assigned_engineer_id, "to": payload.assigned_engineer_id}
         ticket.assigned_engineer_id = payload.assigned_engineer_id
 
-        from app.services import max_channel
+        from app.services import max_channel, telegram_channel
 
-        max_channel.notify_assignment_change(db, ticket, db.get(User, payload.assigned_engineer_id))
+        assigned_engineer = db.get(User, payload.assigned_engineer_id)
+        max_channel.notify_assignment_change(db, ticket, assigned_engineer)
+        telegram_channel.notify_assignment_change(db, ticket, assigned_engineer)
 
     if payload.team_id is not None and payload.team_id != ticket.team_id:
         changed["team_id"] = {"from": ticket.team_id, "to": payload.team_id}

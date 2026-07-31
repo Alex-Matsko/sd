@@ -34,3 +34,10 @@ class ChannelConversationState(Base, TimestampMixin):
     # it - the next message becomes a new ticket linked via parent_ticket_id.
     awaiting_revive_text: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     revive_parent_ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"))
+    # Cross-channel identity matching (по запросу заказчика): set on this
+    # external user's very first message ever (contact_id still None), while
+    # we wait for a phone number to look up an existing Contact by - see
+    # messenger_common.find_contact_by_phone. Lets the same real person be
+    # recognized across MAX and Telegram instead of getting a duplicate
+    # Contact (and a separate ticket history) per channel.
+    awaiting_phone_confirmation: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

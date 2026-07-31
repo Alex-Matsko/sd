@@ -85,5 +85,9 @@ def add_message(
             from app.services import max_channel
 
             max_channel.try_send_outbound(db, ticket, message)
+        elif channel == Channel.TELEGRAM:
+            from app.services import telegram_channel
+
+            telegram_channel.try_send_outbound(db, ticket, message)
 
     return message
