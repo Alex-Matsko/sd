@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createMessage,
   createTimeEntry,
+  downloadAttachment,
   getOrganizationUsage,
   getTicket,
   getTicketHistory,
@@ -13,6 +14,7 @@ import {
   listTimeEntries,
   listUsers,
   updateTicket,
+  uploadAttachment,
 } from "../api/endpoints";
 import { ErrorBanner, Loading, PriorityTag, SlaTimerBadge, StatusTag, ChannelTag, WhoMini } from "../components/ui";
 import {
@@ -30,6 +32,12 @@ function truncate(text: string, max: number): string {
   return collapsed.length > max ? `${collapsed.slice(0, max)}…` : collapsed;
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
+}
+
 export function TicketDetailPage() {
   const { ticketId } = useParams();
   const id = Number(ticketId);
@@ -37,6 +45,7 @@ export function TicketDetailPage() {
   const [replyBody, setReplyBody] = useState("");
   const [replyDirection, setReplyDirection] = useState<MessageDirection>("outbound");
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [timeMinutes, setTimeMinutes] = useState(30);
   const [timeComment, setTimeComment] = useState("");
 
@@ -73,11 +82,23 @@ export function TicketDetailPage() {
   });
 
   const messageMutation = useMutation({
-    mutationFn: () =>
-      createMessage(id, { direction: replyDirection, body: replyBody.trim(), reply_to_message_id: replyTo?.id ?? null }),
+    mutationFn: async () => {
+      const message = await createMessage(id, {
+        direction: replyDirection,
+        body: replyBody.trim(),
+        reply_to_message_id: replyTo?.id ?? null,
+      });
+      // Attachments hang off a message, so the file can only go up once the
+      // message exists - hence upload-after-create rather than one request.
+      for (const file of pendingFiles) {
+        await uploadAttachment(id, message.id, file);
+      }
+      return message;
+    },
     onSuccess: () => {
       setReplyBody("");
       setReplyTo(null);
+      setPendingFiles([]);
       qc.invalidateQueries({ queryKey: ["ticket", id, "messages"] });
       qc.invalidateQueries({ queryKey: ["ticket", id] });
     },
@@ -162,6 +183,16 @@ export function TicketDetailPage() {
                       </div>
                     )}
                     <div className="message-body">{m.body}</div>
+                    {m.attachments.length > 0 && (
+                      <div className="message-attachments">
+                        {m.attachments.map((a) => (
+                          <button key={a.id} className="attachment-chip" onClick={() => downloadAttachment(id, a)}>
+                            <span className="attachment-name">{a.filename}</span>
+                            <span className="muted">{formatFileSize(a.size_bytes)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -187,8 +218,42 @@ export function TicketDetailPage() {
                 </label>
               </div>
               <textarea rows={3} value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Введите текст сообщения…" />
+              {pendingFiles.length > 0 && (
+                <div className="message-attachments">
+                  {pendingFiles.map((file, index) => (
+                    <span className="attachment-chip" key={`${file.name}-${index}`}>
+                      <span className="attachment-name">{file.name}</span>
+                      <span className="muted">{formatFileSize(file.size)}</span>
+                      <button
+                        className="btn-link"
+                        onClick={() => setPendingFiles((files) => files.filter((_, i) => i !== index))}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
               {messageMutation.isError && <ErrorBanner message={(messageMutation.error as Error).message} />}
               <div className="modal-foot" style={{ padding: 0, borderTop: "none" }}>
+                <label className="btn btn-ghost" style={{ cursor: "pointer" }}>
+                  Прикрепить файл
+                  <input
+                    type="file"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      // Read the FileList before resetting the input: the
+                      // state updater below runs later, by which point
+                      // clearing `value` has already emptied `e.target.files`.
+                      // (Resetting is what lets the same file be picked twice.)
+                      const chosen = Array.from(e.target.files ?? []);
+                      e.target.value = "";
+                      setPendingFiles((files) => [...files, ...chosen]);
+                    }}
+                  />
+                </label>
+                <div className="spacer" />
                 <button
                   className="btn btn-primary"
                   disabled={!replyBody.trim() || messageMutation.isPending}
@@ -266,6 +331,18 @@ export function TicketDetailPage() {
               <dd>{ticket.has_no_active_contract ? "Нет активного договора (тариф по умолчанию)" : "Активный договор"}</dd>
               <dt>Решена</dt>
               <dd>{formatDateTime(ticket.resolved_at)}</dd>
+              <dt>Оценка клиента</dt>
+              <dd>
+                {ticket.csat_rating ? (
+                  <>
+                    {"★".repeat(ticket.csat_rating)}
+                    <span className="muted">{"★".repeat(5 - ticket.csat_rating)}</span>{" "}
+                    <span className="muted">{ticket.csat_rating}/5</span>
+                  </>
+                ) : (
+                  <span className="muted">—</span>
+                )}
+              </dd>
             </dl>
           </div>
 

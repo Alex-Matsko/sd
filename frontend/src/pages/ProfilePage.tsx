@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchCurrentUser, requestTelegramLinkCode, unlinkTelegram } from "../api/auth";
+import { changeOwnPassword, fetchCurrentUser, requestTelegramLinkCode, unlinkTelegram } from "../api/auth";
 import { ErrorBanner, Loading } from "../components/ui";
 import { USER_ROLE_LABELS, formatDateTime } from "../lib/labels";
 
@@ -60,6 +60,8 @@ export function ProfilePage() {
         </dl>
       </div>
 
+      <PasswordPanel />
+
       <div className="panel" style={{ maxWidth: 520 }}>
         <div className="panel-head">
           <h2>Уведомления в Telegram</h2>
@@ -100,6 +102,71 @@ export function ProfilePage() {
             )}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function PasswordPanel() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [repeat, setRepeat] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const passwordMutation = useMutation({
+    mutationFn: () => changeOwnPassword(current, next),
+    onSuccess: () => {
+      setCurrent("");
+      setNext("");
+      setRepeat("");
+      setError(null);
+      setDone(true);
+    },
+    onError: (e) => {
+      setDone(false);
+      setError(e instanceof Error ? e.message : "Не удалось сменить пароль");
+    },
+  });
+
+  function submit() {
+    if (next.length < 8) {
+      setError("Новый пароль должен быть не короче 8 символов");
+      return;
+    }
+    if (next !== repeat) {
+      setError("Новый пароль и подтверждение не совпадают");
+      return;
+    }
+    setError(null);
+    passwordMutation.mutate();
+  }
+
+  return (
+    <div className="panel" style={{ maxWidth: 520 }}>
+      <div className="panel-head">
+        <h2>Смена пароля</h2>
+      </div>
+      {error && <ErrorBanner message={error} />}
+      {done && <p className="muted">Пароль изменён. Другие ваши сессии завершены.</p>}
+      <div className="form-row">
+        <label className="form-label">Текущий пароль</label>
+        <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+      </div>
+      <div className="form-grid">
+        <div className="form-row">
+          <label className="form-label">Новый пароль</label>
+          <input type="password" value={next} onChange={(e) => setNext(e.target.value)} />
+        </div>
+        <div className="form-row">
+          <label className="form-label">Повторите новый</label>
+          <input type="password" value={repeat} onChange={(e) => setRepeat(e.target.value)} />
+        </div>
+      </div>
+      <div className="modal-foot" style={{ padding: 0, borderTop: "none", justifyContent: "flex-start" }}>
+        <button className="btn btn-primary" disabled={!current || !next || passwordMutation.isPending} onClick={submit}>
+          Сменить пароль
+        </button>
       </div>
     </div>
   );

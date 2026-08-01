@@ -9,13 +9,14 @@ from app.api.deps import get_current_user
 from app.core.security import (
     create_access_token,
     generate_refresh_token,
+    hash_password,
     hash_refresh_token,
     verify_password,
 )
 from app.db import get_db
 from app.models.auth import RefreshToken
 from app.models.user import User
-from app.schemas.auth import RefreshRequest, TelegramLinkCodeRead, TokenResponse
+from app.schemas.auth import PasswordChangeRequest, RefreshRequest, TelegramLinkCodeRead, TokenResponse
 from app.schemas.user import UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -79,6 +80,25 @@ def logout(payload: RefreshRequest, db: Session = Depends(get_db)) -> None:
 @router.get("/me", response_model=UserRead)
 def me(user: User = Depends(get_current_user)) -> User:
     return user
+
+
+@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+def change_own_password(
+    payload: PasswordChangeRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> None:
+    """Self-service password change. Previously only a manager/admin could set
+    anyone's password via PATCH /users/{id}, which left an engineer with no way
+    to rotate their own - including off the seeded default (found in audit).
+    Revokes this user's refresh tokens so a stolen session can't outlive the
+    password it was issued against."""
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Текущий пароль указан неверно")
+    user.password_hash = hash_password(payload.new_password)
+    db.add(user)
+    db.query(RefreshToken).filter(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)).update(
+        {RefreshToken.revoked_at: datetime.now(timezone.utc)}
+    )
+    db.commit()
 
 
 @router.post("/me/telegram-link-code", response_model=TelegramLinkCodeRead)

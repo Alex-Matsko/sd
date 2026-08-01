@@ -1,6 +1,7 @@
-import { apiRequest } from "./client";
+import { apiDownload, apiRequest, apiUpload } from "./client";
 import type {
   Asset,
+  Attachment,
   AuditLogEntry,
   AutomationRule,
   BusinessCalendar,
@@ -231,6 +232,12 @@ export function createMessage(
   payload: { direction: string; body: string; channel?: string | null; reply_to_message_id?: number | null }
 ) {
   return apiRequest<Message>(`/tickets/${ticketId}/messages`, { method: "POST", body: payload });
+}
+export function uploadAttachment(ticketId: number, messageId: number, file: File) {
+  return apiUpload<Attachment>(`/tickets/${ticketId}/messages/${messageId}/attachments`, file);
+}
+export function downloadAttachment(ticketId: number, attachment: Attachment) {
+  return apiDownload(`/tickets/${ticketId}/attachments/${attachment.id}`, attachment.filename);
 }
 export function listTimeEntries(ticketId: number) {
   return apiRequest<TimeEntry[]>(`/tickets/${ticketId}/time-entries`);

@@ -211,6 +211,8 @@ export interface Ticket {
   resolved_at: string | null;
   sla_resolution_met: boolean | null;
   closed_at: string | null;
+  csat_rating: number | null;
+  csat_rated_at: string | null;
   created_at: string;
   updated_at: string;
   sla: TicketSlaView | null;

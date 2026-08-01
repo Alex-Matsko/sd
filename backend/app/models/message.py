@@ -35,11 +35,11 @@ class Message(Base):
     # native MAX reply references this by mid (-> reply_to_message_id), and
     # an outbound reply to a message that arrived via MAX needs the parent's
     # mid to build the native `link` MAX itself renders as a reply.
-    max_message_id: Mapped[str | None] = mapped_column(String(64))
+    max_message_id: Mapped[str | None] = mapped_column(String(64), index=True)
     # Same role as max_message_id, for Telegram's `message_id` - a plain
     # per-chat integer there (vs MAX's opaque `mid` string), used the same
     # way to resolve a reply in either direction (services/telegram_channel.py).
-    telegram_message_id: Mapped[int | None] = mapped_column(Integer)
+    telegram_message_id: Mapped[int | None] = mapped_column(Integer, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     ticket: Mapped["Ticket"] = relationship(back_populates="messages")

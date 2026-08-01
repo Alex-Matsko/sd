@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TokenResponse(BaseModel):
@@ -16,3 +16,8 @@ class RefreshRequest(BaseModel):
 class TelegramLinkCodeRead(BaseModel):
     code: str
     expires_at: datetime
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)

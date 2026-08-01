@@ -154,6 +154,17 @@ def _extract_attachments(message: dict) -> list[dict]:
     return attachments
 
 
+def _is_private_chat(chat: dict) -> bool:
+    """The support bot has `can_join_groups` enabled, so anyone can add it to a
+    group - where every message would otherwise be parsed as a client request
+    and turned into a ticket (found in audit). Support conversations are
+    one-to-one by design (identification is per-user), so only private chats
+    are processed. Absent `type` is treated as private: Telegram always sends
+    it, and refusing to answer on a shape we failed to read would be worse
+    than answering one stray group message."""
+    return chat.get("type", "private") == "private"
+
+
 def _extract_incoming(update: dict) -> ParsedUpdate | None:
     if "message" in update:
         message = update["message"] or {}
@@ -161,7 +172,7 @@ def _extract_incoming(update: dict) -> ParsedUpdate | None:
         chat = message.get("chat") or {}
         user_id = sender.get("id")
         chat_id = chat.get("id")
-        if user_id is None or chat_id is None:
+        if user_id is None or chat_id is None or not _is_private_chat(chat):
             return None
         reply_to = message.get("reply_to_message") or {}
         return ParsedUpdate(
@@ -182,7 +193,7 @@ def _extract_incoming(update: dict) -> ParsedUpdate | None:
         chat = message.get("chat") or {}
         user_id = sender.get("id")
         chat_id = chat.get("id")
-        if user_id is None or chat_id is None:
+        if user_id is None or chat_id is None or not _is_private_chat(chat):
             return None
         return ParsedUpdate(
             kind="callback",

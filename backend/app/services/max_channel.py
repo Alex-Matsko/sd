@@ -134,6 +134,16 @@ def save_marker(db: Session, marker: int | None) -> None:
     db.commit()
 
 
+def _is_dialog(recipient: dict) -> bool:
+    """Only one-to-one dialogs are treated as client conversations - a bot
+    added to a group chat would otherwise turn every message there into a
+    ticket (same guard as telegram_channel._is_private_chat). Real dialogs
+    report `chat_type: "dialog"` (confirmed live); a missing value is treated
+    as a dialog rather than dropped, so an unexpected shape never silences
+    the bot entirely."""
+    return recipient.get("chat_type", "dialog") == "dialog"
+
+
 def _extract_incoming(update: dict) -> ParsedUpdate | None:
     update_type = update.get("update_type")
 
@@ -144,7 +154,7 @@ def _extract_incoming(update: dict) -> ParsedUpdate | None:
         body = message.get("body") or {}
         user_id = sender.get("user_id")
         chat_id = recipient.get("chat_id")
-        if user_id is None or chat_id is None:
+        if user_id is None or chat_id is None or not _is_dialog(recipient):
             return None
         return ParsedUpdate(
             kind="text",

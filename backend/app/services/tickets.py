@@ -151,24 +151,31 @@ def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: Use
         transition_status(db, ticket, TicketStatus(payload.status), actor)
 
     changed: dict = {}
+    # "Field was sent as null" (clear it) vs "field wasn't sent at all" (leave
+    # it) - `is not None` alone can't tell those apart, which silently swallowed
+    # the UI's "Не назначено"/"Без команды" selections: the dropdown sent null,
+    # the request succeeded, and the assignee stayed put (found in audit).
+    provided = payload.model_fields_set
 
-    if payload.assigned_engineer_id is not None and payload.assigned_engineer_id != ticket.assigned_engineer_id:
+    if "assigned_engineer_id" in provided and payload.assigned_engineer_id != ticket.assigned_engineer_id:
         changed["assigned_engineer_id"] = {"from": ticket.assigned_engineer_id, "to": payload.assigned_engineer_id}
         ticket.assigned_engineer_id = payload.assigned_engineer_id
 
         from app.services import max_channel, telegram_channel
 
-        assigned_engineer = db.get(User, payload.assigned_engineer_id)
+        # Clearing the assignee notifies nobody - both channel helpers no-op
+        # on a None engineer, so unassigning stays silent for the client.
+        assigned_engineer = db.get(User, payload.assigned_engineer_id) if payload.assigned_engineer_id else None
         max_channel.notify_assignment_change(db, ticket, assigned_engineer)
         telegram_channel.notify_assignment_change(db, ticket, assigned_engineer)
 
-    if payload.team_id is not None and payload.team_id != ticket.team_id:
+    if "team_id" in provided and payload.team_id != ticket.team_id:
         changed["team_id"] = {"from": ticket.team_id, "to": payload.team_id}
         ticket.team_id = payload.team_id
 
-    if payload.category_id is not None:
+    if "category_id" in provided:
         ticket.category_id = payload.category_id
-    if payload.asset_id is not None:
+    if "asset_id" in provided:
         ticket.asset_id = payload.asset_id
     if payload.impact is not None:
         ticket.impact = payload.impact

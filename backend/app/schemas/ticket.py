@@ -86,6 +86,11 @@ class TicketRead(BaseModel):
     resolved_at: datetime | None
     sla_resolution_met: bool | None
     closed_at: datetime | None
+    # Client satisfaction captured by the messenger bots on closure - stored
+    # since Stage 5 but previously not exposed here, so the rating a client
+    # gave was invisible in the ticket card (only aggregated in Отчёты).
+    csat_rating: int | None
+    csat_rated_at: datetime | None
     created_at: datetime
     updated_at: datetime
     # Computed by services/sla.compute_view in the tickets router; not a model column.

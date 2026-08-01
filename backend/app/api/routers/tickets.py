@@ -1,6 +1,8 @@
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
@@ -151,6 +153,37 @@ async def upload_attachment(
     db.commit()
     db.refresh(attachment)
     return attachment
+
+
+@router.get("/{ticket_id}/attachments/{attachment_id}")
+def download_attachment(
+    ticket_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> FileResponse:
+    """Serves a stored attachment back. Without this, files arriving over
+    email/MAX/Telegram were written to disk and listed in the API but could
+    never be opened by anyone (found in audit). The attachment is resolved
+    through its message's ticket, so an id from another ticket 404s rather
+    than leaking a file across tickets."""
+    ticket = _get_ticket_or_404(db, ticket_id)
+    attachment = (
+        db.query(Attachment)
+        .join(Message, Message.id == Attachment.message_id)
+        .filter(Attachment.id == attachment_id, Message.ticket_id == ticket.id)
+        .first()
+    )
+    if attachment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Вложение не найдено")
+    path = Path(attachment.stored_path)
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Файл вложения недоступен на диске")
+    return FileResponse(
+        path,
+        filename=attachment.filename,
+        media_type=attachment.mime_type or "application/octet-stream",
+    )
 
 
 @router.get("/{ticket_id}/history", response_model=list[AuditLogRead])
