@@ -19,7 +19,7 @@ import traceback
 
 from app.config import settings
 from app.db import SessionLocal
-from app.services import automation, email_channel, max_channel, sla, telegram_channel
+from app.services import automation, email_channel, max_channel, schedules, sla, telegram_channel
 
 TICK_SECONDS = 5
 EMAIL_POLL_FALLBACK_SECONDS = 30  # used while the email channel isn't configured/enabled
@@ -39,6 +39,17 @@ def run_automation_sweep() -> int:
     db = SessionLocal()
     try:
         return automation.run_automation_rules(db)
+    finally:
+        db.close()
+
+
+def run_schedule_sweep() -> int:
+    """Recurring planned tickets - checked on the SLA tick rather than on a
+    timer of its own: schedules are day-granular, so a once-a-minute check is
+    already far more precision than they need."""
+    db = SessionLocal()
+    try:
+        return schedules.run_due_schedules(db)
     finally:
         db.close()
 
@@ -130,6 +141,12 @@ def main() -> None:
                 closed = run_automation_sweep()
                 if closed:
                     print(f"[worker] автоматизация: обновлено заявок - {closed}", flush=True)
+            except Exception:
+                traceback.print_exc()
+            try:
+                planned = run_schedule_sweep()
+                if planned:
+                    print(f"[worker] расписания: создано плановых заявок - {planned}", flush=True)
             except Exception:
                 traceback.print_exc()
             next_sla_run = now + settings.worker_interval_seconds

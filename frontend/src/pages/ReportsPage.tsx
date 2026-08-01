@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  downloadClientReportPdf,
   downloadClientReportXlsx,
   downloadOverviewXlsx,
   getClientReport,
@@ -288,8 +289,11 @@ function ClientReportPanel({
       <div className="panel-head">
         <h2>Отчёт клиенту — {orgName}</h2>
         <div className="spacer" />
-        <button className="btn btn-primary" onClick={() => downloadClientReportXlsx(Number(organizationId), dateFrom, dateTo)}>
-          Скачать XLSX
+        <button className="btn btn-ghost" onClick={() => downloadClientReportXlsx(Number(organizationId), dateFrom, dateTo)}>
+          XLSX
+        </button>
+        <button className="btn btn-primary" onClick={() => downloadClientReportPdf(Number(organizationId), dateFrom, dateTo)}>
+          PDF для клиента
         </button>
       </div>
       {clientQuery.isLoading && <Loading />}

@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { listOrganizations, listTickets, listUsers } from "../api/endpoints";
+import {
+  createSavedFilter,
+  deleteSavedFilter,
+  listOrganizations,
+  listSavedFilters,
+  listTickets,
+  listUsers,
+} from "../api/endpoints";
 import { EmptyState, ErrorBanner, Loading, PriorityTag, SlaTag, StatusTag, ChannelTag } from "../components/ui";
 import { formatDateTime } from "../lib/labels";
 import { KanbanBoard } from "./KanbanBoard";
@@ -64,8 +71,37 @@ export function TicketsPage() {
   // (filtered) set at once rather than the list view's page.
   const pageSize = view === "kanban" ? 200 : 25;
 
+  const qc = useQueryClient();
   const orgsQuery = useQuery({ queryKey: ["organizations"], queryFn: listOrganizations });
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: listUsers });
+  const savedFiltersQuery = useQuery({ queryKey: ["saved-filters"], queryFn: listSavedFilters });
+
+  const saveFilterMutation = useMutation({
+    mutationFn: (name: string) =>
+      createSavedFilter(name, {
+        status_filter: statusFilter || undefined,
+        priority: priorityFilter || undefined,
+        organization_id: organizationFilter || undefined,
+        assigned_engineer_id: assigneeFilter || undefined,
+        sla_risk: slaRiskFilter || undefined,
+        q: debouncedSearch || undefined,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["saved-filters"] }),
+  });
+  const deleteFilterMutation = useMutation({
+    mutationFn: (id: number) => deleteSavedFilter(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["saved-filters"] }),
+  });
+
+  function applySavedFilter(criteria: Record<string, string | number | undefined>) {
+    setStatusFilter((criteria.status_filter as TicketStatus) ?? "");
+    setPriorityFilter((criteria.priority as Priority) ?? "");
+    setOrganizationFilter((criteria.organization_id as number) ?? "");
+    setAssigneeFilter((criteria.assigned_engineer_id as number) ?? "");
+    setSlaRiskFilter((criteria.sla_risk as "warning" | "breached") ?? "");
+    setSearch((criteria.q as string) ?? "");
+  }
+
   const ticketsQuery = useQuery({
     queryKey: ["tickets", ...filters, view, page],
     queryFn: () =>
@@ -115,7 +151,7 @@ export function TicketsPage() {
       <div className="filter-bar">
         <input
           type="text"
-          placeholder="Поиск по теме или номеру…"
+          placeholder="Поиск по теме, номеру и переписке…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="filter-search"
@@ -163,6 +199,30 @@ export function TicketsPage() {
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="saved-filters">
+        {(savedFiltersQuery.data ?? []).map((f) => (
+          <span className="saved-filter-chip" key={f.id}>
+            <button onClick={() => applySavedFilter(f.criteria)}>{f.name}</button>
+            <button
+              className="saved-filter-remove"
+              title="Удалить фильтр"
+              onClick={() => deleteFilterMutation.mutate(f.id)}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        <button
+          className="btn-link"
+          onClick={() => {
+            const name = window.prompt("Название фильтра");
+            if (name?.trim()) saveFilterMutation.mutate(name.trim());
+          }}
+        >
+          + Сохранить текущий фильтр
+        </button>
       </div>
 
       {ticketsQuery.isLoading && <Loading />}

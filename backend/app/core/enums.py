@@ -105,6 +105,18 @@ class AutomationTriggerType(str, Enum):
     RESOLVED_WITHOUT_REPLY = "resolved_without_reply"
 
 
+class ScheduleCadence(str, Enum):
+    """How often a TicketSchedule fires. Deliberately a short fixed list
+    rather than a cron expression: an MSP's preventive work is weekly or
+    monthly, and cron syntax in an admin form is a support burden for no
+    real gain here."""
+
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+    QUARTERLY = "quarterly"
+
+
 class CallDirection(str, Enum):
     INBOUND = "inbound"
     OUTBOUND = "outbound"

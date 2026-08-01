@@ -2,7 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /srv
 
-RUN apt-get update && apt-get install -y --no-install-recommends libpq5 ca-certificates && rm -rf /var/lib/apt/lists/*
+# fonts-dejavu-core: reportlab's built-in Type1 fonts have no Cyrillic, so
+# PDF reports (ТЗ р. 9) need a real TTF with Russian glyphs - otherwise every
+# label renders as black boxes. ~1 MB, no browser or LaTeX toolchain.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq5 ca-certificates fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 
 # MAX Bot API (platform-api2.max.ru, Этап 5) serves a certificate chain
 # rooted at the Russian state CA (Минцифры), which isn't in the standard

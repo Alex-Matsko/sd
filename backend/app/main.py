@@ -11,12 +11,15 @@ from app.api.routers import (
     contacts,
     contracts,
     integration_settings,
+    monitoring,
     notifications,
     organizations,
     portal,
     priority_matrix,
     reports,
     response_templates,
+    saved_filters,
+    schedules,
     routing_rules,
     tariffs,
     teams,
@@ -55,6 +58,9 @@ app.include_router(reports.router)
 app.include_router(calls.router)
 app.include_router(response_templates.router)
 app.include_router(portal.router)
+app.include_router(saved_filters.router)
+app.include_router(schedules.router)
+app.include_router(monitoring.router)
 
 
 @app.get("/health")

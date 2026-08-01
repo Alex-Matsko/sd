@@ -293,6 +293,12 @@ export function downloadOverviewXlsx(dateFrom?: string, dateTo?: string, organiz
   if (organizationId) query.set("organization_id", String(organizationId));
   return apiDownload(`/reports/overview.xlsx?${query}`, `otchet_${dateFrom ?? ""}_${dateTo ?? ""}.xlsx`);
 }
+export function downloadClientReportPdf(organizationId: number, dateFrom?: string, dateTo?: string) {
+  const query = new URLSearchParams({ organization_id: String(organizationId) });
+  if (dateFrom) query.set("date_from", dateFrom);
+  if (dateTo) query.set("date_to", dateTo);
+  return apiDownload(`/reports/client.pdf?${query}`, `otchet-klientu_${dateFrom ?? ""}_${dateTo ?? ""}.pdf`);
+}
 export function downloadClientReportXlsx(organizationId: number, dateFrom?: string, dateTo?: string) {
   const query = new URLSearchParams({ organization_id: String(organizationId) });
   if (dateFrom) query.set("date_from", dateFrom);
@@ -310,6 +316,56 @@ export function listAutomationRules() {
 }
 export function updateAutomationRule(id: number, payload: { threshold_days?: number; is_active?: boolean }) {
   return apiRequest<AutomationRule>(`/automation-rules/${id}`, { method: "PATCH", body: payload });
+}
+
+// --- Saved queue filters (ТЗ 8.1) ---
+export interface SavedFilter {
+  id: number;
+  name: string;
+  criteria: Record<string, string | number | undefined>;
+}
+export function listSavedFilters() {
+  return apiRequest<SavedFilter[]>("/saved-filters");
+}
+export function createSavedFilter(name: string, criteria: Record<string, unknown>) {
+  return apiRequest<SavedFilter>("/saved-filters", { method: "POST", body: { name, criteria } });
+}
+export function deleteSavedFilter(id: number) {
+  return apiRequest<void>(`/saved-filters/${id}`, { method: "DELETE" });
+}
+
+// --- Ticket schedules (плановые заявки) ---
+export interface TicketSchedule {
+  id: number;
+  name: string;
+  organization_id: number;
+  contact_id: number;
+  category_id: number | null;
+  assigned_engineer_id: number | null;
+  subject: string;
+  body: string | null;
+  type: string;
+  priority: Priority;
+  cadence: "daily" | "weekly" | "monthly" | "quarterly";
+  day_of_week: number | null;
+  day_of_month: number | null;
+  is_active: boolean;
+  next_run_on: string;
+}
+export function listTicketSchedules() {
+  return apiRequest<TicketSchedule[]>("/ticket-schedules");
+}
+export function createTicketSchedule(payload: Record<string, unknown>) {
+  return apiRequest<TicketSchedule>("/ticket-schedules", { method: "POST", body: payload });
+}
+export function updateTicketSchedule(id: number, payload: Record<string, unknown>) {
+  return apiRequest<TicketSchedule>(`/ticket-schedules/${id}`, { method: "PATCH", body: payload });
+}
+export function deleteTicketSchedule(id: number) {
+  return apiRequest<void>(`/ticket-schedules/${id}`, { method: "DELETE" });
+}
+export function runTicketScheduleNow(id: number) {
+  return apiRequest<TicketSchedule>(`/ticket-schedules/${id}/run-now`, { method: "POST" });
 }
 
 // --- Response templates (быстрые ответы, ТЗ 8.2) ---

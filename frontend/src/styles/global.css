@@ -1024,6 +1024,47 @@ button:focus-visible {
   line-height: 1.5;
 }
 
+.saved-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+
+.saved-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.saved-filter-chip button {
+  background: none;
+  border: none;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.saved-filter-chip button:first-child:hover {
+  color: var(--accent);
+}
+
+.saved-filter-remove {
+  color: var(--text-faint) !important;
+  border-left: 1px solid var(--border) !important;
+  padding: 5px 8px !important;
+}
+
+.saved-filter-remove:hover {
+  color: var(--danger) !important;
+}
+
 .related-ticket {
   display: flex;
   align-items: center;
