@@ -4,7 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -46,15 +46,31 @@ MAX_PAGE_SIZE = 200
 
 
 def _search_filter(query, q: str):
-    """Free-text search over subject plus the OH-<number> display form. The
-    display number is a Python property, not a column, so an "OH-1042" query
-    is turned back into the numeric `number` it renders from - otherwise
-    searching by the number people actually see would match nothing."""
-    conditions = [Ticket.subject.ilike(f"%{q}%")]
+    """Free-text search over the subject, the message thread, and the
+    OH-<number> display form.
+
+    Two things worth knowing. The display number is a Python property, not a
+    column, so an "OH-1042" query is turned back into the numeric `number` it
+    renders from - otherwise searching by the number people actually see
+    would match nothing. And the thread is searched via EXISTS rather than a
+    join: a ticket whose subject *and* three messages all match would
+    otherwise come back four times."""
+    conditions = [
+        Ticket.subject.ilike(f"%{q}%"),
+        db_exists_message_match(q),
+    ]
     digits = q.strip().upper().removeprefix("OH-").lstrip("#")
     if digits.isdigit():
         conditions.append(Ticket.number == int(digits))
     return query.filter(or_(*conditions))
+
+
+def db_exists_message_match(q: str):
+    return (
+        select(Message.id)
+        .where(Message.ticket_id == Ticket.id, Message.body.ilike(f"%{q}%"))
+        .exists()
+    )
 
 
 @router.get("", response_model=list[TicketRead])
@@ -165,6 +181,24 @@ def update_ticket(
         return _read_with_sla(db, tickets_service.update_ticket(db, ticket, payload, actor))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.get("/{ticket_id}/related", response_model=list[TicketRead])
+def list_related_tickets(
+    ticket_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> list[TicketRead]:
+    """Section 8.2 "связанные заявки". `parent_ticket_id` has been written
+    since the "поднять старую" bot flow, but nothing ever displayed it - so a
+    revived ticket's history was recorded and invisible. Returns the parent
+    and any children, both directions in one list."""
+    ticket = _get_ticket_or_404(db, ticket_id)
+    related = db.query(Ticket).filter(Ticket.parent_ticket_id == ticket.id).all()
+    if ticket.parent_ticket_id is not None:
+        parent = db.get(Ticket, ticket.parent_ticket_id)
+        if parent is not None:
+            related.insert(0, parent)
+    cache = sla_service.SlaCache()
+    return [_read_with_sla(db, t, cache) for t in related]
 
 
 @router.get("/{ticket_id}/messages", response_model=list[MessageRead])

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createMessage,
@@ -11,6 +11,8 @@ import {
   listMessages,
   listOrganizations,
   listTeams,
+  listRelatedTickets,
+  listResponseTemplates,
   listTicketCalls,
   listTimeEntries,
   listUsers,
@@ -66,6 +68,11 @@ export function TicketDetailPage() {
   const timeEntriesQuery = useQuery({ queryKey: ["ticket", id, "time"], queryFn: () => listTimeEntries(id), enabled: Number.isFinite(id) });
   const historyQuery = useQuery({ queryKey: ["ticket", id, "history"], queryFn: () => getTicketHistory(id), enabled: Number.isFinite(id) });
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: listUsers });
+  const relatedQuery = useQuery({
+    queryKey: ["ticket", id, "related"],
+    queryFn: () => listRelatedTickets(id),
+    enabled: Number.isFinite(id),
+  });
   const callsQuery = useQuery({
     queryKey: ["ticket", id, "calls"],
     queryFn: () => listTicketCalls(id),
@@ -81,6 +88,12 @@ export function TicketDetailPage() {
     queryFn: () => getOrganizationUsage(ticket!.organization_id),
     enabled: !!ticket && !ticket.has_no_active_contract,
     retry: false,
+  });
+
+  const templatesQuery = useQuery({
+    queryKey: ["response-templates", ticket?.category_id ?? null],
+    queryFn: () => listResponseTemplates({ category_id: ticket?.category_id ?? undefined }),
+    enabled: !!ticket,
   });
 
   const updateMutation = useMutation({
@@ -252,6 +265,26 @@ export function TicketDetailPage() {
                   <input type="radio" checked={replyDirection === "internal_note"} onChange={() => setReplyDirection("internal_note")} /> Внутренняя заметка
                 </label>
               </div>
+              {(templatesQuery.data ?? []).length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const template = (templatesQuery.data ?? []).find((t) => t.id === Number(e.target.value));
+                    if (!template) return;
+                    // Append rather than replace: an engineer often types a
+                    // sentence of context first, then drops in the boilerplate.
+                    setReplyBody((body) => (body.trim() ? `${body.trimEnd()}\n\n${template.body}` : template.body));
+                    e.target.value = "";
+                  }}
+                >
+                  <option value="">Вставить шаблон ответа…</option>
+                  {(templatesQuery.data ?? []).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               <textarea rows={3} value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Введите текст сообщения…" />
               {pendingFiles.length > 0 && (
                 <div className="message-attachments">
@@ -396,6 +429,23 @@ export function TicketDetailPage() {
                 <dt>Стоимость сверх лимита</dt>
                 <dd>{usageQuery.data.overage_cost} ₽</dd>
               </dl>
+            </div>
+          )}
+
+          {(relatedQuery.data ?? []).length > 0 && (
+            <div className="panel">
+              <div className="panel-head">
+                <h2>Связанные заявки</h2>
+              </div>
+              <div className="list">
+                {(relatedQuery.data ?? []).map((r) => (
+                  <Link className="related-ticket" key={r.id} to={`/tickets/${r.id}`}>
+                    <span className="mono">{r.display_number}</span>
+                    <span className="subject">{r.subject}</span>
+                    <StatusTag status={r.status} />
+                  </Link>
+                ))}
+              </div>
             </div>
           )}
 

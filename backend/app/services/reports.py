@@ -194,6 +194,114 @@ def _backlog_aging_section(db: Session, organization_id: int | None) -> list[dic
     return result
 
 
+_CLIENT_STATUS_LABELS = {
+    "new": "Новая",
+    "assigned": "Назначена",
+    "in_progress": "В работе",
+    "waiting_customer": "Ждём вас",
+    "waiting_third_party": "Ждём третью сторону",
+    "resolved": "Решена",
+    "closed": "Закрыта",
+    "cancelled": "Отменена",
+}
+_CLIENT_CHANNEL_LABELS = {
+    "telegram": "Telegram",
+    "max": "MAX",
+    "email": "Email",
+    "phone": "Телефон",
+    "portal": "Портал",
+    "whatsapp": "WhatsApp",
+}
+
+
+def get_client_report(db: Session, organization_id: int, date_from: date, date_to: date) -> dict:
+    """ТЗ 9.2 - the per-period statement handed to the client: their tickets,
+    the time logged against them, and how the contracted hour package went.
+
+    Scoped deliberately to what the client is entitled to see: no engineer
+    names, no internal notes, no cross-organization figures. Time is summed
+    from TimeEntry rows dated inside the period (not from the ticket's own
+    dates), so work done this month on a ticket opened last month lands in
+    the month it was actually spent - which is how the package is billed."""
+    from app.models.contract import Contract
+    from app.models.organization import Organization
+    from app.services import billing
+    from app.services.contracts import resolve_contract_and_tariff
+
+    organization = db.get(Organization, organization_id)
+    if organization is None:
+        raise ValueError("Организация не найдена")
+
+    start, end = _bounds(date_from, date_to)
+    tickets = (
+        db.query(Ticket)
+        .filter(Ticket.organization_id == organization_id, Ticket.created_at >= start, Ticket.created_at < end)
+        .order_by(Ticket.created_at)
+        .all()
+    )
+
+    minutes_by_ticket: dict[int, int] = defaultdict(int)
+    entries = (
+        db.query(TimeEntry)
+        .join(Ticket, Ticket.id == TimeEntry.ticket_id)
+        .filter(
+            Ticket.organization_id == organization_id,
+            TimeEntry.entry_date >= date_from,
+            TimeEntry.entry_date <= date_to,
+        )
+        .all()
+    )
+    for entry in entries:
+        minutes_by_ticket[entry.ticket_id] += entry.duration_minutes
+    total_minutes = sum(minutes_by_ticket.values())
+
+    contract, _, has_no_active_contract = resolve_contract_and_tariff(db, organization_id)
+    if contract is not None and not has_no_active_contract:
+        usage = billing.get_organization_usage(db, organization_id, contract, date_to.year, date_to.month)
+        package = {
+            "package_total_hours": round(usage["package_total_minutes"] / 60, 2),
+            "package_used_hours": round(usage["package_used_minutes"] / 60, 2),
+            "package_remaining_hours": round(usage["package_remaining_minutes"] / 60, 2),
+            "overage_hours": round(usage["overage_minutes"] / 60, 2),
+            "overage_cost": usage["overage_cost"],
+        }
+    else:
+        # No active contract - the ticket still got served (docs/decisions.md),
+        # but there's no package to report against, and inventing zeros would
+        # read as "your package is exhausted".
+        package = {
+            "package_total_hours": "нет договора",
+            "package_used_hours": "—",
+            "package_remaining_hours": "—",
+            "overage_hours": "—",
+            "overage_cost": "—",
+        }
+
+    return {
+        "organization": organization.name,
+        "period": {"date_from": date_from.isoformat(), "date_to": date_to.isoformat()},
+        "totals": {
+            "tickets": len(tickets),
+            "resolved": sum(1 for t in tickets if t.resolved_at is not None),
+            "hours": round(total_minutes / 60, 2),
+        },
+        "package": package,
+        "tickets": [
+            {
+                "display_number": t.display_number,
+                "subject": t.subject,
+                "channel": _CLIENT_CHANNEL_LABELS.get(t.channel.value, t.channel.value),
+                "priority": t.priority,
+                "status": _CLIENT_STATUS_LABELS.get(str(t.status).split(".")[-1].lower(), str(t.status)),
+                "created_at": t.created_at.strftime("%d.%m.%Y %H:%M"),
+                "resolved_at": t.resolved_at.strftime("%d.%m.%Y %H:%M") if t.resolved_at else None,
+                "hours": round(minutes_by_ticket.get(t.id, 0) / 60, 2),
+            }
+            for t in tickets
+        ],
+    }
+
+
 def get_overview(db: Session, date_from: date, date_to: date, organization_id: int | None = None) -> dict:
     start, end = _bounds(date_from, date_to)
     return {

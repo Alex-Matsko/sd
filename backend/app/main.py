@@ -15,6 +15,7 @@ from app.api.routers import (
     organizations,
     priority_matrix,
     reports,
+    response_templates,
     routing_rules,
     tariffs,
     teams,
@@ -51,6 +52,7 @@ app.include_router(integration_settings.router)
 app.include_router(automation_rules.router)
 app.include_router(reports.router)
 app.include_router(calls.router)
+app.include_router(response_templates.router)
 
 
 @app.get("/health")

@@ -113,3 +113,37 @@ def test_empty_list_has_its_own_caption(db: Session, contact: Contact):
     items, total = messenger_common.my_tickets_page(db, contact, offset=0)
     assert items == [] and total == 0
     assert messenger_common.my_tickets_caption(items, 0, total) == "У вас пока нет заявок."
+
+
+def test_search_matches_message_body(db: Session, contact: Contact):
+    """Search used to cover only the subject and number, so a ticket whose
+    problem was described in the thread (the usual case for email/messenger
+    tickets, where the subject is auto-generated) was unfindable."""
+    from app.core.enums import MessageDirection
+    from app.schemas.message import MessageCreate
+    from app.services import messages as messages_service
+
+    ticket = _make(db, contact, "Обращение из MAX")
+    messages_service.add_message(
+        db, ticket, MessageCreate(direction=MessageDirection.INBOUND, body="Не открывается VPN-соединение"),
+        author_contact=contact,
+    )
+    found = _search_filter(db.query(Ticket).filter(Ticket.contact_id == contact.id), "VPN").all()
+    assert [t.id for t in found] == [ticket.id]
+
+
+def test_search_returns_each_ticket_once_despite_multiple_matches(db: Session, contact: Contact):
+    """Matching the subject AND several messages must not duplicate the row -
+    that's why the thread is searched with EXISTS rather than a join."""
+    from app.core.enums import MessageDirection
+    from app.schemas.message import MessageCreate
+    from app.services import messages as messages_service
+
+    ticket = _make(db, contact, "Проблема с принтером")
+    for _ in range(3):
+        messages_service.add_message(
+            db, ticket, MessageCreate(direction=MessageDirection.INBOUND, body="принтер всё ещё не работает"),
+            author_contact=contact,
+        )
+    found = _search_filter(db.query(Ticket).filter(Ticket.contact_id == contact.id), "принтер").all()
+    assert len(found) == 1

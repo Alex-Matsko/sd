@@ -19,6 +19,8 @@ import type {
   OrganizationUsage,
   Priority,
   ReportsOverview,
+  ResponseTemplate,
+  ClientReport,
   RoutingRule,
   Tariff,
   TariffSlaRule,
@@ -279,6 +281,25 @@ export function markAllNotificationsRead() {
 }
 
 // --- Reports ---
+export function getClientReport(organizationId: number, dateFrom?: string, dateTo?: string) {
+  return apiRequest<ClientReport>("/reports/client", {
+    query: { organization_id: organizationId, date_from: dateFrom, date_to: dateTo },
+  });
+}
+export function downloadOverviewXlsx(dateFrom?: string, dateTo?: string, organizationId?: number) {
+  const query = new URLSearchParams();
+  if (dateFrom) query.set("date_from", dateFrom);
+  if (dateTo) query.set("date_to", dateTo);
+  if (organizationId) query.set("organization_id", String(organizationId));
+  return apiDownload(`/reports/overview.xlsx?${query}`, `otchet_${dateFrom ?? ""}_${dateTo ?? ""}.xlsx`);
+}
+export function downloadClientReportXlsx(organizationId: number, dateFrom?: string, dateTo?: string) {
+  const query = new URLSearchParams({ organization_id: String(organizationId) });
+  if (dateFrom) query.set("date_from", dateFrom);
+  if (dateTo) query.set("date_to", dateTo);
+  return apiDownload(`/reports/client.xlsx?${query}`, `otchet-klientu_${dateFrom ?? ""}_${dateTo ?? ""}.xlsx`);
+}
+
 export function getReportsOverview(filters: { date_from?: string; date_to?: string; organization_id?: number }) {
   return apiRequest<ReportsOverview>("/reports/overview", { query: filters });
 }
@@ -289,6 +310,27 @@ export function listAutomationRules() {
 }
 export function updateAutomationRule(id: number, payload: { threshold_days?: number; is_active?: boolean }) {
   return apiRequest<AutomationRule>(`/automation-rules/${id}`, { method: "PATCH", body: payload });
+}
+
+// --- Response templates (быстрые ответы, ТЗ 8.2) ---
+export function listResponseTemplates(params: { category_id?: number; include_inactive?: boolean } = {}) {
+  return apiRequest<ResponseTemplate[]>("/response-templates", {
+    query: params as Record<string, string | number | boolean | undefined>,
+  });
+}
+export function createResponseTemplate(payload: { name: string; body: string; category_id?: number | null }) {
+  return apiRequest<ResponseTemplate>("/response-templates", { method: "POST", body: payload });
+}
+export function updateResponseTemplate(id: number, payload: Partial<ResponseTemplate>) {
+  return apiRequest<ResponseTemplate>(`/response-templates/${id}`, { method: "PATCH", body: payload });
+}
+export function deleteResponseTemplate(id: number) {
+  return apiRequest<void>(`/response-templates/${id}`, { method: "DELETE" });
+}
+
+// --- Related tickets (ТЗ 8.2) ---
+export function listRelatedTickets(ticketId: number) {
+  return apiRequest<Ticket[]>(`/tickets/${ticketId}/related`);
 }
 
 // --- Calls (телефония, раздел 2.4) ---
