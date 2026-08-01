@@ -32,6 +32,21 @@ def decode_access_token(token: str) -> dict:
     return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
 
 
+def create_portal_access_token(contact_id: int) -> str:
+    """Token for a client-portal session. `type: "portal"` is what keeps the
+    two populations apart: `get_current_user` rejects anything that isn't
+    `type: "access"`, so a client's token can never authenticate against the
+    staff API even though both are signed with the same secret."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(contact_id),
+        "type": "portal",
+        "iat": now,
+        "exp": now + timedelta(minutes=settings.portal_token_expire_minutes),
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
 def generate_refresh_token() -> tuple[str, str, datetime]:
     """Returns (raw_token_to_return_to_client, sha256_hash_to_store, expires_at)."""
     raw = secrets.token_urlsafe(48)

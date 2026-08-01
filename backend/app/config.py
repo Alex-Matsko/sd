@@ -11,6 +11,14 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30
 
+    # Portal sessions are longer-lived than staff ones: a client checks in
+    # occasionally and being logged out mid-message is worse than the
+    # marginal risk, since the portal exposes only that client's own data.
+    portal_token_expire_minutes: int = 720
+    # Public base URL of the portal, used to build magic links in emails.
+    portal_base_url: str = "http://localhost:8081/portal"
+    portal_magic_link_ttl_minutes: int = 30
+
     default_tariff_code: str = "default"
     default_ticket_attachment_limit_mb: int = 25
 

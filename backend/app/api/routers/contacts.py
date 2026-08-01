@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_dispatcher_or_above
@@ -7,13 +7,17 @@ from app.db import get_db
 from app.models.contact import Contact, ContactEmail, ContactPhone
 from app.models.user import User
 from app.schemas.contact import ContactCreate, ContactRead, ContactUpdate
-from app.services import messenger_common
+from app.services import messenger_common, portal
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 
 class ContactMergeRequest(BaseModel):
     into_contact_id: int
+
+
+class PortalPasswordRequest(BaseModel):
+    password: str = Field(min_length=8)
 
 
 @router.get("", response_model=list[ContactRead])
@@ -83,6 +87,28 @@ def merge_contact(
     messenger_common.merge_contacts(db, from_contact=from_contact, into_contact=into_contact)
     db.refresh(into_contact)
     return into_contact
+
+
+@router.post("/{contact_id}/portal-password", status_code=status.HTTP_204_NO_CONTENT)
+def set_portal_password(
+    contact_id: int,
+    payload: PortalPasswordRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_dispatcher_or_above),
+) -> None:
+    """Gives a client access to the portal (section 7). A dispatcher sets the
+    first password; afterwards the client can also log in by magic link, so
+    this is a way in rather than the only one. The contact needs at least one
+    email address - that address is the portal login."""
+    contact = db.get(Contact, contact_id)
+    if contact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Контакт не найден")
+    if not contact.emails:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="У контакта нет email — он будет логином в личном кабинете",
+        )
+    portal.set_password(db, contact, payload.password)
 
 
 @router.patch("/{contact_id}", response_model=ContactRead)

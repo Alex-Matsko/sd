@@ -1,0 +1,362 @@
+/* Client portal (ТЗ р.7). Mobile-first: the client is as likely to write in
+   from a phone as from a desk, and the requirement calls out mobile layout
+   explicitly. Deliberately plainer than the staff SPA - one column, large
+   tap targets, no dense tables. */
+
+.portal {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.portal-centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.portal-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px 22px;
+  box-shadow: var(--shadow-md);
+}
+
+.portal-header {
+  background: var(--sidebar-bg);
+  color: #fff;
+  padding: 14px 18px;
+}
+
+.portal-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 14.5px;
+}
+
+.portal-main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 18px 16px 60px;
+}
+
+.portal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.portal-title-row h1 {
+  font-size: 20px;
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.portal-sub {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 4px 0 16px;
+}
+
+.portal-subject {
+  font-size: 17px;
+  margin: 8px 0 0;
+}
+
+.portal-muted {
+  color: var(--text-muted);
+}
+
+.portal-small {
+  font-size: 12.5px;
+}
+
+.portal-field {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.portal-field span {
+  display: block;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+
+.portal-field input,
+.portal-field textarea,
+.portal-reply textarea {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text);
+  /* 16px keeps iOS Safari from zooming the page on focus. */
+  font-size: 16px;
+}
+
+.portal-btn {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.portal-btn-compact {
+  width: auto;
+  padding: 9px 14px;
+  font-size: 14px;
+  margin-top: 0;
+}
+
+.portal-btn-primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.portal-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.portal-btn-ghost {
+  background: none;
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.portal-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.portal-hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin: 14px 0 0;
+  line-height: 1.5;
+}
+
+.portal-error,
+.portal-note {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+.portal-error {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.portal-note {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.portal-usage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.portal-usage > div {
+  flex: 1 1 130px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+
+.portal-usage strong {
+  display: block;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.portal-usage span {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.portal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.portal-ticket {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  cursor: pointer;
+  color: inherit;
+  font-family: inherit;
+}
+
+.portal-ticket:hover {
+  border-color: var(--accent);
+}
+
+.portal-ticket-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.portal-number {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.portal-ticket-subject {
+  font-weight: 600;
+  font-size: 14.5px;
+  margin-bottom: 4px;
+}
+
+.portal-status {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--neutral-bg);
+  color: var(--text-muted);
+}
+
+.portal-status-new,
+.portal-status-assigned {
+  background: var(--info-bg);
+  color: var(--info);
+}
+
+.portal-status-in_progress {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.portal-status-waiting_customer {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.portal-status-resolved,
+.portal-status-closed {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.portal-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.portal-message {
+  border-radius: var(--radius-md);
+  padding: 11px 13px;
+  max-width: 88%;
+  border: 1px solid var(--border);
+}
+
+.portal-message.from-me {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+.portal-message.from-support {
+  align-self: flex-start;
+  background: var(--bg-elevated);
+}
+
+.portal-message-author {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.portal-message-body {
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.portal-message-time {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-top: 5px;
+}
+
+.portal-rate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  font-size: 14px;
+}
+
+.portal-stars button {
+  background: none;
+  border: none;
+  font-size: 26px;
+  line-height: 1;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.portal-stars button:hover {
+  color: var(--warning);
+}
+
+.portal-reply {
+  margin-top: 10px;
+}
+
+@media (max-width: 560px) {
+  .portal-main {
+    padding: 14px 12px 48px;
+  }
+
+  .portal-title-row h1 {
+    font-size: 18px;
+  }
+
+  .portal-message {
+    max-width: 100%;
+  }
+}

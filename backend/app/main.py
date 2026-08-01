@@ -13,6 +13,7 @@ from app.api.routers import (
     integration_settings,
     notifications,
     organizations,
+    portal,
     priority_matrix,
     reports,
     response_templates,
@@ -53,6 +54,7 @@ app.include_router(automation_rules.router)
 app.include_router(reports.router)
 app.include_router(calls.router)
 app.include_router(response_templates.router)
+app.include_router(portal.router)
 
 
 @app.get("/health")

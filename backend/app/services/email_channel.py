@@ -275,6 +275,26 @@ def ingest_email(db: Session, raw: bytes) -> IngestResult:
     )
 
 
+def send_plain_email(config: EmailConfig, to_address: str, subject: str, body: str) -> None:
+    """A standalone message not attached to any ticket - currently the portal
+    magic link. Kept separate from `send_outbound_email` because that one
+    always stamps the [#OH-N] ticket tag into the subject and threads the
+    reply, neither of which applies to a login link."""
+    msg = StdEmailMessage()
+    msg["From"] = f"{config.from_display_name} <{config.from_address}>"
+    msg["To"] = to_address
+    msg["Subject"] = subject
+    msg["Message-ID"] = make_msgid(domain=config.from_address.rsplit("@", 1)[-1])
+    msg.set_content(body)
+
+    with smtplib.SMTP(config.smtp_host, config.smtp_port, timeout=30) as smtp:
+        if config.smtp_use_tls:
+            smtp.starttls()
+        if config.smtp_username:
+            smtp.login(config.smtp_username, config.smtp_password)
+        smtp.send_message(msg)
+
+
 def send_outbound_email(config: EmailConfig, to_address: str, ticket: Ticket, body: str, in_reply_to: str | None) -> str:
     msg = StdEmailMessage()
     msg["From"] = f"{config.from_display_name} <{config.from_address}>"
