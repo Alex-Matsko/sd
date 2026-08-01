@@ -22,8 +22,10 @@ from app.models.notification import Notification
 from app.models.team import Team
 from app.models.ticket import Ticket
 from app.models.user import User
+from app.schemas.integration_setting import IntegrationSettingUpdate
 from app.schemas.message import MessageCreate
 from app.schemas.ticket import TicketCreate, TicketUpdate
+from app.services import integration_settings
 from app.services import messages as messages_service
 from app.services import sla
 from app.services import tickets as tickets_service
@@ -266,6 +268,40 @@ def test_escalation_fires_exactly_once(db: Session, contact: Contact, engineer_u
     count_after_first = len(_notifications(db, ticket))
     assert sla.run_escalations(db, now=now + timedelta(minutes=5)) == 0
     assert len(_notifications(db, ticket)) == count_after_first
+
+
+def test_escalation_notifies_telegram_when_engineer_linked(db: Session, contact: Contact, engineer_user: User, monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        "app.services.telegram_client.send_message",
+        lambda base_url, token, chat_id, text, **kw: sent.append((chat_id, text)),
+    )
+    integration_settings.upsert(
+        db, Channel.TELEGRAM, IntegrationSettingUpdate(is_enabled=True, config={}, secrets={"bot_token": "test-token"})
+    )
+    engineer_user.telegram_id = "tg-engineer-1"
+    db.commit()
+
+    ticket = _make_ticket(db, contact)
+    _assign(db, ticket, engineer_user)
+    touched = sla.run_escalations(db, now=msk(2026, 7, 21, 10, 23))  # 76% - warning
+    assert touched == 1
+    assert sent == [("tg-engineer-1", sent[0][1])]
+    assert "SLA" in sent[0][1] or "реак" in sent[0][1].lower()
+
+
+def test_escalation_skips_telegram_when_engineer_not_linked(db: Session, contact: Contact, engineer_user: User, monkeypatch):
+    sent = []
+    monkeypatch.setattr("app.services.telegram_client.send_message", lambda *a, **kw: sent.append(a))
+    integration_settings.upsert(
+        db, Channel.TELEGRAM, IntegrationSettingUpdate(is_enabled=True, config={}, secrets={"bot_token": "test-token"})
+    )
+    # engineer_user.telegram_id left unset
+
+    ticket = _make_ticket(db, contact)
+    _assign(db, ticket, engineer_user)
+    sla.run_escalations(db, now=msk(2026, 7, 21, 10, 23))
+    assert sent == []
 
 
 def test_resolution_escalation_skipped_while_paused(db: Session, contact: Contact, engineer_user: User):

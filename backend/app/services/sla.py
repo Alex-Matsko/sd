@@ -12,6 +12,7 @@ at first resolve, or by the escalation scan at breach - and never recomputed
 afterwards (docs/decisions.md: reopening keeps the original result).
 """
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -24,7 +25,10 @@ from app.models.notification import Notification
 from app.models.tariff import Tariff, TariffSlaRule
 from app.models.team import Team
 from app.models.ticket import Ticket
+from app.models.user import User
 from app.services import audit
+
+logger = logging.getLogger("app.sla")
 from app.services.calendar_math import (
     CalendarSpec,
     add_working_minutes,
@@ -225,6 +229,32 @@ def compute_view(db: Session, ticket: Ticket, cache: SlaCache | None = None, now
 def _notify(db: Session, user_ids: set[int], type_: NotificationType, ticket: Ticket, title: str) -> None:
     for user_id in user_ids:
         db.add(Notification(user_id=user_id, ticket_id=ticket.id, type=type_, title=title))
+    _notify_telegram(db, user_ids, title)
+
+
+def _notify_telegram(db: Session, user_ids: set[int], title: str) -> None:
+    """Section 8: "Уведомления инженерам: в интерфейсе (websocket) + в
+    Telegram" - the in-app half above is REST-polled today, not websocket
+    (no push infra exists yet - see docs/decisions.md); this is the Telegram
+    half, piggybacking on the same escalation events rather than a separate
+    trigger. No-op for engineers who haven't linked their Telegram (profile
+    page, "/link" - services/telegram_channel.py) or if the channel itself
+    isn't configured. Deferred import: telegram_channel -> messenger_common
+    -> tickets_service -> sla would otherwise be circular."""
+    if not user_ids:
+        return
+    from app.services import telegram_channel
+    from app.services import telegram_client
+
+    config = telegram_channel.load_telegram_config(db)
+    if config is None:
+        return
+    recipients = db.query(User).filter(User.id.in_(user_ids), User.telegram_id.isnot(None)).all()
+    for user in recipients:
+        try:
+            telegram_client.send_message(config.base_url, config.token, user.telegram_id, title)
+        except Exception:
+            logger.exception("Не удалось отправить SLA-уведомление в Telegram пользователю %s", user.id)
 
 
 def _warning_recipients(db: Session, ticket: Ticket) -> set[int]:

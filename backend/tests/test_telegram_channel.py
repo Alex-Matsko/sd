@@ -7,11 +7,14 @@ token is used in this environment (see docs/decisions.md)."""
 import pytest
 from sqlalchemy.orm import Session
 
+from datetime import datetime, timedelta, timezone
+
 from app.core.enums import Channel, MessageDirection, Priority, TicketStatus, TicketType
 from app.models.channel_conversation_state import ChannelConversationState
 from app.models.contact import Contact
 from app.models.message import Message
 from app.models.ticket import Ticket
+from app.models.user import User
 from app.schemas.integration_setting import IntegrationSettingUpdate
 from app.schemas.ticket import TicketCreate
 from app.services import integration_settings, telegram_channel
@@ -345,6 +348,41 @@ def test_csat_callback_records_rating_once(db: Session, telegram_enabled, contac
     telegram_channel.handle_update(db, _callback_update(user_id=23, chat_id=23, payload=f"csat:{ticket.id}:1"))
     db.refresh(ticket)
     assert ticket.csat_rating == 4
+
+
+# --- engineer self-service Telegram linking ("/link <код>") -------------------------------------------------------
+
+
+def test_link_command_with_valid_code_sets_telegram_id(db: Session, telegram_enabled, engineer_user: User, _fake_send):
+    engineer_user.telegram_link_code = "ABCD1234"
+    engineer_user.telegram_link_code_expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+    db.commit()
+
+    telegram_channel.handle_update(db, _text_update(user_id=99, chat_id=99, text="/link ABCD1234"))
+
+    db.refresh(engineer_user)
+    assert engineer_user.telegram_id == "99"
+    assert engineer_user.telegram_link_code is None
+    assert any("привязан" in s["text"] for s in _fake_send)
+    # Must not have fallen through to the client dialog at all.
+    assert db.query(Contact).filter(Contact.telegram_id == "99").first() is None
+
+
+def test_link_command_with_expired_code_does_not_link(db: Session, telegram_enabled, engineer_user: User, _fake_send):
+    engineer_user.telegram_link_code = "EXPIRED1"
+    engineer_user.telegram_link_code_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    db.commit()
+
+    telegram_channel.handle_update(db, _text_update(user_id=98, chat_id=98, text="/link EXPIRED1"))
+
+    db.refresh(engineer_user)
+    assert engineer_user.telegram_id is None
+    assert any("не найден" in s["text"] or "устарел" in s["text"] for s in _fake_send)
+
+
+def test_link_command_with_unknown_code_does_not_raise_or_create_contact(db: Session, telegram_enabled, _fake_send):
+    telegram_channel.handle_update(db, _text_update(user_id=97, chat_id=97, text="/link NOPE0000"))
+    assert db.query(Contact).filter(Contact.telegram_id == "97").first() is None
 
 
 def test_try_send_outbound_without_known_chat_does_not_raise(db: Session, telegram_enabled, contact: Contact):

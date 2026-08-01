@@ -373,3 +373,8 @@ export interface TokenResponse {
   refresh_token: string;
   token_type: string;
 }
+
+export interface TelegramLinkCode {
+  code: string;
+  expires_at: string;
+}

@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -14,10 +15,12 @@ from app.core.security import (
 from app.db import get_db
 from app.models.auth import RefreshToken
 from app.models.user import User
-from app.schemas.auth import RefreshRequest, TokenResponse
+from app.schemas.auth import RefreshRequest, TelegramLinkCodeRead, TokenResponse
 from app.schemas.user import UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+TELEGRAM_LINK_CODE_TTL_MINUTES = 15
 
 
 def _issue_tokens(user: User, db: Session) -> TokenResponse:
@@ -75,4 +78,28 @@ def logout(payload: RefreshRequest, db: Session = Depends(get_db)) -> None:
 
 @router.get("/me", response_model=UserRead)
 def me(user: User = Depends(get_current_user)) -> User:
+    return user
+
+
+@router.post("/me/telegram-link-code", response_model=TelegramLinkCodeRead)
+def request_telegram_link_code(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> TelegramLinkCodeRead:
+    """Self-service Telegram linking (section 8: "инженер привязывает свой
+    TG в профиле") - the code is sent to the bot as "/link <code>"
+    (services/telegram_channel.py), which sets telegram_id on this user
+    without needing an admin to do it via user management."""
+    code = secrets.token_hex(4).upper()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=TELEGRAM_LINK_CODE_TTL_MINUTES)
+    user.telegram_link_code = code
+    user.telegram_link_code_expires_at = expires_at
+    db.add(user)
+    db.commit()
+    return TelegramLinkCodeRead(code=code, expires_at=expires_at)
+
+
+@router.post("/me/telegram-unlink", response_model=UserRead)
+def unlink_telegram(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> User:
+    user.telegram_id = None
+    db.add(user)
+    db.commit()
+    db.refresh(user)
     return user

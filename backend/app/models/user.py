@@ -1,4 +1,6 @@
-from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, String
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import UserRole
@@ -15,6 +17,12 @@ class User(Base, TimestampMixin):
     role: Mapped[UserRole] = mapped_column(SAEnum(UserRole, native_enum=False, length=20, validate_strings=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     telegram_id: Mapped[str | None] = mapped_column(String(64), unique=True)
+    # Self-service linking (section 8: "инженер привязывает свой TG в профиле"):
+    # a short-lived one-time code shown in the profile page, sent to the bot
+    # as "/link <code>" (services/telegram_channel.py) to set telegram_id
+    # without needing an admin to set it via user management.
+    telegram_link_code: Mapped[str | None] = mapped_column(String(16), unique=True)
+    telegram_link_code_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     team_memberships: Mapped[list["TeamMembership"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

@@ -202,11 +202,18 @@ export function Layout() {
           <NotificationBell />
           {user && (
             <div className="topbar-user">
-              <Avatar name={user.full_name} />
-              <div className="topbar-user-info">
-                <span className="topbar-user-name">{user.full_name}</span>
-                <span className="topbar-user-role muted">{USER_ROLE_LABELS[user.role]}</span>
-              </div>
+              <button
+                className="topbar-user-link"
+                title="Профиль"
+                onClick={() => navigate("/profile")}
+                style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer", padding: 0 }}
+              >
+                <Avatar name={user.full_name} />
+                <div className="topbar-user-info">
+                  <span className="topbar-user-name">{user.full_name}</span>
+                  <span className="topbar-user-role muted">{USER_ROLE_LABELS[user.role]}</span>
+                </div>
+              </button>
               <button className="icon-btn" title="Выйти" onClick={handleLogout}>
                 <IconLogout size={17} />
               </button>

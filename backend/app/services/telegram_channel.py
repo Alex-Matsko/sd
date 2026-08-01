@@ -14,6 +14,7 @@ Verified end-to-end against a real bot token on 2026-07-31.
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -595,6 +596,39 @@ def _handle_callback(db: Session, config: TelegramConfig, state: ChannelConversa
     logger.warning("Telegram: неизвестный callback payload=%r", payload)
 
 
+_LINK_CODE_PATTERN = re.compile(r"^/link\s+(\S+)$", re.IGNORECASE)
+
+
+def _try_link_engineer(db: Session, config: TelegramConfig, parsed: ParsedUpdate) -> bool:
+    """Self-service staff linking (section 8: "инженер привязывает свой TG в
+    профиле"), handled entirely separately from the client dialog below -
+    an engineer's own User account, not a Contact, and must never fall
+    through to creating a ticket out of a stray "/link ..." message. Returns
+    True if this update was a link attempt (handled either way, valid code
+    or not) so the caller skips the normal client flow."""
+    if parsed.kind != "text":
+        return False
+    match = _LINK_CODE_PATTERN.match(parsed.text.strip())
+    if not match:
+        return False
+    code = match.group(1).upper()
+    user = (
+        db.query(User)
+        .filter(User.telegram_link_code == code, User.telegram_link_code_expires_at > datetime.now(timezone.utc))
+        .first()
+    )
+    if user is None:
+        _send(config, parsed.chat_id, "Код не найден или устарел. Получите новый код в профиле в веб-панели.")
+        return True
+    user.telegram_id = parsed.external_user_id
+    user.telegram_link_code = None
+    user.telegram_link_code_expires_at = None
+    db.add(user)
+    db.commit()
+    _send(config, parsed.chat_id, f"Telegram успешно привязан к вашей учётной записи, {user.full_name}!")
+    return True
+
+
 def handle_update(db: Session, raw_update: dict) -> None:
     parsed = _extract_incoming(raw_update)
     if parsed is None:
@@ -602,6 +636,9 @@ def handle_update(db: Session, raw_update: dict) -> None:
 
     config = load_telegram_config(db)
     if config is None:
+        return
+
+    if _try_link_engineer(db, config, parsed):
         return
 
     state = _get_or_create_state(db, parsed.external_user_id, parsed.chat_id)
