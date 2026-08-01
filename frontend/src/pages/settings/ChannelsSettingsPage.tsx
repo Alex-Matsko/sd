@@ -3,7 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listIntegrationSettings, updateIntegrationSetting } from "../../api/endpoints";
 import { ErrorBanner, Loading } from "../../components/ui";
 import { formatDateTime } from "../../lib/labels";
-import type { Channel, EmailChannelConfig, IntegrationSetting, MaxChannelConfig, TelegramChannelConfig } from "../../api/types";
+import type {
+  Channel,
+  EmailChannelConfig,
+  IntegrationSetting,
+  MaxChannelConfig,
+  TelegramChannelConfig,
+  TelephonyChannelConfig,
+} from "../../api/types";
 
 const CHANNEL_TITLES: Partial<Record<Channel, string>> = {
   email: "Email",
@@ -376,6 +383,84 @@ function TelegramChannelCard({ setting }: { setting: IntegrationSetting }) {
   );
 }
 
+function TelephonyChannelCard({ setting }: { setting: IntegrationSetting }) {
+  const qc = useQueryClient();
+  const cfg = setting.config as TelephonyChannelConfig;
+
+  const [isEnabled, setIsEnabled] = useState(setting.is_enabled);
+  const [createOnMissed, setCreateOnMissed] = useState(cfg.create_ticket_on_missed ?? true);
+  const [secret, setSecret] = useState("");
+  const [secretCleared, setSecretCleared] = useState(false);
+
+  const isSecretSet = setting.secret_keys_set.includes("webhook_secret");
+  const webhookUrl = `${import.meta.env.VITE_API_BASE_URL ?? window.location.origin}/webhooks/telephony`;
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const secrets: Record<string, string | null> = {};
+      if (secretCleared) secrets.webhook_secret = null;
+      else if (secret) secrets.webhook_secret = secret;
+
+      return updateIntegrationSetting("phone", {
+        is_enabled: isEnabled,
+        config: { ...cfg, create_ticket_on_missed: createOnMissed },
+        secrets: Object.keys(secrets).length > 0 ? secrets : undefined,
+      });
+    },
+    onSuccess: () => {
+      setSecret("");
+      setSecretCleared(false);
+      qc.invalidateQueries({ queryKey: ["integration-settings"] });
+    },
+  });
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>Телефония (Plusofon)</h2>
+        <div className="spacer" />
+        <label className="form-row-inline" style={{ marginBottom: 0 }}>
+          <input type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} />
+          Канал включён
+        </label>
+      </div>
+      <p className="muted">
+        События звонков приходят вебхуком от АТС. Клиент опознаётся по номеру телефона контакта; пропущенный звонок
+        становится заявкой в очереди диспетчера. Изменено: {formatDateTime(setting.updated_at)}.
+      </p>
+
+      <div className="form-row">
+        <label className="form-label">Адрес вебхука (указать в личном кабинете Plusofon)</label>
+        <input type="text" readOnly value={webhookUrl} className="mono" />
+      </div>
+
+      <div className="form-grid">
+        <SecretField
+          label="Секрет вебхука (заголовок X-Webhook-Secret)"
+          isSet={isSecretSet}
+          value={secret}
+          onChange={setSecret}
+          onClear={() => setSecretCleared(true)}
+          cleared={secretCleared}
+        />
+        <div className="form-row form-row-inline" style={{ alignItems: "center" }}>
+          <label>
+            <input type="checkbox" checked={createOnMissed} onChange={(e) => setCreateOnMissed(e.target.checked)} />{" "}
+            Создавать заявку по пропущенному звонку
+          </label>
+        </div>
+      </div>
+
+      {saveMutation.isError && <ErrorBanner message={(saveMutation.error as Error).message} />}
+      <div className="modal-foot" style={{ padding: 0, borderTop: "none", justifyContent: "flex-start" }}>
+        <button className="btn btn-primary" disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PlaceholderChannelCard({ setting }: { setting: IntegrationSetting }) {
   const qc = useQueryClient();
   const [isEnabled, setIsEnabled] = useState(setting.is_enabled);
@@ -422,7 +507,8 @@ export function ChannelsSettingsPage() {
   const email = settings.find((s) => s.channel === "email");
   const max = settings.find((s) => s.channel === "max");
   const telegram = settings.find((s) => s.channel === "telegram");
-  const others = settings.filter((s) => !["email", "max", "telegram"].includes(s.channel));
+  const phone = settings.find((s) => s.channel === "phone");
+  const others = settings.filter((s) => !["email", "max", "telegram", "phone"].includes(s.channel));
 
   return (
     <div className="view">
@@ -439,6 +525,7 @@ export function ChannelsSettingsPage() {
       {email && <EmailChannelCard key={email.updated_at + "email"} setting={email} />}
       {max && <MaxChannelCard key={max.updated_at + "max"} setting={max} />}
       {telegram && <TelegramChannelCard key={telegram.updated_at + "telegram"} setting={telegram} />}
+      {phone && <TelephonyChannelCard key={phone.updated_at + "phone"} setting={phone} />}
       {others.map((s) => (
         <PlaceholderChannelCard key={s.channel} setting={s} />
       ))}

@@ -105,6 +105,22 @@ class AutomationTriggerType(str, Enum):
     RESOLVED_WITHOUT_REPLY = "resolved_without_reply"
 
 
+class CallDirection(str, Enum):
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
+
+
+class CallStatus(str, Enum):
+    # Section 2.4: a call is "ringing" while the dispatcher popup is relevant,
+    # then either answered/completed or missed - and a missed one becomes a
+    # ticket automatically.
+    RINGING = "ringing"
+    ANSWERED = "answered"
+    COMPLETED = "completed"
+    MISSED = "missed"
+    FAILED = "failed"
+
+
 class SlaTimerState(str, Enum):
     NO_RULE = "no_rule"  # tariff has no SLA rule for the ticket's priority
     OK = "ok"

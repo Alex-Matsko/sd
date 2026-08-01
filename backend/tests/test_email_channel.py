@@ -415,21 +415,26 @@ def test_integration_settings_secrets_never_round_trip_plaintext(db: Session):
     assert integration_settings.decrypt_secret(setting, "bot_token") == "123:ABC"
 
 
+# These two assert on the one key they set rather than on the whole
+# `secret_keys_set` list. An earlier version compared the full list and
+# picked whichever channel was "not built yet" to keep it a single-element
+# set - which broke the moment that channel got built and the shared dev
+# database started carrying a real secret for it (twice now: MAX, then
+# telephony). Asserting only about the key under test makes them independent
+# of whatever else the database happens to hold.
 def test_integration_settings_clearing_secret(db: Session):
-    # Channel.PHONE (Plusofon) isn't built/configured yet - unlike MAX, which
-    # may carry a real bot_token in the shared dev database (docs/decisions.md)
-    # and would make secret_keys_set assertions here flaky.
     setting = integration_settings.upsert(
         db, Channel.PHONE, IntegrationSettingUpdate(secrets={"api_key": "value"})
     )
-    assert integration_settings.to_read(setting).secret_keys_set == ["api_key"]
+    assert "api_key" in integration_settings.to_read(setting).secret_keys_set
 
     setting = integration_settings.upsert(db, Channel.PHONE, IntegrationSettingUpdate(secrets={"api_key": None}))
-    assert integration_settings.to_read(setting).secret_keys_set == []
+    assert "api_key" not in integration_settings.to_read(setting).secret_keys_set
+    assert integration_settings.decrypt_secret(setting, "api_key") is None
 
 
 def test_integration_settings_omitted_secret_key_is_unchanged(db: Session):
     integration_settings.upsert(db, Channel.PHONE, IntegrationSettingUpdate(secrets={"api_key": "value"}))
     setting = integration_settings.upsert(db, Channel.PHONE, IntegrationSettingUpdate(config={"poll_interval_seconds": 15}))
-    assert integration_settings.to_read(setting).secret_keys_set == ["api_key"]
+    assert "api_key" in integration_settings.to_read(setting).secret_keys_set
     assert integration_settings.decrypt_secret(setting, "api_key") == "value"

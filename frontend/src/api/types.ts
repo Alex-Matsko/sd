@@ -311,6 +311,33 @@ export interface MaxChannelConfig {
   poll_timeout_seconds?: number;
 }
 
+export type CallDirection = "inbound" | "outbound";
+export type CallStatus = "ringing" | "answered" | "completed" | "missed" | "failed";
+
+export interface Call {
+  id: number;
+  external_id: string;
+  direction: CallDirection;
+  status: CallStatus;
+  from_number: string;
+  to_number: string | null;
+  started_at: string | null;
+  answered_at: string | null;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  recording_url: string | null;
+  contact_id: number | null;
+  organization_id: number | null;
+  ticket_id: number | null;
+  handled_at: string | null;
+  created_at: string;
+}
+
+export interface TelephonyChannelConfig {
+  create_ticket_on_missed?: boolean;
+  field_map?: Record<string, string>;
+}
+
 export interface TelegramChannelConfig {
   base_url?: string;
   poll_timeout_seconds?: number;

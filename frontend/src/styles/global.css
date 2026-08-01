@@ -1024,6 +1024,14 @@ button:focus-visible {
   line-height: 1.5;
 }
 
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  font-size: 13px;
+}
+
 .message-attachments {
   display: flex;
   flex-wrap: wrap;

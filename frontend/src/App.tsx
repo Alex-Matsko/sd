@@ -8,6 +8,7 @@ import { TicketsPage } from "./pages/TicketsPage";
 import { NewTicketPage } from "./pages/NewTicketPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { CallsPage } from "./pages/CallsPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
 import { OrganizationsPage } from "./pages/directory/OrganizationsPage";
 import { OrganizationDetailPage } from "./pages/directory/OrganizationDetailPage";
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="tickets/:ticketId" element={<TicketDetailPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="profile" element={<ProfilePage />} />
+        <Route path="calls" element={<CallsPage />} />
         <Route path="directory/organizations" element={<OrganizationsPage />} />
         <Route path="directory/organizations/:organizationId" element={<OrganizationDetailPage />} />
         <Route path="directory/contacts" element={<ContactsPage />} />

@@ -6,6 +6,7 @@ from app.api.routers import (
     auth,
     automation_rules,
     calendars,
+    calls,
     categories,
     contacts,
     contracts,
@@ -49,6 +50,7 @@ app.include_router(notifications.router)
 app.include_router(integration_settings.router)
 app.include_router(automation_rules.router)
 app.include_router(reports.router)
+app.include_router(calls.router)
 
 
 @app.get("/health")

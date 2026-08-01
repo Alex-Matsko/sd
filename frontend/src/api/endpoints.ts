@@ -1,7 +1,8 @@
-import { apiDownload, apiRequest, apiUpload } from "./client";
+import { apiDownload, apiPage, apiRequest, apiUpload } from "./client";
 import type {
   Asset,
   Attachment,
+  Call,
   AuditLogEntry,
   AutomationRule,
   BusinessCalendar,
@@ -199,9 +200,20 @@ export interface TicketFilters {
   priority?: Priority;
   channel?: Channel;
   sla_risk?: "warning" | "breached";
+  q?: string;
+  limit?: number;
+  offset?: number;
 }
 export function listTickets(filters: TicketFilters = {}) {
-  return apiRequest<Ticket[]>("/tickets", { query: filters as Record<string, string | number | undefined> });
+  return apiPage<Ticket>("/tickets", filters as Record<string, string | number | undefined>);
+}
+export interface TicketStats {
+  by_status: Record<TicketStatus, number>;
+  open_total: number;
+  overdue: number;
+}
+export function getTicketStats() {
+  return apiRequest<TicketStats>("/tickets/stats");
 }
 export function getTicket(id: number) {
   return apiRequest<Ticket>(`/tickets/${id}`);
@@ -277,6 +289,20 @@ export function listAutomationRules() {
 }
 export function updateAutomationRule(id: number, payload: { threshold_days?: number; is_active?: boolean }) {
   return apiRequest<AutomationRule>(`/automation-rules/${id}`, { method: "PATCH", body: payload });
+}
+
+// --- Calls (телефония, раздел 2.4) ---
+export function listCalls(params: { unhandled_only?: boolean; limit?: number; offset?: number } = {}) {
+  return apiPage<Call>("/calls", params as Record<string, string | number | boolean | undefined>);
+}
+export function markCallHandled(id: number) {
+  return apiRequest<Call>(`/calls/${id}/handled`, { method: "POST" });
+}
+export function createTicketFromCall(id: number, payload: { subject: string; contact_id?: number | null }) {
+  return apiRequest<Ticket>(`/calls/${id}/ticket`, { method: "POST", body: payload });
+}
+export function listTicketCalls(ticketId: number) {
+  return apiRequest<Call[]>(`/tickets/${ticketId}/calls`);
 }
 
 // --- Integration settings (Настройки → Каналы) ---

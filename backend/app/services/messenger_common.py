@@ -10,6 +10,7 @@ cost more than it saves for two channels.
 
 import re
 
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from app.core.enums import OPEN_TICKET_STATUSES, TicketStatus
@@ -85,6 +86,62 @@ def find_contact_by_phone(db: Session, raw_phone: str) -> Contact | None:
         if normalize_phone_digits(phone_row.phone) == normalized:
             return phone_row.contact
     return None
+
+
+MY_TICKETS_PAGE_SIZE = 5
+
+
+def my_tickets_page(db: Session, contact: Contact, offset: int = 0) -> tuple[list[Ticket], int]:
+    """One page of the client's "Мои заявки" list, plus the total count.
+
+    Ordering happens in SQL - open tickets first, newest first within each
+    group - rather than by re-sorting a fetched window. The previous version
+    took the 10 newest and only then floated open ones to the top, so a
+    still-open ticket older than 10 closed ones dropped off the list
+    entirely: exactly the ticket the client most likely wanted."""
+    base = db.query(Ticket).filter(Ticket.contact_id == contact.id)
+    ordering = case((Ticket.status.in_(OPEN_TICKET_STATUSES), 0), else_=1)
+    items = (
+        base.order_by(ordering, Ticket.created_at.desc(), Ticket.id.desc())
+        .limit(MY_TICKETS_PAGE_SIZE)
+        .offset(max(0, offset))
+        .all()
+    )
+    return items, base.count()
+
+
+def my_tickets_buttons(tickets: list[Ticket], offset: int, total: int) -> list[list[dict]]:
+    """Ticket buttons plus a "показать ещё" row when more pages remain. The
+    offset travels inside the callback payload, so no extra per-chat state is
+    needed to remember where the client is in the list."""
+    buttons = [
+        [
+            {
+                "type": "callback",
+                "text": f"{t.display_number} — {t.subject[:30]} ({STATUS_LABELS_RU.get(TicketStatus(t.status), t.status)})",
+                "payload": f"ticket:{t.id}",
+            }
+        ]
+        for t in tickets
+    ]
+    next_offset = offset + MY_TICKETS_PAGE_SIZE
+    if next_offset < total:
+        buttons.append([{"type": "callback", "text": "Показать ещё →", "payload": f"mytickets:{next_offset}"}])
+    if offset > 0:
+        previous = max(0, offset - MY_TICKETS_PAGE_SIZE)
+        buttons.append([{"type": "callback", "text": "← Назад", "payload": f"mytickets:{previous}"}])
+    return buttons
+
+
+def my_tickets_caption(tickets: list[Ticket], offset: int, total: int) -> str:
+    if not tickets:
+        return "У вас пока нет заявок."
+    shown_from = offset + 1
+    shown_to = offset + len(tickets)
+    open_count = sum(1 for t in tickets if TicketStatus(t.status) in OPEN_TICKET_STATUSES)
+    if total <= MY_TICKETS_PAGE_SIZE:
+        return f"Ваши заявки (открытых: {open_count} из {total}):"
+    return f"Ваши заявки {shown_from}–{shown_to} из {total} (сначала открытые):"
 
 
 def merge_contacts(db: Session, from_contact: Contact, into_contact: Contact) -> None:

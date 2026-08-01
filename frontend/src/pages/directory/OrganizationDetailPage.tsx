@@ -40,7 +40,7 @@ export function OrganizationDetailPage() {
   const assetsQuery = useQuery({ queryKey: ["assets", id], queryFn: () => listAssets(id), enabled: Number.isFinite(id) });
   const ticketsQuery = useQuery({
     queryKey: ["tickets", "org", id],
-    queryFn: () => listTickets({ organization_id: id }),
+    queryFn: () => listTickets({ organization_id: id, limit: 10 }),
     enabled: Number.isFinite(id),
   });
   const usageQuery = useQuery({
@@ -51,6 +51,7 @@ export function OrganizationDetailPage() {
   });
 
   const org = orgQuery.data;
+  const orgTickets = ticketsQuery.data?.items ?? [];
 
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
@@ -343,8 +344,8 @@ export function OrganizationDetailPage() {
             Вся очередь →
           </Link>
         </div>
-        {(ticketsQuery.data ?? []).length === 0 && <p className="muted">Заявок пока нет</p>}
-        {(ticketsQuery.data ?? []).length > 0 && (
+        {orgTickets.length === 0 && <p className="muted">Заявок пока нет</p>}
+        {orgTickets.length > 0 && (
           <div className="list">
             <div className="list-head" style={{ gridTemplateColumns: "90px 2fr 1fr 1fr" }}>
               <span>№</span>
@@ -352,7 +353,7 @@ export function OrganizationDetailPage() {
               <span>Приоритет</span>
               <span>Статус</span>
             </div>
-            {(ticketsQuery.data ?? []).slice(0, 10).map((t) => (
+            {orgTickets.map((t) => (
               <Link className="list-row" style={{ gridTemplateColumns: "90px 2fr 1fr 1fr" }} key={t.id} to={`/tickets/${t.id}`}>
                 <span className="mono">{t.display_number}</span>
                 <span className="subject">{t.subject}</span>

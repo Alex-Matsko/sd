@@ -15,6 +15,7 @@ import {
   IconGrid,
   IconInbox,
   IconLogout,
+  IconPhone,
   IconPlus,
   IconRoute,
   IconServer,
@@ -165,6 +166,10 @@ export function Layout() {
           <NavLink to="/tickets/new" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
             <IconPlus size={16} />
             <span>Новая заявка</span>
+          </NavLink>
+          <NavLink to="/calls" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
+            <IconPhone size={16} />
+            <span>Звонки</span>
           </NavLink>
           <NavLink to="/reports" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
             <IconFileText size={16} />

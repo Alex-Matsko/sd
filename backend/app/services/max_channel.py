@@ -408,27 +408,17 @@ def _send_ticket_choice(config: MaxConfig, chat_id: str, open_tickets: list[Tick
     _send(config, chat_id, "У вас несколько открытых заявок. К какой относится сообщение?", buttons=buttons)
 
 
-def _send_my_tickets(db: Session, config: MaxConfig, contact: Contact, chat_id: str) -> None:
-    tickets = db.query(Ticket).filter(Ticket.contact_id == contact.id).order_by(Ticket.created_at.desc()).limit(10).all()
+def _send_my_tickets(db: Session, config: MaxConfig, contact: Contact, chat_id: str, offset: int = 0) -> None:
+    tickets, total = messenger_common.my_tickets_page(db, contact, offset)
     if not tickets:
-        _send(config, chat_id, "У вас пока нет заявок.")
+        _send(config, chat_id, messenger_common.my_tickets_caption(tickets, offset, total))
         return
-    # Structured for scanability: active tickets first (most likely to be
-    # tapped), history below - a flat "created_at desc" list buried an open
-    # ticket under recently-closed ones once there were more than a couple.
-    open_tickets = [t for t in tickets if TicketStatus(t.status) in OPEN_TICKET_STATUSES]
-    closed_tickets = [t for t in tickets if TicketStatus(t.status) not in OPEN_TICKET_STATUSES]
-    buttons = [
-        [
-            {
-                "type": "callback",
-                "text": f"{t.display_number} — {t.subject[:30]} ({_STATUS_LABELS_RU.get(TicketStatus(t.status), t.status)})",
-                "payload": f"ticket:{t.id}",
-            }
-        ]
-        for t in open_tickets + closed_tickets
-    ]
-    _send(config, chat_id, f"Ваши заявки (открытых: {len(open_tickets)} из {len(tickets)}):", buttons=buttons)
+    _send(
+        config,
+        chat_id,
+        messenger_common.my_tickets_caption(tickets, offset, total),
+        buttons=messenger_common.my_tickets_buttons(tickets, offset, total),
+    )
 
 
 def _cancel_pending_ticket_flow(state: ChannelConversationState) -> None:
@@ -557,6 +547,10 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
 
     if payload == "cmd:my_tickets":
         _send_my_tickets(db, config, contact, parsed.chat_id)
+        return
+
+    if payload.startswith("mytickets:"):
+        _send_my_tickets(db, config, contact, parsed.chat_id, offset=int(payload.split(":", 1)[1]))
         return
 
     if payload.startswith("close:"):

@@ -127,6 +127,27 @@ async function authorizedFetch(path: string, init: RequestInit, retry = true): P
   return res;
 }
 
+export interface Page<T> {
+  items: T[];
+  total: number;
+}
+
+/** GET for paged endpoints: the body stays a plain array, the full match
+ * count comes back in `X-Total-Count` (see the tickets router). */
+export async function apiPage<T>(
+  path: string,
+  query: Record<string, string | number | boolean | undefined | null> = {}
+): Promise<Page<T>> {
+  const url = new URL(`${API_BASE_URL}${path}`);
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, String(value));
+  }
+  const res = await authorizedFetch(url.pathname + url.search, { method: "GET" });
+  const items = (await res.json()) as T[];
+  const header = res.headers.get("X-Total-Count");
+  return { items, total: header === null ? items.length : Number(header) };
+}
+
 export async function apiUpload<T>(path: string, file: File): Promise<T> {
   const form = new FormData();
   form.append("file", file);

@@ -11,11 +11,13 @@ import {
   listMessages,
   listOrganizations,
   listTeams,
+  listTicketCalls,
   listTimeEntries,
   listUsers,
   updateTicket,
   uploadAttachment,
 } from "../api/endpoints";
+import { formatCallDuration } from "./CallsPage";
 import { ErrorBanner, Loading, PriorityTag, SlaTimerBadge, StatusTag, ChannelTag, WhoMini } from "../components/ui";
 import {
   CHANNEL_LABELS,
@@ -64,6 +66,11 @@ export function TicketDetailPage() {
   const timeEntriesQuery = useQuery({ queryKey: ["ticket", id, "time"], queryFn: () => listTimeEntries(id), enabled: Number.isFinite(id) });
   const historyQuery = useQuery({ queryKey: ["ticket", id, "history"], queryFn: () => getTicketHistory(id), enabled: Number.isFinite(id) });
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: listUsers });
+  const callsQuery = useQuery({
+    queryKey: ["ticket", id, "calls"],
+    queryFn: () => listTicketCalls(id),
+    enabled: Number.isFinite(id),
+  });
   const teamsQuery = useQuery({ queryKey: ["teams"], queryFn: listTeams });
   const orgsQuery = useQuery({ queryKey: ["organizations"], queryFn: listOrganizations });
 
@@ -153,6 +160,34 @@ export function TicketDetailPage() {
                 <dt>Срок решения</dt>
                 <dd>{formatDateTime(ticket.sla_resolution_due_at)}</dd>
               </dl>
+            </div>
+          )}
+
+          {(callsQuery.data ?? []).length > 0 && (
+            <div className="panel">
+              <div className="panel-head">
+                <h2>Звонок</h2>
+              </div>
+              {(callsQuery.data ?? []).map((call) => (
+                <dl className="props-list" key={call.id}>
+                  <dt>Номер</dt>
+                  <dd className="mono">{call.from_number}</dd>
+                  <dt>Время</dt>
+                  <dd>{formatDateTime(call.started_at ?? call.created_at)}</dd>
+                  <dt>Длительность</dt>
+                  <dd>{formatCallDuration(call.duration_seconds)}</dd>
+                  <dt>Запись разговора</dt>
+                  <dd>
+                    {call.recording_url ? (
+                      <a className="link" href={call.recording_url} target="_blank" rel="noreferrer">
+                        Прослушать
+                      </a>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </dd>
+                </dl>
+              ))}
             </div>
           )}
 

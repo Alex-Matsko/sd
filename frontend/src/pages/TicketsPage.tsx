@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { listOrganizations, listTickets, listUsers } from "../api/endpoints";
 import { EmptyState, ErrorBanner, Loading, PriorityTag, SlaTag, StatusTag, ChannelTag } from "../components/ui";
@@ -44,11 +44,30 @@ export function TicketsPage() {
   const [slaRiskFilter, setSlaRiskFilter] = useState<"" | "warning" | "breached">("");
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"list" | "kanban">("list");
+  const [page, setPage] = useState(0);
+
+  // Search moved server-side along with paging: filtering the fetched array
+  // would only ever search the page in hand. Debounced so typing doesn't
+  // fire a request per keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const filters = [statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter, debouncedSearch];
+  // Any filter change invalidates the current page number - staying on page 5
+  // of a result set that now has two pages would show an empty screen.
+  useEffect(() => setPage(0), filters);
+
+  // The Kanban board is a board of work in flight, so it needs the whole
+  // (filtered) set at once rather than the list view's page.
+  const pageSize = view === "kanban" ? 200 : 25;
 
   const orgsQuery = useQuery({ queryKey: ["organizations"], queryFn: listOrganizations });
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: listUsers });
   const ticketsQuery = useQuery({
-    queryKey: ["tickets", statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter],
+    queryKey: ["tickets", ...filters, view, page],
     queryFn: () =>
       listTickets({
         status_filter: statusFilter || undefined,
@@ -56,19 +75,22 @@ export function TicketsPage() {
         organization_id: organizationFilter || undefined,
         assigned_engineer_id: assigneeFilter || undefined,
         sla_risk: slaRiskFilter || undefined,
+        q: debouncedSearch || undefined,
+        limit: pageSize,
+        offset: view === "kanban" ? 0 : page * pageSize,
       }),
     refetchInterval: 30_000,
+    // Keeps the previous page visible while the next one loads, instead of
+    // collapsing the table to a spinner on every page step.
+    placeholderData: keepPreviousData,
   });
 
   const orgsById = new Map((orgsQuery.data ?? []).map((o) => [o.id, o]));
   const usersById = new Map((usersQuery.data ?? []).map((u) => [u.id, u]));
 
-  const filtered = useMemo(() => {
-    const tickets = ticketsQuery.data ?? [];
-    if (!search.trim()) return tickets;
-    const q = search.trim().toLowerCase();
-    return tickets.filter((t) => t.subject.toLowerCase().includes(q) || t.display_number.toLowerCase().includes(q));
-  }, [ticketsQuery.data, search]);
+  const filtered = ticketsQuery.data?.items ?? [];
+  const total = ticketsQuery.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <div className="view">
@@ -191,6 +213,33 @@ export function TicketsPage() {
             </Link>
           ))}
         </div>
+      )}
+
+      {ticketsQuery.isSuccess && view === "list" && total > 0 && (
+        <div className="pagination">
+          <span className="muted">
+            {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} из {total}
+          </span>
+          <div className="spacer" />
+          <button className="btn btn-ghost" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+            ← Назад
+          </button>
+          <span className="muted">
+            Стр. {page + 1} из {pageCount}
+          </span>
+          <button
+            className="btn btn-ghost"
+            disabled={page + 1 >= pageCount}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Вперёд →
+          </button>
+        </div>
+      )}
+      {ticketsQuery.isSuccess && view === "kanban" && total > filtered.length && (
+        <p className="muted" style={{ marginTop: 12 }}>
+          На доске показаны {filtered.length} из {total} заявок — уточните фильтры, чтобы увидеть остальные.
+        </p>
       )}
     </div>
   );

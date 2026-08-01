@@ -1,47 +1,25 @@
-import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { listTickets } from "../api/endpoints";
+import { getTicketStats, listTickets } from "../api/endpoints";
 import { ErrorBanner, Loading, PriorityTag } from "../components/ui";
 import { STATUS_LABELS, formatDateTime } from "../lib/labels";
-import type { TicketStatus } from "../api/types";
-
-const OPEN_STATUSES: TicketStatus[] = [
-  "new",
-  "assigned",
-  "in_progress",
-  "waiting_customer",
-  "waiting_third_party",
-];
 
 export function DashboardPage() {
-  const ticketsQuery = useQuery({ queryKey: ["tickets", "dashboard"], queryFn: () => listTickets() });
+  // Counters come from the server rather than from counting a fetched list:
+  // the queue is paged, so a client-side tally would silently only cover the
+  // first page once the system has more than a page's worth of tickets.
+  const statsQuery = useQuery({ queryKey: ["ticket-stats"], queryFn: getTicketStats, refetchInterval: 60_000 });
+  const recentQuery = useQuery({
+    queryKey: ["tickets", "dashboard-recent"],
+    queryFn: () => listTickets({ limit: 8 }),
+    refetchInterval: 60_000,
+  });
 
-  const stats = useMemo(() => {
-    const tickets = ticketsQuery.data ?? [];
-    const byStatus = new Map<TicketStatus, number>();
-    let overdue = 0;
-    const now = Date.now();
-    for (const t of tickets) {
-      byStatus.set(t.status, (byStatus.get(t.status) ?? 0) + 1);
-      if (
-        OPEN_STATUSES.includes(t.status) &&
-        t.sla_resolution_due_at &&
-        new Date(t.sla_resolution_due_at).getTime() < now
-      ) {
-        overdue += 1;
-      }
-    }
-    const open = tickets.filter((t) => OPEN_STATUSES.includes(t.status));
-    return { tickets, byStatus, overdue, open };
-  }, [ticketsQuery.data]);
+  if (statsQuery.isLoading || recentQuery.isLoading) return <div className="view"><Loading /></div>;
+  if (statsQuery.isError) return <div className="view"><ErrorBanner message={(statsQuery.error as Error).message} /></div>;
 
-  if (ticketsQuery.isLoading) return <div className="view"><Loading /></div>;
-  if (ticketsQuery.isError) return <div className="view"><ErrorBanner message={(ticketsQuery.error as Error).message} /></div>;
-
-  const recentOpen = [...stats.open]
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 8);
+  const stats = statsQuery.data!;
+  const recentOpen = recentQuery.data?.items ?? [];
 
   return (
     <div className="view">
@@ -49,7 +27,7 @@ export function DashboardPage() {
 
       <div className="stat-grid">
         <div className="stat-card">
-          <span className="stat-value">{stats.open.length}</span>
+          <span className="stat-value">{stats.open_total}</span>
           <span className="stat-label">Открытых заявок</span>
         </div>
         <div className="stat-card stat-card-warn">
@@ -57,11 +35,11 @@ export function DashboardPage() {
           <span className="stat-label">Нарушение SLA</span>
         </div>
         <div className="stat-card">
-          <span className="stat-value">{stats.byStatus.get("new") ?? 0}</span>
+          <span className="stat-value">{stats.by_status.new ?? 0}</span>
           <span className="stat-label">Новых</span>
         </div>
         <div className="stat-card">
-          <span className="stat-value">{stats.byStatus.get("waiting_customer") ?? 0}</span>
+          <span className="stat-value">{stats.by_status.waiting_customer ?? 0}</span>
           <span className="stat-label">Ждут клиента</span>
         </div>
       </div>
