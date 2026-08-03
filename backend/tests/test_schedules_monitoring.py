@@ -325,3 +325,80 @@ def test_alerts_endpoint_serialises_dates(db: Session, monitoring_enabled):
     ours = next(r for r in rendered if r.external_id == "EV-SER")
     assert isinstance(ours.created_at, datetime)
     assert isinstance(ours.resolved_at, datetime)
+
+
+# --- настройки мониторинга ----------------------------------------------
+
+
+def test_settings_expose_defaults_before_anything_is_configured(db: Session):
+    from app.api.routers.monitoring import get_monitoring_settings
+
+    # Явно приводим настройки к «ничего не настроено»: тесты идут по общей
+    # dev-базе, где мониторинг мог быть уже сконфигурирован руками.
+    integration_settings.upsert(db, Channel.PORTAL, IntegrationSettingUpdate(config={}))
+
+    settings = get_monitoring_settings(db=db, _=None)
+
+    # Форма должна показывать реальные умолчания, а не пустые поля: иначе
+    # администратор решит, что маппинг надо заполнять с нуля.
+    assert settings.field_map == monitoring.DEFAULT_FIELD_MAP
+    assert settings.auto_resolve is True
+
+
+def test_saving_settings_keeps_the_secret_when_it_is_not_touched(db: Session, monitoring_enabled):
+    from app.api.routers.monitoring import MonitoringSettingsUpdate, update_monitoring_settings
+
+    # Ключ webhook_secret вообще не передаётся — это «не менять».
+    result = update_monitoring_settings(MonitoringSettingsUpdate(auto_resolve=False), db=db, _=None)
+
+    assert result.webhook_secret_set is True
+    assert result.auto_resolve is False
+    # И секрет по-прежнему тот же, а не затёрт пустым значением.
+    assert monitoring.load_config(db).webhook_secret == "s3cret"
+
+
+def test_explicit_null_clears_the_secret(db: Session, monitoring_enabled):
+    from app.api.routers.monitoring import MonitoringSettingsUpdate, update_monitoring_settings
+
+    result = update_monitoring_settings(MonitoringSettingsUpdate(webhook_secret=None), db=db, _=None)
+
+    assert result.webhook_secret_set is False
+    assert monitoring.load_config(db).webhook_secret is None
+
+
+def test_field_map_stores_only_the_differences(db: Session, monitoring_enabled):
+    """В конфиг пишутся только отличия от умолчаний: если сохранять карту
+    целиком, изменение умолчаний в коде не дойдёт до уже настроенных
+    установок — они навсегда останутся со старыми именами полей."""
+    from app.api.routers.monitoring import MonitoringSettingsUpdate, update_monitoring_settings
+
+    result = update_monitoring_settings(
+        MonitoringSettingsUpdate(field_map={**monitoring.DEFAULT_FIELD_MAP, "external_id": "eventid"}),
+        db=db, _=None,
+    )
+
+    setting = integration_settings.get(db, Channel.PORTAL)
+    assert setting.config["monitoring"]["field_map"] == {"external_id": "eventid"}
+    # Наружу при этом отдаётся полная карта — форме нужны все поля.
+    assert result.field_map["external_id"] == "eventid"
+    assert result.field_map["subject"] == "subject"
+
+
+def test_settings_reject_non_ascii_secret_with_a_readable_message(db: Session, monitoring_enabled):
+    from fastapi import HTTPException as FastAPIHTTPException
+
+    from app.api.routers.monitoring import MonitoringSettingsUpdate, update_monitoring_settings
+
+    with pytest.raises(FastAPIHTTPException) as exc:
+        update_monitoring_settings(MonitoringSettingsUpdate(webhook_secret="секрет"), db=db, _=None)
+
+    assert exc.value.status_code == 400
+    assert "латинских" in exc.value.detail
+
+
+def test_settings_never_return_the_secret_itself(db: Session, monitoring_enabled):
+    from app.api.routers.monitoring import get_monitoring_settings
+
+    settings = get_monitoring_settings(db=db, _=None)
+
+    assert "s3cret" not in settings.model_dump_json()

@@ -5,11 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, verify_webhook_secret
+from app.api.deps import get_current_user, require_manager_or_above, verify_webhook_secret
+from app.core.enums import Channel
 from app.db import get_db
 from app.models.monitoring_alert import MonitoringAlert
 from app.models.user import User
-from app.services import monitoring
+from app.schemas.integration_setting import IntegrationSettingUpdate
+from app.services import integration_settings, monitoring
 
 logger = logging.getLogger("app.monitoring")
 
@@ -82,3 +84,88 @@ def list_alerts(
         .offset(max(0, offset))
         .all()
     )
+
+
+# --- настройки ------------------------------------------------------------
+#
+# Отдельный ресурс, а не карточка в списке каналов. Хранятся настройки в
+# конфиге канала PORTAL (см. monitoring.load_config), но для интерфейса это
+# деталь реализации: мониторинг — не клиентский канал, и «Портал» в списке
+# каналов был бы фантомной записью, которую нельзя настроить.
+
+
+class MonitoringSettingsRead(BaseModel):
+    is_enabled: bool
+    auto_resolve: bool
+    default_contact_id: int | None
+    field_map: dict[str, str]
+    # Значение секрета не возвращается никогда — только признак, что он задан.
+    webhook_secret_set: bool
+    updated_at: datetime
+
+
+class MonitoringSettingsUpdate(BaseModel):
+    is_enabled: bool | None = None
+    auto_resolve: bool | None = None
+    default_contact_id: int | None = None
+    field_map: dict[str, str] | None = None
+    # Пропущено — не менять, null или "" — очистить, иначе — записать.
+    # Различие «не передано» и «передано null» берётся из model_fields_set:
+    # без него снять секрет было бы невозможно.
+    webhook_secret: str | None = None
+
+
+def _read_settings(setting) -> MonitoringSettingsRead:
+    cfg = (setting.config or {}).get("monitoring") or {}
+    return MonitoringSettingsRead(
+        is_enabled=setting.is_enabled,
+        auto_resolve=cfg.get("auto_resolve", True),
+        default_contact_id=cfg.get("default_contact_id"),
+        field_map={**monitoring.DEFAULT_FIELD_MAP, **(cfg.get("field_map") or {})},
+        webhook_secret_set="monitoring_webhook_secret" in (setting.secrets_encrypted or {}),
+        updated_at=setting.updated_at,
+    )
+
+
+@router.get("/settings/monitoring", response_model=MonitoringSettingsRead)
+def get_monitoring_settings(
+    db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> MonitoringSettingsRead:
+    return _read_settings(integration_settings.get_or_create(db, Channel.PORTAL))
+
+
+@router.put("/settings/monitoring", response_model=MonitoringSettingsRead)
+def update_monitoring_settings(
+    payload: MonitoringSettingsUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_manager_or_above),
+) -> MonitoringSettingsRead:
+    setting = integration_settings.get_or_create(db, Channel.PORTAL)
+    current = (setting.config or {}).get("monitoring") or {}
+    fields = payload.model_fields_set
+
+    monitoring_config = dict(current)
+    if "auto_resolve" in fields:
+        monitoring_config["auto_resolve"] = payload.auto_resolve
+    if "default_contact_id" in fields:
+        monitoring_config["default_contact_id"] = payload.default_contact_id
+    if "field_map" in fields:
+        # Хранятся только отличия от значений по умолчанию: иначе изменение
+        # умолчаний в коде не дошло бы до уже настроенных установок.
+        overrides = {
+            key: value
+            for key, value in (payload.field_map or {}).items()
+            if value and value != monitoring.DEFAULT_FIELD_MAP.get(key)
+        }
+        monitoring_config["field_map"] = overrides
+
+    update = IntegrationSettingUpdate(
+        is_enabled=payload.is_enabled,
+        config={**(setting.config or {}), "monitoring": monitoring_config},
+        secrets={"monitoring_webhook_secret": payload.webhook_secret} if "webhook_secret" in fields else None,
+    )
+    try:
+        setting = integration_settings.upsert(db, Channel.PORTAL, update)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return _read_settings(setting)

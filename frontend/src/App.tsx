@@ -24,6 +24,7 @@ import { AutomationRulesPage } from "./pages/settings/AutomationRulesPage";
 import { UsersPage } from "./pages/settings/UsersPage";
 import { ResponseTemplatesPage } from "./pages/settings/ResponseTemplatesPage";
 import { TicketSchedulesPage } from "./pages/settings/TicketSchedulesPage";
+import { MonitoringPage } from "./pages/settings/MonitoringPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { user, isLoading } = useAuth();
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="settings/users" element={<UsersPage />} />
         <Route path="settings/templates" element={<ResponseTemplatesPage />} />
         <Route path="settings/schedules" element={<TicketSchedulesPage />} />
+        <Route path="settings/monitoring" element={<MonitoringPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

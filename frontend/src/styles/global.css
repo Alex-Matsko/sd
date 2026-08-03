@@ -846,8 +846,37 @@ a.list-row:hover {
   gap: 12px;
 }
 
+/* Подзаголовок внутри длинной формы настроек. */
+.form-section {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 22px 0 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.severity-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 13px;
+}
+
+.severity-hint code {
+  background: var(--neutral-bg);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
 .form-row-inline {
   display: flex;
+  /* Явно, а не по умолчанию: класс часто ставится вместе с .form-row, а тот
+     задаёт flex-direction: column. Без сброса чекбокс уезжал над подписью
+     и вставал по центру строки. */
+  flex-direction: row;
   align-items: center;
   gap: 14px;
   margin-bottom: 10px;

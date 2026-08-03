@@ -55,6 +55,7 @@ const GROUPS: NavGroup[] = [
       { to: "/settings/categories", label: "Категории", icon: <IconGrid size={15} /> },
       { to: "/settings/routing", label: "Маршрутизация", icon: <IconRoute size={15} /> },
       { to: "/settings/channels", label: "Каналы", icon: <IconInbox size={15} /> },
+      { to: "/settings/monitoring", label: "Мониторинг", icon: <IconServer size={15} /> },
       { to: "/settings/automation", label: "Автоматизация", icon: <IconClock size={15} /> },
       { to: "/settings/templates", label: "Шаблоны ответов", icon: <IconFileText size={15} /> },
       { to: "/settings/schedules", label: "Плановые заявки", icon: <IconClock size={15} /> },

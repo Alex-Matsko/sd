@@ -436,3 +436,43 @@ export function updateIntegrationSetting(
 ) {
   return apiRequest<IntegrationSetting>(`/settings/integrations/${channel}`, { method: "PUT", body: payload });
 }
+
+// --- Мониторинг (Zabbix) ---
+// Отдельный ресурс, а не канал: настройки лежат в конфиге канала «Портал»,
+// но для интерфейса это деталь реализации.
+export interface MonitoringSettings {
+  is_enabled: boolean;
+  auto_resolve: boolean;
+  default_contact_id: number | null;
+  field_map: Record<string, string>;
+  webhook_secret_set: boolean;
+  updated_at: string;
+}
+export function getMonitoringSettings() {
+  return apiRequest<MonitoringSettings>("/settings/monitoring");
+}
+export function updateMonitoringSettings(payload: {
+  is_enabled?: boolean;
+  auto_resolve?: boolean;
+  default_contact_id?: number | null;
+  field_map?: Record<string, string>;
+  // Ключ не передан — секрет не меняется; null — снять; строка — записать.
+  webhook_secret?: string | null;
+}) {
+  return apiRequest<MonitoringSettings>("/settings/monitoring", { method: "PUT", body: payload });
+}
+export function listMonitoringAlerts(params: { unresolved_only?: boolean; limit?: number; offset?: number } = {}) {
+  return apiPage<MonitoringAlert>("/monitoring/alerts", params as Record<string, string | number | undefined>);
+}
+export interface MonitoringAlert {
+  id: number;
+  external_id: string;
+  source: string;
+  severity: string | null;
+  host: string | null;
+  subject: string;
+  organization_id: number | null;
+  ticket_id: number | null;
+  resolved_at: string | null;
+  created_at: string;
+}
