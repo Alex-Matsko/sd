@@ -17,7 +17,7 @@ import threading
 import time
 import traceback
 
-from app.config import settings
+from app.config import settings, warn_about_insecure_settings
 from app.db import SessionLocal
 from app.services import automation, email_channel, max_channel, schedules, sla, telegram_channel
 
@@ -117,6 +117,7 @@ def telegram_poller_loop() -> None:
 
 
 def main() -> None:
+    warn_about_insecure_settings()
     print(
         f"[worker] SLA-эскалации каждые {settings.worker_interval_seconds} с; "
         "опрос почты, MAX и Telegram — интервалы из Настроек → Каналы",

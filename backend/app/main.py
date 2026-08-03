@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,10 +27,24 @@ from app.api.routers import (
     teams,
     tickets,
     users,
+    ws,
 )
-from app.config import settings
+from app.config import settings, warn_about_insecure_settings
 
-app = FastAPI(title="Открытые Горизонты — Service Desk API", version="0.1.0")
+from app.services.realtime import hub
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    warn_about_insecure_settings()
+    # The LISTEN loop lives for the process, not per request - one database
+    # connection shared by every websocket this process holds.
+    hub.start()
+    yield
+    await hub.stop()
+
+
+app = FastAPI(title="Открытые Горизонты — Service Desk API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,6 +77,7 @@ app.include_router(portal.router)
 app.include_router(saved_filters.router)
 app.include_router(schedules.router)
 app.include_router(monitoring.router)
+app.include_router(ws.router)
 
 
 @app.get("/health")

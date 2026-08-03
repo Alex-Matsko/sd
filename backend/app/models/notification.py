@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, String, func
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, func, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.enums import NotificationType
@@ -13,6 +13,10 @@ class Notification(Base):
     a notification belongs to exactly one user."""
 
     __tablename__ = "notifications"
+
+    # Индекс на внешний ключ к tickets: без него удаление заявки
+    # проверяет эту таблицу полным перебором (миграция c3e91a5d70f4).
+    __table_args__ = (Index("ix_notifications_ticket_id", "ticket_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)

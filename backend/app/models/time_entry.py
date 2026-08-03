@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Date, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -13,6 +13,12 @@ class TimeEntry(Base, TimestampMixin):
     rate at the moment it was logged (docs/decisions.md: proportional split)."""
 
     __tablename__ = "time_entries"
+
+    # Списания за период — основа отчёта и биллинга.
+    __table_args__ = (
+        Index("ix_time_entries_entry_date", "entry_date"),
+        Index("ix_time_entries_ticket_id", "ticket_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id"))

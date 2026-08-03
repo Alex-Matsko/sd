@@ -41,4 +41,41 @@ class Settings(BaseSettings):
     seed_admin_password: str = "ChangeMe123!"
 
 
+    # Set to "production" on the customer's VM. Nothing behaves differently
+    # because of it - it only decides whether the checks below shout.
+    environment: str = "development"
+
+
 settings = Settings()
+
+# Values that are fine on a laptop and dangerous on a server. They're printed
+# at startup rather than enforced, because refusing to boot would strand an
+# operator mid-deploy with a system that won't come up; a loud, specific
+# warning in the logs is what actually gets acted on. See docs/deployment.md.
+INSECURE_DEFAULTS = {
+    "JWT_SECRET": (settings.jwt_secret, "change-me"),
+    "SETTINGS_ENCRYPTION_KEY": (settings.settings_encryption_key, "jP7WgoQPzPJpZgjNEQ7irtTLLEYhHQfpKxKZSQhcvlk="),
+    "SEED_ADMIN_PASSWORD": (settings.seed_admin_password, "ChangeMe123!"),
+}
+
+
+def insecure_settings() -> list[str]:
+    """Names of settings still holding their published default value."""
+    problems = [name for name, (actual, default) in INSECURE_DEFAULTS.items() if actual == default]
+    if settings.cors_origins == ["*"]:
+        problems.append("CORS_ORIGINS")
+    return problems
+
+
+def warn_about_insecure_settings() -> None:
+    problems = insecure_settings()
+    if not problems:
+        return
+    banner = "!" * 72
+    detail = ", ".join(problems)
+    if settings.environment == "production":
+        print(f"\n{banner}\nВНИМАНИЕ: в проде используются небезопасные значения по умолчанию: {detail}", flush=True)
+        print("Ключ шифрования опубликован в репозитории — секреты интеграций фактически не защищены.", flush=True)
+        print(f"См. docs/deployment.md, раздел «Секреты».\n{banner}\n", flush=True)
+    else:
+        print(f"[config] dev-значения по умолчанию: {detail} (в проде обязательно заменить)", flush=True)

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import CallDirection, CallStatus
@@ -15,6 +15,10 @@ class Call(Base, TimestampMixin):
     place on the ticket itself."""
 
     __tablename__ = "calls"
+
+    # Индекс на внешний ключ к tickets: без него удаление заявки
+    # проверяет эту таблицу полным перебором (миграция c3e91a5d70f4).
+    __table_args__ = (Index("ix_calls_ticket_id", "ticket_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     # Provider's own call id - the same call arrives as several webhook events

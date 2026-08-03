@@ -20,6 +20,7 @@ import {
   uploadAttachment,
 } from "../api/endpoints";
 import { formatCallDuration } from "./CallsPage";
+import { TicketTimer } from "../components/TicketTimer";
 import { ErrorBanner, Loading, PriorityTag, SlaTimerBadge, StatusTag, ChannelTag, WhoMini } from "../components/ui";
 import {
   CHANNEL_LABELS,
@@ -336,6 +337,7 @@ export function TicketDetailPage() {
           <div className="panel">
             <div className="panel-head">
               <h2>Учёт времени</h2>
+              <TicketTimer ticketId={id} />
             </div>
             <div className="time-entries">
               {(timeEntriesQuery.data ?? []).map((entry) => (

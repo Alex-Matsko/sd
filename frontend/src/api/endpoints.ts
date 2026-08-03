@@ -213,6 +213,11 @@ export interface TicketStats {
   by_status: Record<TicketStatus, number>;
   open_total: number;
   overdue: number;
+  /** Заявки, у которых срок решения истекает сегодня, — по ТЗ 8.3 это главное,
+   *  на что смотрит руководитель утром. */
+  at_risk_today: number;
+  week_flow: { date: string; created: number; closed: number }[];
+  workload: { engineer_name: string; open_tickets: number }[];
 }
 export function getTicketStats() {
   return apiRequest<TicketStats>("/tickets/stats");
@@ -264,6 +269,24 @@ export function createTimeEntry(
 }
 export function updateTimeEntry(ticketId: number, entryId: number, payload: Partial<TimeEntry>) {
   return apiRequest<TimeEntry>(`/tickets/${ticketId}/time-entries/${entryId}`, { method: "PATCH", body: payload });
+}
+
+// Таймер принадлежит сотруднику, а не заявке: одновременно он может быть
+// запущен только один, поэтому «активный таймер» спрашивается без id заявки.
+export interface ActiveTimer {
+  running: boolean;
+  ticket_id?: number;
+  display_number?: string;
+  started_at?: string;
+}
+export function getActiveTimer() {
+  return apiRequest<ActiveTimer>("/tickets/timer/active");
+}
+export function startTimer(ticketId: number) {
+  return apiRequest<ActiveTimer>(`/tickets/${ticketId}/timer/start`, { method: "POST" });
+}
+export function stopTimer() {
+  return apiRequest<TimeEntry | null>("/tickets/timer/stop", { method: "POST" });
 }
 export function getTicketHistory(ticketId: number) {
   return apiRequest<AuditLogEntry[]>(`/tickets/${ticketId}/history`);

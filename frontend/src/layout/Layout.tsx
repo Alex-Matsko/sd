@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/AuthContext";
 import { Avatar } from "../components/ui";
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from "../api/endpoints";
+import { connectNotifications } from "../api/realtime";
 import {
   IconBell,
   IconBuilding,
@@ -56,6 +57,7 @@ const GROUPS: NavGroup[] = [
       { to: "/settings/channels", label: "Каналы", icon: <IconInbox size={15} /> },
       { to: "/settings/automation", label: "Автоматизация", icon: <IconClock size={15} /> },
       { to: "/settings/templates", label: "Шаблоны ответов", icon: <IconFileText size={15} /> },
+      { to: "/settings/schedules", label: "Плановые заявки", icon: <IconClock size={15} /> },
       { to: "/settings/users", label: "Сотрудники", icon: <IconUsers size={15} /> },
     ],
   },
@@ -70,8 +72,14 @@ function NotificationBell() {
   const notificationsQuery = useQuery({
     queryKey: ["notifications"],
     queryFn: () => listNotifications(),
+    // Kept as a fallback alongside the websocket below: if a proxy blocks
+    // websockets the bell still updates, just less promptly.
     refetchInterval: 30_000,
   });
+
+  // Live push (ТЗ р. 8). The payload isn't merged into the cache directly -
+  // refetching keeps one source of truth for the list and its read state.
+  useEffect(() => connectNotifications(() => qc.invalidateQueries({ queryKey: ["notifications"] })), [qc]);
 
   const readMutation = useMutation({
     mutationFn: (id: number) => markNotificationRead(id),

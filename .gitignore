@@ -11,3 +11,7 @@ frontend/dist/
 frontend/.env
 frontend/.env.local
 frontend/tsconfig.tsbuildinfo
+
+# Локальный оверрайд Compose: бинд-маунт исходников и pytest в образе.
+# На машине заказчика его быть не должно (см. docs/deployment.md).
+docker-compose.override.yml

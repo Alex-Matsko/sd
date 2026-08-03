@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -147,10 +147,68 @@ def get_ticket_stats(db: Session = Depends(get_db), _: User = Depends(get_curren
         )
         .scalar()
     )
+    # Section 8.3 wants "SLA-риски сегодня" - open tickets whose resolution
+    # deadline falls before the end of today, i.e. what has to be dealt with
+    # now, as distinct from what is already overdue.
+    now = datetime.now(timezone.utc)
+    end_of_day = datetime.combine(now.date(), time.max, tzinfo=timezone.utc)
+    at_risk_today = (
+        db.query(func.count(Ticket.id))
+        .filter(
+            Ticket.status.in_(OPEN_TICKET_STATUSES),
+            Ticket.sla_resolution_due_at.isnot(None),
+            Ticket.sla_resolution_due_at >= now,
+            Ticket.sla_resolution_due_at <= end_of_day,
+        )
+        .scalar()
+    )
+
+    # Поток за неделю: создано и закрыто по дням. Одно «создано» ничего не
+    # говорит - вопрос в том, разгребается очередь или копится, а это видно
+    # только в паре с «закрыто» (р. 8.3).
+    week_start = now.date() - timedelta(days=6)
+    week_start_at = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
+    created_rows = (
+        db.query(func.date(Ticket.created_at), func.count(Ticket.id))
+        .filter(Ticket.created_at >= week_start_at)
+        .group_by(func.date(Ticket.created_at))
+        .all()
+    )
+    closed_rows = (
+        db.query(func.date(Ticket.closed_at), func.count(Ticket.id))
+        .filter(Ticket.closed_at.isnot(None), Ticket.closed_at >= week_start_at)
+        .group_by(func.date(Ticket.closed_at))
+        .all()
+    )
+    created_by_day = {str(day): count for day, count in created_rows}
+    closed_by_day = {str(day): count for day, count in closed_rows}
+    week_flow = [
+        {
+            "date": day.isoformat(),
+            "created": created_by_day.get(day.isoformat(), 0),
+            "closed": closed_by_day.get(day.isoformat(), 0),
+        }
+        for day in (week_start + timedelta(days=offset) for offset in range(7))
+    ]
+
+    # Engineer workload: open tickets currently on each person's plate.
+    workload_rows = (
+        db.query(User.full_name, func.count(Ticket.id))
+        .join(Ticket, Ticket.assigned_engineer_id == User.id)
+        .filter(Ticket.status.in_(OPEN_TICKET_STATUSES))
+        .group_by(User.id, User.full_name)
+        .order_by(func.count(Ticket.id).desc())
+        .limit(10)
+        .all()
+    )
+
     return {
         "by_status": {s.value: by_status.get(s, 0) for s in TicketStatus},
         "open_total": sum(by_status.get(s, 0) for s in OPEN_TICKET_STATUSES),
         "overdue": int(overdue or 0),
+        "at_risk_today": int(at_risk_today or 0),
+        "week_flow": week_flow,
+        "workload": [{"engineer_name": name, "open_tickets": count} for name, count in workload_rows],
     }
 
 
@@ -303,6 +361,39 @@ def create_time_entry(
 ) -> TimeEntry:
     ticket = _get_ticket_or_404(db, ticket_id)
     return time_entries_service.create_time_entry(db, ticket, payload, actor)
+
+
+@router.get("/timer/active")
+def get_my_timer(db: Session = Depends(get_db), actor: User = Depends(get_current_user)) -> dict:
+    """The running timer belongs to the person, not the ticket, so this lives
+    outside /{ticket_id} - the UI needs to know a timer is running even when
+    the engineer is looking at a different ticket."""
+    timer = time_entries_service.get_active_timer(db, actor)
+    if timer is None:
+        return {"running": False}
+    ticket = db.get(Ticket, timer.ticket_id)
+    return {
+        "running": True,
+        "ticket_id": timer.ticket_id,
+        "display_number": ticket.display_number if ticket else None,
+        "started_at": timer.started_at,
+    }
+
+
+@router.post("/{ticket_id}/timer/start")
+def start_timer(
+    ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)
+) -> dict:
+    ticket = _get_ticket_or_404(db, ticket_id)
+    timer = time_entries_service.start_timer(db, ticket, actor)
+    return {"running": True, "ticket_id": timer.ticket_id, "started_at": timer.started_at}
+
+
+@router.post("/timer/stop", response_model=TimeEntryRead | None)
+def stop_timer(db: Session = Depends(get_db), actor: User = Depends(get_current_user)) -> TimeEntry | None:
+    """Returns the booked entry, or null when the timer ran for under a
+    minute (a mis-click) and nothing was written."""
+    return time_entries_service.stop_timer(db, actor)
 
 
 @router.patch("/{ticket_id}/time-entries/{entry_id}", response_model=TimeEntryRead)

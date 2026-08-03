@@ -227,8 +227,13 @@ def compute_view(db: Session, ticket: Ticket, cache: SlaCache | None = None, now
 
 
 def _notify(db: Session, user_ids: set[int], type_: NotificationType, ticket: Ticket, title: str) -> None:
+    from app.services import realtime
+
     for user_id in user_ids:
         db.add(Notification(user_id=user_id, ticket_id=ticket.id, type=type_, title=title))
+        # Fires on commit (pg_notify semantics), so the client is never woken
+        # for a row that a rollback would have removed.
+        realtime.publish_notification(db, user_id, type_.value, title, ticket.id)
     _notify_telegram(db, user_ids, title)
 
 

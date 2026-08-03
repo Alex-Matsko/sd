@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.enums import Channel
@@ -15,7 +15,13 @@ class ChannelConversationState(Base, TimestampMixin):
     """
 
     __tablename__ = "channel_conversation_states"
-    __table_args__ = (UniqueConstraint("channel", "external_user_id", name="uq_channel_conversation_identity"),)
+    __table_args__ = (
+        UniqueConstraint("channel", "external_user_id", name="uq_channel_conversation_identity"),
+        # Индексы на внешние ключи к tickets: без них удаление заявки
+        # проверяет эту таблицу полным перебором (миграция c3e91a5d70f4).
+        Index("ix_channel_conversation_states_active_ticket_id", "active_ticket_id"),
+        Index("ix_channel_conversation_states_revive_parent_ticket_id", "revive_parent_ticket_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     channel: Mapped[Channel] = mapped_column(SAEnum(Channel, native_enum=False, length=20, validate_strings=True))

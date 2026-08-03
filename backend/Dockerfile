@@ -17,8 +17,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY certs/russian-trusted-root-ca.pem /usr/local/share/ca-certificates/russian-trusted-root-ca.crt
 RUN update-ca-certificates
 
-COPY requirements.txt .
+COPY requirements.txt requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Тестовые зависимости в боевой образ не попадают. Локально их ставит
+# docker-compose.override.yml (см. README): раньше pytest доставлялся руками
+# в запущенный контейнер и молча исчезал при каждой пересборке.
+ARG INSTALL_DEV=false
+RUN if [ "$INSTALL_DEV" = "true" ]; then pip install --no-cache-dir -r requirements-dev.txt; fi
 
 COPY . .
 

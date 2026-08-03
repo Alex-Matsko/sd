@@ -4,6 +4,42 @@ import { getTicketStats, listTickets } from "../api/endpoints";
 import { ErrorBanner, Loading, PriorityTag } from "../components/ui";
 import { STATUS_LABELS, formatDateTime } from "../lib/labels";
 
+const WEEKDAYS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+
+/** Поток заявок за неделю (ТЗ 8.3). Две полосы на день вместо линейного
+ *  графика: смысл здесь не в тренде, а в том, разгребаем мы очередь или она
+ *  копится, — а это читается по тому, какая полоса длиннее. */
+function WeekFlow({ days }: { days: { date: string; created: number; closed: number }[] }) {
+  const peak = Math.max(1, ...days.flatMap((d) => [d.created, d.closed]));
+  return (
+    <div className="week-flow">
+      {days.map((day) => {
+        const date = new Date(day.date);
+        return (
+          <div className="week-flow-day" key={day.date}>
+            <div className="week-flow-bars">
+              <div
+                className="week-flow-bar week-flow-bar-created"
+                style={{ height: `${(day.created / peak) * 100}%` }}
+                title={`Создано: ${day.created}`}
+              />
+              <div
+                className="week-flow-bar week-flow-bar-closed"
+                style={{ height: `${(day.closed / peak) * 100}%` }}
+                title={`Закрыто: ${day.closed}`}
+              />
+            </div>
+            <span className="week-flow-label muted">{WEEKDAYS[date.getDay()]}</span>
+            <span className="week-flow-value mono">
+              {day.created}/{day.closed}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function DashboardPage() {
   // Counters come from the server rather than from counting a fetched list:
   // the queue is paged, so a client-side tally would silently only cover the
@@ -20,6 +56,8 @@ export function DashboardPage() {
 
   const stats = statsQuery.data!;
   const recentOpen = recentQuery.data?.items ?? [];
+  const workload = stats.workload ?? [];
+  const workloadPeak = Math.max(1, ...workload.map((w) => w.open_tickets));
 
   return (
     <div className="view">
@@ -30,9 +68,15 @@ export function DashboardPage() {
           <span className="stat-value">{stats.open_total}</span>
           <span className="stat-label">Открытых заявок</span>
         </div>
-        <div className="stat-card stat-card-warn">
+        {/* Тревожный цвет — только когда есть о чём тревожиться. Ноль,
+            подсвеченный красным, приучает не смотреть на цвет вообще. */}
+        <Link className={`stat-card${stats.overdue > 0 ? " stat-card-danger" : ""}`} to="/tickets?overdue=1">
           <span className="stat-value">{stats.overdue}</span>
           <span className="stat-label">Нарушение SLA</span>
+        </Link>
+        <div className={`stat-card${stats.at_risk_today > 0 ? " stat-card-warn" : ""}`}>
+          <span className="stat-value">{stats.at_risk_today}</span>
+          <span className="stat-label">Срок решения истекает сегодня</span>
         </div>
         <div className="stat-card">
           <span className="stat-value">{stats.by_status.new ?? 0}</span>
@@ -41,6 +85,39 @@ export function DashboardPage() {
         <div className="stat-card">
           <span className="stat-value">{stats.by_status.waiting_customer ?? 0}</span>
           <span className="stat-label">Ждут клиента</span>
+        </div>
+      </div>
+
+      <div className="dashboard-columns">
+        <div className="panel">
+          <div className="panel-head">
+            <h2>Поток за неделю</h2>
+            <span className="muted week-flow-legend">
+              <i className="swatch swatch-created" /> создано
+              <i className="swatch swatch-closed" /> закрыто
+            </span>
+          </div>
+          {(stats.week_flow ?? []).length === 0 ? (
+            <p className="muted">Данных пока нет</p>
+          ) : (
+            <WeekFlow days={stats.week_flow} />
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-head">
+            <h2>Загрузка инженеров</h2>
+          </div>
+          {workload.length === 0 && <p className="muted">Открытых заявок ни на кого не назначено</p>}
+          {workload.map((row) => (
+            <div className="workload-row" key={row.engineer_name}>
+              <span className="workload-name">{row.engineer_name}</span>
+              <span className="workload-track">
+                <span className="workload-fill" style={{ width: `${(row.open_tickets / workloadPeak) * 100}%` }} />
+              </span>
+              <span className="mono">{row.open_tickets}</span>
+            </div>
+          ))}
         </div>
       </div>
 

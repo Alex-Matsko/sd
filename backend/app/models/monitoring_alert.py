@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -17,6 +17,10 @@ class MonitoringAlert(Base, TimestampMixin):
     update the existing record, not open a second ticket for one outage."""
 
     __tablename__ = "monitoring_alerts"
+
+    # Индекс на внешний ключ к tickets: без него удаление заявки
+    # проверяет эту таблицу полным перебором (миграция c3e91a5d70f4).
+    __table_args__ = (Index("ix_monitoring_alerts_ticket_id", "ticket_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     external_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import Channel, MessageDirection
@@ -9,6 +9,10 @@ from app.models.base import Base
 
 class Message(Base):
     __tablename__ = "messages"
+
+    # Переписка грузится по ticket_id при каждом открытии карточки, а поиск
+    # по тексту ходит сюда через EXISTS.
+    __table_args__ = (Index("ix_messages_ticket_id", "ticket_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id", ondelete="CASCADE"))

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Identity, Integer, String
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Identity, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import Channel, ImpactUrgencyLevel, Priority, TicketStatus, TicketType
@@ -9,6 +9,21 @@ from app.models.base import Base, TimestampMixin
 
 class Ticket(Base, TimestampMixin):
     __tablename__ = "tickets"
+
+    # Индексы под фактические запросы очереди, дашборда и отчётов; каждый
+    # замедляет вставку, поэтому «на всякий случай» здесь ничего нет.
+    # См. миграцию c3e91a5d70f4 и docs/decisions.md.
+    __table_args__ = (
+        Index("ix_tickets_created_at", "created_at"),
+        Index("ix_tickets_status_created_at", "status", "created_at"),
+        Index("ix_tickets_closed_at", "closed_at"),
+        Index("ix_tickets_resolved_at", "resolved_at"),
+        Index("ix_tickets_organization_created_at", "organization_id", "created_at"),
+        Index("ix_tickets_assigned_engineer_id", "assigned_engineer_id"),
+        # Без него удаление заявки перебирает всю таблицу (self-reference),
+        # и панель «связанные заявки» ищет потомков полным сканом.
+        Index("ix_tickets_parent_ticket_id", "parent_ticket_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     # Sequential ticket number, independent of `id`, backing the OH-<number>

@@ -58,8 +58,21 @@ def _resolve_days_ago(db: Session, ticket: Ticket, days: float) -> None:
     db.commit()
 
 
+def _drain(db: Session) -> None:
+    """Прогоняет движок по уже существующим кандидатам до начала проверки.
+
+    Тесты идут по общей dev-базе, в которой живут настоящие заявки от ручных
+    проверок. Без этого счётчик срабатываний считал бы и их: тест на
+    пользовательский порог падал из-за заявки, решённой два дня назад
+    во время живого тестирования ботов.
+    """
+    automation.run_automation_rules(db)
+
+
 def test_auto_close_fires_after_threshold(db: Session, contact: Contact):
     rule = _default_rule(db)
+    _drain(db)
+
     ticket = _make_ticket(db, contact)
     _resolve_days_ago(db, ticket, rule.threshold_days + 1)
 
@@ -73,6 +86,8 @@ def test_auto_close_fires_after_threshold(db: Session, contact: Contact):
 
 def test_auto_close_does_not_fire_before_threshold(db: Session, contact: Contact):
     rule = _default_rule(db)
+    _drain(db)
+
     ticket = _make_ticket(db, contact)
     _resolve_days_ago(db, ticket, max(rule.threshold_days - 1, 0.1))
 
@@ -88,6 +103,8 @@ def test_inactive_rule_does_not_fire(db: Session, contact: Contact):
     rule.is_active = False
     db.add(rule)
     db.commit()
+
+    _drain(db)
 
     ticket = _make_ticket(db, contact)
     _resolve_days_ago(db, ticket, rule.threshold_days + 5)
@@ -105,6 +122,8 @@ def test_custom_threshold_is_respected(db: Session, contact: Contact):
     db.add(rule)
     db.commit()
 
+    _drain(db)
+
     ticket = _make_ticket(db, contact)
     _resolve_days_ago(db, ticket, 1.5)
 
@@ -117,6 +136,8 @@ def test_custom_threshold_is_respected(db: Session, contact: Contact):
 
 def test_client_reply_removes_ticket_from_auto_close_candidates(db: Session, contact: Contact):
     rule = _default_rule(db)
+    _drain(db)
+
     ticket = _make_ticket(db, contact)
     _resolve_days_ago(db, ticket, rule.threshold_days + 5)
 
@@ -141,6 +162,8 @@ def test_reresolved_ticket_uses_latest_resolution_time_not_first(db: Session, co
     the audit trail, or a ticket resolved long ago, reopened, and just
     re-resolved would be incorrectly auto-closed immediately."""
     rule = _default_rule(db)
+    _drain(db)
+
     ticket = _make_ticket(db, contact)
     _resolve_days_ago(db, ticket, rule.threshold_days + 10)  # first resolution, long ago
 

@@ -1,5 +1,9 @@
+import math
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
+from app.models.active_timer import ActiveTimer
 from app.models.contract import Contract
 from app.models.ticket import Ticket
 from app.models.time_entry import TimeEntry
@@ -36,6 +40,73 @@ def create_time_entry(db: Session, ticket: Ticket, payload: TimeEntryCreate, eng
     db.commit()
     db.refresh(entry)
     return entry
+
+
+# Threshold in *seconds*, checked before rounding. Comparing the rounded
+# minutes instead would never trigger: ceil() turns even half a second into
+# one minute, so a mis-click would still book an entry.
+MIN_TIMER_SECONDS = 60
+
+# Подпись автоматического списания. Запись, созданная таймером, ничем иначе
+# не отличается от введённой руками — а разница важна и инженеру, который
+# правит своё время, и при разборе счёта с клиентом.
+TIMER_COMMENT = "По таймеру"
+
+
+def start_timer(db: Session, ticket: Ticket, engineer: User) -> ActiveTimer:
+    """Starts the engineer's work timer on this ticket, stopping whatever was
+    running before (see ActiveTimer: one per person). The previous timer is
+    banked as a time entry rather than discarded - the work happened, and
+    silently losing it would be worse than an entry the engineer can edit."""
+    existing = db.query(ActiveTimer).filter(ActiveTimer.user_id == engineer.id).first()
+    if existing is not None:
+        if existing.ticket_id == ticket.id:
+            return existing
+        stop_timer(db, engineer, comment="Автоматически остановлен при запуске таймера по другой заявке")
+
+    timer = ActiveTimer(user_id=engineer.id, ticket_id=ticket.id, started_at=datetime.now(timezone.utc))
+    db.add(timer)
+    db.commit()
+    db.refresh(timer)
+    return timer
+
+
+def stop_timer(db: Session, engineer: User, comment: str | None = None) -> TimeEntry | None:
+    """Stops the running timer and books the elapsed minutes.
+
+    Anything under a minute is dropped rather than logged as a zero-minute
+    entry - a mis-click shouldn't leave a row in the client's billing report.
+    Elapsed time is rounded up, so 90 seconds of work bills as 2 minutes
+    rather than 1."""
+    timer = db.query(ActiveTimer).filter(ActiveTimer.user_id == engineer.id).first()
+    if timer is None:
+        return None
+
+    ticket = db.get(Ticket, timer.ticket_id)
+    elapsed_seconds = (datetime.now(timezone.utc) - timer.started_at).total_seconds()
+    db.delete(timer)
+
+    if ticket is None or elapsed_seconds < MIN_TIMER_SECONDS:
+        db.commit()
+        return None
+
+    minutes = math.ceil(elapsed_seconds / 60)
+
+    entry = create_time_entry(
+        db,
+        ticket,
+        TimeEntryCreate(
+            entry_date=datetime.now(timezone.utc).date(),
+            duration_minutes=minutes,
+            comment=comment or TIMER_COMMENT,
+        ),
+        engineer,
+    )
+    return entry
+
+
+def get_active_timer(db: Session, engineer: User) -> ActiveTimer | None:
+    return db.query(ActiveTimer).filter(ActiveTimer.user_id == engineer.id).first()
 
 
 def update_time_entry(db: Session, entry: TimeEntry, payload: TimeEntryUpdate, actor: User) -> TimeEntry:
