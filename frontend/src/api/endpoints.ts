@@ -476,3 +476,62 @@ export interface MonitoringAlert {
   resolved_at: string | null;
   created_at: string;
 }
+
+// --- Отчёты клиентам (ТЗ 9.2): готовые снимки за период ---
+export interface ClientReportSummary {
+  id: number;
+  organization_id: number;
+  organization_name: string;
+  period_start: string;
+  period_end: string;
+  period_title: string;
+  tickets_count: number;
+  hours: number;
+  source: "manual" | "auto";
+  generated_at: string;
+  generated_by: string | null;
+  sent_at: string | null;
+}
+export interface ClientReportDetail extends ClientReportSummary {
+  data: ClientReportData;
+}
+export interface ClientReportData {
+  organization: string;
+  period: { date_from: string; date_to: string };
+  totals: { tickets: number; resolved: number; hours: number };
+  sla: {
+    reaction_met_pct: number | null;
+    resolution_met_pct: number | null;
+    reaction_total: number;
+    resolution_total: number;
+    reaction_missed: number;
+    resolution_missed: number;
+  };
+  by_channel: { channel: string; count: number }[];
+  by_category: { category: string; count: number }[];
+  package: Record<string, number | string>;
+  tickets: {
+    display_number: string;
+    subject: string;
+    channel: string;
+    status: string;
+    created_at: string;
+    hours: number;
+  }[];
+}
+export function listClientReports(params: { organization_id?: number; limit?: number; offset?: number } = {}) {
+  return apiPage<ClientReportSummary>("/client-reports", params as Record<string, string | number | undefined>);
+}
+export function generateClientReport(payload: { organization_id: number; period_start: string; period_end: string }) {
+  return apiRequest<ClientReportSummary>("/client-reports", { method: "POST", body: payload });
+}
+export function getStoredClientReport(id: number) {
+  return apiRequest<ClientReportDetail>(`/client-reports/${id}`);
+}
+export function markClientReportSent(id: number) {
+  return apiRequest<ClientReportSummary>(`/client-reports/${id}/sent`, { method: "POST" });
+}
+export function downloadStoredClientReport(report: ClientReportSummary, format: "pdf" | "xlsx") {
+  const name = `Отчёт ${report.organization_name} ${report.period_title}.${format}`;
+  return apiDownload(`/client-reports/${report.id}/${format}`, name);
+}

@@ -7,6 +7,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { TicketsPage } from "./pages/TicketsPage";
 import { NewTicketPage } from "./pages/NewTicketPage";
 import { ReportsPage } from "./pages/ReportsPage";
+import { ClientReportsPage } from "./pages/ClientReportsPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { CallsPage } from "./pages/CallsPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="tickets/new" element={<NewTicketPage />} />
         <Route path="tickets/:ticketId" element={<TicketDetailPage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="client-reports" element={<ClientReportsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="calls" element={<CallsPage />} />
         <Route path="directory/organizations" element={<OrganizationsPage />} />

@@ -19,7 +19,15 @@ import traceback
 
 from app.config import settings, warn_about_insecure_settings
 from app.db import SessionLocal
-from app.services import automation, email_channel, max_channel, schedules, sla, telegram_channel
+from app.services import (
+    automation,
+    client_reports,
+    email_channel,
+    max_channel,
+    schedules,
+    sla,
+    telegram_channel,
+)
 
 TICK_SECONDS = 5
 EMAIL_POLL_FALLBACK_SECONDS = 30  # used while the email channel isn't configured/enabled
@@ -50,6 +58,23 @@ def run_schedule_sweep() -> int:
     db = SessionLocal()
     try:
         return schedules.run_due_schedules(db)
+    finally:
+        db.close()
+
+
+def run_monthly_client_reports() -> int:
+    """Отчёты клиентам за прошлый месяц (ТЗ 9.2).
+
+    Проверяется на том же тике, что и расписания, но фактическая работа
+    делается один раз за месяц: если отчёты за прошлый месяц уже есть,
+    проход ничего не создаёт. Отдельного планировщика ради этого заводить
+    незачем, а привязка к «ровно 1-го числа в 00:00» сломалась бы от любого
+    простоя воркера — здесь же отчёты сформируются при первом запуске после
+    начала месяца.
+    """
+    db = SessionLocal()
+    try:
+        return client_reports.generate_monthly_reports(db)
     finally:
         db.close()
 
@@ -148,6 +173,12 @@ def main() -> None:
                 planned = run_schedule_sweep()
                 if planned:
                     print(f"[worker] расписания: создано плановых заявок - {planned}", flush=True)
+            except Exception:
+                traceback.print_exc()
+            try:
+                generated = run_monthly_client_reports()
+                if generated:
+                    print(f"[worker] отчёты клиентам: сформировано - {generated}", flush=True)
             except Exception:
                 traceback.print_exc()
             next_sla_run = now + settings.worker_interval_seconds

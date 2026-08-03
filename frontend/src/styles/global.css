@@ -1688,3 +1688,49 @@ button.attachment-chip:hover {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ---------- Отчёты клиентам (ТЗ 9.2) ---------- */
+
+.report-preview {
+  /* Предпросмотр — это документ, а не панель управления: рамка потолще,
+     чтобы он читался как отдельный лист среди остальных панелей. */
+  border-color: var(--border-strong);
+}
+
+.report-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px 28px;
+  margin-bottom: 4px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0;
+  margin: 0;
+  font-size: 13px;
+}
+
+.kv dt {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.kv dd {
+  margin: 0;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.kv dt:last-of-type,
+.kv dd:last-of-type {
+  border-bottom: none;
+}
+
+.sent-mark {
+  color: var(--success);
+}

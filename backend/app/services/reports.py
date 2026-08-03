@@ -355,6 +355,32 @@ def get_client_report(db: Session, organization_id: int, date_from: date, date_t
             "overage_cost": "—",
         }
 
+    # Соблюдение SLA — то, за что клиент, собственно, платит по договору;
+    # считается по тем же полям, что и внутренний отчёт, но без имён
+    # инженеров и без сравнения с другими клиентами.
+    reaction_known = [t for t in tickets if t.sla_reaction_met is not None]
+    resolution_known = [t for t in tickets if t.sla_resolution_met is not None]
+    sla = {
+        "reaction_met_pct": _pct(sum(1 for t in reaction_known if t.sla_reaction_met), len(reaction_known)),
+        "resolution_met_pct": _pct(sum(1 for t in resolution_known if t.sla_resolution_met), len(resolution_known)),
+        "reaction_total": len(reaction_known),
+        "resolution_total": len(resolution_known),
+        # Нарушения показываются числом, а не списком: список читался бы как
+        # претензия к самому себе в документе, который вы же и отправляете.
+        "reaction_missed": sum(1 for t in reaction_known if not t.sla_reaction_met),
+        "resolution_missed": sum(1 for t in resolution_known if not t.sla_resolution_met),
+    }
+
+    categories = {c.id: c.name for c in db.query(Category.id, Category.name)}
+    by_channel: dict[str, int] = defaultdict(int)
+    by_category: dict[str, int] = defaultdict(int)
+    for t in tickets:
+        by_channel[_CLIENT_CHANNEL_LABELS.get(t.channel.value, t.channel.value)] += 1
+        by_category[categories.get(t.category_id, "Без категории")] += 1
+
+    def _sorted(counts: dict[str, int], key: str) -> list[dict]:
+        return [{key: name, "count": count} for name, count in sorted(counts.items(), key=lambda kv: -kv[1])]
+
     return {
         "organization": organization.name,
         "period": {"date_from": date_from.isoformat(), "date_to": date_to.isoformat()},
@@ -363,6 +389,9 @@ def get_client_report(db: Session, organization_id: int, date_from: date, date_t
             "resolved": sum(1 for t in tickets if t.resolved_at is not None),
             "hours": round(total_minutes / 60, 2),
         },
+        "sla": sla,
+        "by_channel": _sorted(by_channel, "channel"),
+        "by_category": _sorted(by_category, "category"),
         "package": package,
         "tickets": [
             {

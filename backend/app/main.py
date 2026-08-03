@@ -18,6 +18,7 @@ from app.api.routers import (
     organizations,
     portal,
     priority_matrix,
+    client_reports,
     reports,
     response_templates,
     saved_filters,
@@ -71,6 +72,7 @@ app.include_router(notifications.router)
 app.include_router(integration_settings.router)
 app.include_router(automation_rules.router)
 app.include_router(reports.router)
+app.include_router(client_reports.router)
 app.include_router(calls.router)
 app.include_router(response_templates.router)
 app.include_router(portal.router)

@@ -185,6 +185,10 @@ export function Layout() {
             <IconFileText size={16} />
             <span>Отчёты</span>
           </NavLink>
+          <NavLink to="/client-reports" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
+            <IconFileText size={16} />
+            <span>Отчёты клиентам</span>
+          </NavLink>
 
           {GROUPS.map((group) => (
             <div className="nav-group" key={group.key}>
