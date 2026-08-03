@@ -94,9 +94,16 @@ def generate(
     return report
 
 
-def mark_sent(db: Session, report: ClientReport, actor: User) -> ClientReport:
-    report.sent_at = datetime.now(timezone.utc)
-    report.sent_by_user_id = actor.id
+def set_sent(db: Session, report: ClientReport, actor: User, sent: bool) -> ClientReport:
+    """Ставит или снимает отметку об отправке.
+
+    Отметка ничего не делает — она только напоминает, кому отчёт уже ушёл.
+    Раз так, снять её должно быть так же просто, как поставить: единственным
+    способом откатить случайное нажатие было переформирование отчёта, что
+    для пометки чересчур.
+    """
+    report.sent_at = datetime.now(timezone.utc) if sent else None
+    report.sent_by_user_id = actor.id if sent else None
     db.add(report)
     db.commit()
     db.refresh(report)

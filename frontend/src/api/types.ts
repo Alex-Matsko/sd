@@ -319,29 +319,6 @@ export interface ResponseTemplate {
   is_active: boolean;
 }
 
-export interface ClientReport {
-  organization: string;
-  period: { date_from: string; date_to: string };
-  totals: { tickets: number; resolved: number; hours: number };
-  package: {
-    package_total_hours: number | string;
-    package_used_hours: number | string;
-    package_remaining_hours: number | string;
-    overage_hours: number | string;
-    overage_cost: number | string;
-  };
-  tickets: {
-    display_number: string;
-    subject: string;
-    channel: string;
-    priority: string;
-    status: string;
-    created_at: string;
-    resolved_at: string | null;
-    hours: number;
-  }[];
-}
-
 export type CallDirection = "inbound" | "outbound";
 export type CallStatus = "ringing" | "answered" | "completed" | "missed" | "failed";
 

@@ -1,10 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  downloadClientReportPdf,
-  downloadClientReportXlsx,
   downloadOverviewXlsx,
-  getClientReport,
   getReportsOverview,
   listOrganizations,
 } from "../api/endpoints";
@@ -64,7 +61,7 @@ export function ReportsPage() {
 
   return (
     <div className="view" style={{ maxWidth: 1180 }}>
-      <h1 className="view-title">Отчёты</h1>
+      <h1 className="view-title">Сводный отчёт</h1>
       <div className="filter-bar">
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
         <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
@@ -81,13 +78,6 @@ export function ReportsPage() {
           Выгрузить в XLSX
         </button>
       </div>
-
-      <ClientReportPanel
-        organizations={orgsQuery.data ?? []}
-        organizationId={organizationId}
-        dateFrom={dateFrom}
-        dateTo={dateTo}
-      />
 
       {reportQuery.isLoading && <Loading />}
       {reportQuery.isError && <ErrorBanner message={(reportQuery.error as Error).message} />}
@@ -248,82 +238,3 @@ export function ReportsPage() {
   );
 }
 
-/** ТЗ 9.2: отчёт клиенту за период — форма, пригодная для отправки клиенту.
- *  Показывается только когда выбрана конкретная организация: «отчёт клиенту»
- *  по всем клиентам сразу смысла не имеет. */
-function ClientReportPanel({
-  organizations,
-  organizationId,
-  dateFrom,
-  dateTo,
-}: {
-  organizations: { id: number; name: string }[];
-  organizationId: number | "";
-  dateFrom: string;
-  dateTo: string;
-}) {
-  const clientQuery = useQuery({
-    queryKey: ["client-report", organizationId, dateFrom, dateTo],
-    queryFn: () => getClientReport(Number(organizationId), dateFrom, dateTo),
-    enabled: !!organizationId,
-  });
-
-  if (!organizationId) {
-    return (
-      <div className="panel">
-        <div className="panel-head">
-          <h2>Отчёт клиенту</h2>
-        </div>
-        <p className="muted">
-          Выберите организацию в фильтре выше — сформируется отчёт за период с расходом пакета часов, пригодный для
-          отправки клиенту.
-        </p>
-      </div>
-    );
-  }
-
-  const orgName = organizations.find((o) => o.id === organizationId)?.name ?? "";
-
-  return (
-    <div className="panel">
-      <div className="panel-head">
-        <h2>Отчёт клиенту — {orgName}</h2>
-        <div className="spacer" />
-        <button className="btn btn-ghost" onClick={() => downloadClientReportXlsx(Number(organizationId), dateFrom, dateTo)}>
-          XLSX
-        </button>
-        <button className="btn btn-primary" onClick={() => downloadClientReportPdf(Number(organizationId), dateFrom, dateTo)}>
-          PDF для клиента
-        </button>
-      </div>
-      {clientQuery.isLoading && <Loading />}
-      {clientQuery.isError && <ErrorBanner message={(clientQuery.error as Error).message} />}
-      {clientQuery.data && (
-        <>
-          <div className="kpi-row">
-            <div className="kpi">
-              <span className="v">{clientQuery.data.totals.tickets}</span>
-              <span className="l">Заявок за период</span>
-            </div>
-            <div className="kpi">
-              <span className="v">{clientQuery.data.totals.resolved}</span>
-              <span className="l">Решено</span>
-            </div>
-            <div className="kpi">
-              <span className="v">{clientQuery.data.totals.hours}</span>
-              <span className="l">Списано часов</span>
-            </div>
-            <div className="kpi">
-              <span className="v">{clientQuery.data.package.package_remaining_hours}</span>
-              <span className="l">Остаток пакета, ч</span>
-            </div>
-            <div className="kpi">
-              <span className="v">{clientQuery.data.package.overage_hours}</span>
-              <span className="l">Сверх пакета, ч</span>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}

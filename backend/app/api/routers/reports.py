@@ -1,12 +1,12 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.user import User
-from app.services import report_export, report_pdf, reports
+from app.services import report_export, reports
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -57,64 +57,9 @@ def export_overview(
     )
 
 
-@router.get("/client")
-def get_client_report(
-    organization_id: int,
-    date_from: date | None = None,
-    date_to: date | None = None,
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> dict:
-    """Section 9.2: the per-period statement for one client organization."""
-    date_from, date_to = _period(date_from, date_to)
-    try:
-        return reports.get_client_report(db, organization_id, date_from, date_to)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-
-
-@router.get("/client.xlsx")
-def export_client_report(
-    organization_id: int,
-    date_from: date | None = None,
-    date_to: date | None = None,
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> Response:
-    date_from, date_to = _period(date_from, date_to)
-    try:
-        data = reports.get_client_report(db, organization_id, date_from, date_to)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-    return _xlsx(
-        report_export.client_report_workbook(data),
-        report_export.filename_for("otchet-klientu", date_from, date_to),
-    )
-
-
-@router.get("/client.pdf")
-def export_client_report_pdf(
-    organization_id: int,
-    date_from: date | None = None,
-    date_to: date | None = None,
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> Response:
-    """PDF of the client statement (ТЗ р. 9). Only this report is offered as
-    PDF - it's the one that leaves the company, where a fixed layout matters.
-    The internal overview stays XLSX, since it's meant to be reworked."""
-    date_from, date_to = _period(date_from, date_to)
-    try:
-        data = reports.get_client_report(db, organization_id, date_from, date_to)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-    try:
-        content = report_pdf.client_report_pdf(data)
-    except report_pdf.FontUnavailable as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
-    filename = report_export.filename_for("otchet-klientu", date_from, date_to).replace(".xlsx", ".pdf")
-    return Response(
-        content=content,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+# Отчёт клиенту «на лету» отсюда убран. Он жил в двух местах: здесь считался
+# по запросу, а в /client-reports сохраняется снимком. Два пути к одному
+# документу — это две разные версии цифр за один и тот же месяц, причём
+# несохранённая никак не отличима от отправленной клиенту. Осталась одна
+# дорога: сформировать отчёт (он же снимок) и скачать его из раздела
+# «Отчёты клиентам». См. docs/decisions.md.

@@ -120,9 +120,22 @@ def test_generated_report_is_a_snapshot(db: Session, contact: Contact, organizat
     assert updated.data["totals"]["hours"] == 2
 
 
+def test_sent_mark_can_be_taken_back(db: Session, organization: Organization, engineer_user: User):
+    """Отметка ничего не отправляет — снять её должно быть так же просто,
+    как поставить. Раньше единственным способом откатить случайное нажатие
+    было переформирование отчёта."""
+    report = client_reports.generate(db, organization.id, PERIOD_START, PERIOD_END)
+
+    client_reports.set_sent(db, report, engineer_user, sent=True)
+    assert report.sent_at is not None and report.sent_by_user_id == engineer_user.id
+
+    client_reports.set_sent(db, report, engineer_user, sent=False)
+    assert report.sent_at is None and report.sent_by_user_id is None
+
+
 def test_regenerating_clears_the_sent_mark(db: Session, organization: Organization, engineer_user: User):
     report = client_reports.generate(db, organization.id, PERIOD_START, PERIOD_END)
-    client_reports.mark_sent(db, report, engineer_user)
+    client_reports.set_sent(db, report, engineer_user, sent=True)
     assert report.sent_at is not None
 
     # У клиента на руках старые цифры — отметка «отправлен» про новый снимок

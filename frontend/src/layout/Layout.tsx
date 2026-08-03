@@ -35,6 +35,15 @@ interface NavGroup {
 
 const GROUPS: NavGroup[] = [
   {
+    key: "reports",
+    label: "Отчёты",
+    icon: <IconFileText size={16} />,
+    items: [
+      { to: "/reports", label: "Сводный отчёт", icon: <IconGrid size={15} /> },
+      { to: "/client-reports", label: "Отчёты клиентам", icon: <IconFileText size={15} /> },
+    ],
+  },
+  {
     key: "directory",
     label: "Справочники",
     icon: <IconBuilding size={16} />,
@@ -145,7 +154,7 @@ function NotificationBell() {
 export function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ directory: true, settings: false });
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ reports: true, directory: true, settings: false });
 
   function toggleGroup(key: string) {
     setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -180,14 +189,6 @@ export function Layout() {
           <NavLink to="/calls" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
             <IconPhone size={16} />
             <span>Звонки</span>
-          </NavLink>
-          <NavLink to="/reports" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-            <IconFileText size={16} />
-            <span>Отчёты</span>
-          </NavLink>
-          <NavLink to="/client-reports" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-            <IconFileText size={16} />
-            <span>Отчёты клиентам</span>
           </NavLink>
 
           {GROUPS.map((group) => (

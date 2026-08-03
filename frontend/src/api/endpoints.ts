@@ -20,7 +20,6 @@ import type {
   Priority,
   ReportsOverview,
   ResponseTemplate,
-  ClientReport,
   RoutingRule,
   Tariff,
   TariffSlaRule,
@@ -304,29 +303,12 @@ export function markAllNotificationsRead() {
 }
 
 // --- Reports ---
-export function getClientReport(organizationId: number, dateFrom?: string, dateTo?: string) {
-  return apiRequest<ClientReport>("/reports/client", {
-    query: { organization_id: organizationId, date_from: dateFrom, date_to: dateTo },
-  });
-}
 export function downloadOverviewXlsx(dateFrom?: string, dateTo?: string, organizationId?: number) {
   const query = new URLSearchParams();
   if (dateFrom) query.set("date_from", dateFrom);
   if (dateTo) query.set("date_to", dateTo);
   if (organizationId) query.set("organization_id", String(organizationId));
   return apiDownload(`/reports/overview.xlsx?${query}`, `otchet_${dateFrom ?? ""}_${dateTo ?? ""}.xlsx`);
-}
-export function downloadClientReportPdf(organizationId: number, dateFrom?: string, dateTo?: string) {
-  const query = new URLSearchParams({ organization_id: String(organizationId) });
-  if (dateFrom) query.set("date_from", dateFrom);
-  if (dateTo) query.set("date_to", dateTo);
-  return apiDownload(`/reports/client.pdf?${query}`, `otchet-klientu_${dateFrom ?? ""}_${dateTo ?? ""}.pdf`);
-}
-export function downloadClientReportXlsx(organizationId: number, dateFrom?: string, dateTo?: string) {
-  const query = new URLSearchParams({ organization_id: String(organizationId) });
-  if (dateFrom) query.set("date_from", dateFrom);
-  if (dateTo) query.set("date_to", dateTo);
-  return apiDownload(`/reports/client.xlsx?${query}`, `otchet-klientu_${dateFrom ?? ""}_${dateTo ?? ""}.xlsx`);
 }
 
 export function getReportsOverview(filters: { date_from?: string; date_to?: string; organization_id?: number }) {
@@ -528,8 +510,8 @@ export function generateClientReport(payload: { organization_id: number; period_
 export function getStoredClientReport(id: number) {
   return apiRequest<ClientReportDetail>(`/client-reports/${id}`);
 }
-export function markClientReportSent(id: number) {
-  return apiRequest<ClientReportSummary>(`/client-reports/${id}/sent`, { method: "POST" });
+export function setClientReportSent(id: number, sent: boolean) {
+  return apiRequest<ClientReportSummary>(`/client-reports/${id}/sent`, { method: "POST", body: { sent } });
 }
 export function downloadStoredClientReport(report: ClientReportSummary, format: "pdf" | "xlsx") {
   const name = `Отчёт ${report.organization_name} ${report.period_title}.${format}`;

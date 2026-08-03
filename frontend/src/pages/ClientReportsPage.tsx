@@ -6,7 +6,7 @@ import {
   getStoredClientReport,
   listClientReports,
   listOrganizations,
-  markClientReportSent,
+  setClientReportSent,
   type ClientReportData,
   type ClientReportSummary,
 } from "../api/endpoints";
@@ -159,7 +159,10 @@ export function ClientReportsPage() {
       <div className="panel">
         <div className="panel-head">
           <h2>Сформированные отчёты</h2>
-          <span className="muted">{listQuery.data ? `всего ${listQuery.data.total}` : ""}</span>
+          <span className="muted">
+            Отметка об отправке ставится вручную — рассылки нет
+            {listQuery.data ? ` · всего ${listQuery.data.total}` : ""}
+          </span>
         </div>
         {listQuery.isLoading && <Loading />}
         {listQuery.isError && <ErrorBanner message={(listQuery.error as Error).message} />}
@@ -178,7 +181,9 @@ export function ClientReportsPage() {
   );
 }
 
-const LIST_COLUMNS = "1.6fr 1.1fr 90px 90px 1.1fr 210px";
+// Последняя колонка широкая: в ней четыре текстовых действия, и самое
+// длинное — «Отметить отправленным».
+const LIST_COLUMNS = "1.3fr 1fr 90px 80px 1fr 330px";
 
 function ReportList({
   reports,
@@ -190,7 +195,7 @@ function ReportList({
   onChanged: () => void;
 }) {
   const sentMutation = useMutation({
-    mutationFn: (id: number) => markClientReportSent(id),
+    mutationFn: ({ id, sent }: { id: number; sent: boolean }) => setClientReportSent(id, sent),
     onSuccess: onChanged,
   });
 
@@ -213,7 +218,7 @@ function ReportList({
           <span className="muted">
             {formatDateTime(r.generated_at)}
             {r.source === "auto" ? " · автоматически" : ""}
-            {r.sent_at && <span className="sent-mark"> · отправлен</span>}
+            {r.sent_at && <span className="sent-mark"> · отмечен отправленным</span>}
           </span>
           <span style={{ display: "flex", gap: 10 }}>
             <button className="btn-link" onClick={() => onOpen(r.id)}>
@@ -225,11 +230,12 @@ function ReportList({
             <button className="btn-link" onClick={() => downloadStoredClientReport(r, "xlsx")}>
               XLSX
             </button>
-            {!r.sent_at && (
-              <button className="btn-link" onClick={() => sentMutation.mutate(r.id)}>
-                Отправлен
-              </button>
-            )}
+            {/* Отметка ничего не отправляет — она только напоминает, кому
+                отчёт уже ушёл. Поэтому «Отметить отправленным», а не
+                «Отправить», и поэтому её можно снять. */}
+            <button className="btn-link" onClick={() => sentMutation.mutate({ id: r.id, sent: !r.sent_at })}>
+              {r.sent_at ? "Снять отметку" : "Отметить отправленным"}
+            </button>
           </span>
         </div>
       ))}

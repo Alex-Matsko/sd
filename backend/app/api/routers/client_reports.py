@@ -128,13 +128,20 @@ def get_client_report(
     return {**_to_read(db, report).model_dump(), "data": report.data}
 
 
+class SentUpdate(BaseModel):
+    sent: bool = True
+
+
 @router.post("/{report_id}/sent", response_model=ClientReportRead)
-def mark_client_report_sent(
-    report_id: int, db: Session = Depends(get_db), actor: User = Depends(require_manager_or_above)
+def set_client_report_sent(
+    report_id: int,
+    payload: SentUpdate | None = None,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_manager_or_above),
 ) -> ClientReportRead:
-    """Отметка «отправлен» ставится руками: рассылки нет, но без отметки
-    невозможно понять, кому отчёт уже ушёл, а кому нет."""
-    report = service.mark_sent(db, _get_or_404(db, report_id), actor)
+    """Отметка об отправке ставится и снимается руками: рассылки нет, но без
+    отметки невозможно понять, кому отчёт уже ушёл, а кому нет."""
+    report = service.set_sent(db, _get_or_404(db, report_id), actor, (payload or SentUpdate()).sent)
     return _to_read(db, report)
 
 
