@@ -1,11 +1,11 @@
-import hmac
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, verify_webhook_secret
 from app.db import get_db
 from app.models.monitoring_alert import MonitoringAlert
 from app.models.user import User
@@ -27,8 +27,8 @@ class MonitoringAlertRead(BaseModel):
     subject: str
     organization_id: int | None
     ticket_id: int | None
-    resolved_at: str | None = None
-    created_at: str
+    resolved_at: datetime | None = None
+    created_at: datetime
 
 
 @router.post("/webhooks/monitoring", status_code=status.HTTP_202_ACCEPTED)
@@ -43,10 +43,7 @@ async def monitoring_webhook(request: Request, db: Session = Depends(get_db)) ->
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Интеграция с мониторингом не настроена"
         )
 
-    if config.webhook_secret:
-        provided = request.headers.get("X-Webhook-Secret") or request.query_params.get("secret") or ""
-        if not hmac.compare_digest(provided, config.webhook_secret):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный секрет вебхука")
+    verify_webhook_secret(request, config.webhook_secret)
 
     try:
         payload = await request.json()

@@ -1,11 +1,10 @@
-import hmac
 import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_dispatcher_or_above
+from app.api.deps import get_current_user, require_dispatcher_or_above, verify_webhook_secret
 from app.core.enums import CallStatus, Channel, Priority, TicketType
 from app.db import get_db
 from app.models.call import Call
@@ -35,10 +34,7 @@ async def telephony_webhook(request: Request, db: Session = Depends(get_db)) -> 
     if config is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Канал телефонии не настроен")
 
-    if config.webhook_secret:
-        provided = request.headers.get("X-Webhook-Secret") or request.query_params.get("secret") or ""
-        if not hmac.compare_digest(provided, config.webhook_secret):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный секрет вебхука")
+    verify_webhook_secret(request, config.webhook_secret)
 
     try:
         payload = await request.json()

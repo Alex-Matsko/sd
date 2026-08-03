@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_manager_or_above
@@ -37,5 +37,10 @@ def update_integration_setting(
     db: Session = Depends(get_db),
     _: User = Depends(require_manager_or_above),
 ) -> IntegrationSettingRead:
-    setting = settings_service.upsert(db, channel, payload)
+    try:
+        setting = settings_service.upsert(db, channel, payload)
+    except ValueError as exc:
+        # Некорректный секрет — это ошибка ввода, а не сбой: администратор
+        # должен увидеть, что именно не так, прямо в форме.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return settings_service.to_read(setting)

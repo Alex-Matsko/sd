@@ -1,7 +1,8 @@
+import hmac
 from collections.abc import Generator
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -50,3 +51,19 @@ def require_roles(*roles: UserRole):
 require_dispatcher_or_above = require_roles(UserRole.DISPATCHER, UserRole.MANAGER, UserRole.ADMIN)
 require_manager_or_above = require_roles(UserRole.MANAGER, UserRole.ADMIN)
 require_admin = require_roles(UserRole.ADMIN)
+
+
+def verify_webhook_secret(request: Request, expected: str | None) -> None:
+    """Проверяет общий секрет вебхука (телефония, мониторинг).
+
+    Секрет кодируется в байты перед сравнением: `hmac.compare_digest`
+    на не-ASCII строках возбуждает TypeError, и вебхук отдавал 500 вместо
+    401 — а секрет вводит человек, и написать его кириллицей никто не мешает.
+    Сравнение остаётся постоянного времени, чтобы секрет не утекал через
+    время ответа.
+    """
+    if not expected:
+        return
+    provided = request.headers.get("X-Webhook-Secret") or request.query_params.get("secret") or ""
+    if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный секрет вебхука")

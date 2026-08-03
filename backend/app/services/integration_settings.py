@@ -29,6 +29,21 @@ def to_read(setting: IntegrationSetting) -> IntegrationSettingRead:
     )
 
 
+# Секреты, которые внешняя система шлёт нам HTTP-заголовком. Заголовки
+# декодируются как latin-1, поэтому секрет с кириллицей совпал бы при
+# передаче в query-параметре и не совпал бы в заголовке — интеграция
+# «то работает, то нет». Проще не дать завести такой секрет.
+WEBHOOK_SECRET_KEYS = {"webhook_secret", "monitoring_webhook_secret"}
+
+
+def _validate_secret(key: str, value: str) -> None:
+    if key in WEBHOOK_SECRET_KEYS and not value.isascii():
+        raise ValueError(
+            "Секрет вебхука должен состоять из латинских букв, цифр и знаков препинания: "
+            "внешняя система передаёт его HTTP-заголовком, где кириллица не проходит."
+        )
+
+
 def upsert(db: Session, channel: Channel, payload: IntegrationSettingUpdate) -> IntegrationSetting:
     setting = get_or_create(db, channel)
     if payload.is_enabled is not None:
@@ -41,6 +56,7 @@ def upsert(db: Session, channel: Channel, payload: IntegrationSettingUpdate) -> 
             if not value:
                 secrets.pop(key, None)
             else:
+                _validate_secret(key, value)
                 secrets[key] = crypto.encrypt(value)
         setting.secrets_encrypted = secrets
     db.add(setting)

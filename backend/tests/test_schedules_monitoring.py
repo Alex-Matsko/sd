@@ -4,6 +4,10 @@
 from datetime import date, datetime, timezone
 
 import pytest
+from fastapi import HTTPException, Response
+from starlette.requests import Request
+
+from app.api.deps import verify_webhook_secret
 from sqlalchemy.orm import Session
 
 from app.core.enums import Channel, Priority, ScheduleCadence, TicketStatus, TicketType
@@ -233,3 +237,91 @@ def test_alert_with_unknown_organization_still_becomes_a_ticket(db: Session, mon
 def test_disabled_integration_yields_no_config(db: Session):
     integration_settings.upsert(db, Channel.PORTAL, IntegrationSettingUpdate(is_enabled=False))
     assert monitoring.load_config(db) is None
+
+
+# --- секрет вебхука ------------------------------------------------------
+
+
+def _request(secret_header: str | None = None, secret_query: str | None = None) -> Request:
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/webhooks/monitoring",
+        "headers": [(b"x-webhook-secret", secret_header.encode())] if secret_header else [],
+        "query_string": f"secret={secret_query}".encode() if secret_query else b"",
+    }
+    return Request(scope)
+
+
+def test_webhook_secret_accepts_match():
+    verify_webhook_secret(_request(secret_header="s3cret"), "s3cret")
+
+
+def test_webhook_secret_accepts_query_parameter():
+    """Не всякая система умеет ставить заголовок — Zabbix проще передаёт
+    секрет в URL."""
+    verify_webhook_secret(_request(secret_query="s3cret"), "s3cret")
+
+
+def test_webhook_secret_rejects_mismatch():
+    with pytest.raises(HTTPException) as exc:
+        verify_webhook_secret(_request(secret_header="wrong"), "s3cret")
+    assert exc.value.status_code == 401
+
+
+def test_webhook_secret_rejects_missing():
+    with pytest.raises(HTTPException) as exc:
+        verify_webhook_secret(_request(), "s3cret")
+    assert exc.value.status_code == 401
+
+
+def test_unset_secret_lets_everything_through():
+    """Секрет не задан — проверять нечего; вебхук остаётся открытым осознанно,
+    иначе интеграцию невозможно было бы завести по шагам."""
+    verify_webhook_secret(_request(), None)
+
+
+def test_non_ascii_secret_gives_401_not_500():
+    """hmac.compare_digest на не-ASCII строках возбуждает TypeError, и вебхук
+    отдавал 500 вместо 401. Поймано живой проверкой интеграции, не тестом.
+
+    Совпасть такой секрет в заголовке всё равно не может (заголовки
+    декодируются как latin-1) — поэтому заводить его и запрещено, см.
+    test_non_ascii_webhook_secret_is_rejected_on_save. Здесь важно только
+    то, что сервер отвечает отказом, а не падает."""
+    with pytest.raises(HTTPException) as exc:
+        verify_webhook_secret(_request(secret_header="whatever"), "секрет-мониторинга")
+    assert exc.value.status_code == 401
+
+
+def test_non_ascii_webhook_secret_is_rejected_on_save(db: Session):
+    """Секрет с кириллицей совпал бы в query-параметре и не совпал бы в
+    заголовке — интеграция работала бы через раз. Лучше не дать его завести."""
+    with pytest.raises(ValueError):
+        integration_settings.upsert(
+            db, Channel.PORTAL,
+            IntegrationSettingUpdate(secrets={"monitoring_webhook_secret": "секрет-мониторинга"}),
+        )
+
+    # Пароль почты не проверяется: он никуда не идёт HTTP-заголовком,
+    # и запрещать в нём не-ASCII было бы произволом.
+    integration_settings.upsert(
+        db, Channel.EMAIL, IntegrationSettingUpdate(secrets={"imap_password": "пароль-почты"})
+    )
+
+
+def test_alerts_endpoint_serialises_dates(db: Session, monitoring_enabled):
+    """Схема ответа объявляла created_at/resolved_at строками, и список
+    алертов отдавал 500 при любом непустом результате. Тесты дёргали сервис
+    напрямую и этого не видели — поэтому здесь проверяется именно эндпоинт."""
+    from app.api.routers.monitoring import MonitoringAlertRead, list_alerts
+
+    monitoring.ingest_alert(db, _alert(event_id="EV-SER", host="srv-9"), monitoring_enabled)
+    monitoring.ingest_alert(db, _alert(event_id="EV-SER", status="OK"), monitoring_enabled)
+
+    alerts = list_alerts(response=Response(), db=db, _=None)
+    rendered = [MonitoringAlertRead.model_validate(a) for a in alerts]
+
+    ours = next(r for r in rendered if r.external_id == "EV-SER")
+    assert isinstance(ours.created_at, datetime)
+    assert isinstance(ours.resolved_at, datetime)
