@@ -71,6 +71,7 @@ export interface PortalTicket {
   resolved_at: string | null;
   closed_at: string | null;
   csat_rating: number | null;
+  assigned_engineer_name: string | null;
 }
 
 export interface PortalMessage {
@@ -78,6 +79,7 @@ export interface PortalMessage {
   body: string;
   is_from_support: boolean;
   created_at: string;
+  attachments: PortalAttachment[];
 }
 
 export interface PortalTicketDetail extends PortalTicket {
@@ -114,8 +116,77 @@ export async function consumeMagicLink(token: string) {
   return data;
 }
 
+export interface PortalAttachment {
+  id: number;
+  filename: string;
+  size_bytes: number;
+}
+
+export interface PortalTicketUpdate {
+  ticket_id: number;
+  display_number: string;
+  subject: string;
+  status: string;
+  new_messages: number;
+  status_changed: boolean;
+  at: string;
+}
+
+export interface PortalUpdates {
+  total_new_messages: number;
+  tickets: PortalTicketUpdate[];
+}
+
+export interface TicketFilters {
+  q?: string;
+  open_only?: boolean;
+  status_filter?: string;
+}
+
 export const fetchPortalMe = () => request<PortalMe>("/me");
-export const listPortalTickets = () => request<PortalTicket[]>("/tickets");
+
+export const listPortalTickets = (filters: TicketFilters = {}) => {
+  const params = new URLSearchParams();
+  if (filters.q) params.set("q", filters.q);
+  if (filters.open_only) params.set("open_only", "true");
+  if (filters.status_filter) params.set("status_filter", filters.status_filter);
+  const query = params.toString();
+  return request<PortalTicket[]>(`/tickets${query ? `?${query}` : ""}`);
+};
+
+export const fetchPortalUpdates = () => request<PortalUpdates>("/updates");
+export const markPortalUpdatesSeen = () => request<void>("/updates/seen", { method: "POST" });
+
+export const changePortalPassword = (current_password: string, new_password: string) =>
+  request<void>("/me/password", { method: "POST", body: { current_password, new_password } });
+
+/** Файл к своему сообщению: скриншот — самое частое, что нужно приложить. */
+export async function uploadPortalAttachment(ticketId: number, messageId: number, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/portal/tickets/${ticketId}/messages/${messageId}/attachments`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getPortalToken()}` },
+    body: form,
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "Не удалось приложить файл");
+  return (await res.json()) as PortalAttachment;
+}
+
+/** Скачивание идёт через fetch с токеном: обычная ссылка ушла бы без него. */
+export async function downloadPortalFile(path: string, filename: string) {
+  const res = await fetch(`${API_BASE_URL}/portal${path}`, {
+    headers: { Authorization: `Bearer ${getPortalToken()}` },
+  });
+  if (!res.ok) throw new Error("Не удалось скачать файл");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 export const getPortalTicket = (id: number) => request<PortalTicketDetail>(`/tickets/${id}`);
 export const fetchPortalUsage = () => request<PortalUsage>("/usage");
 
@@ -124,6 +195,9 @@ export const createPortalTicket = (payload: { subject: string; body: string }) =
 
 export const replyToPortalTicket = (id: number, body: string) =>
   request<PortalMessage>(`/tickets/${id}/messages`, { method: "POST", body: { body } });
+
+export const downloadMyReport = (year: number, month: number) =>
+  downloadPortalFile(`/reports/${year}/${month}.pdf`, `Отчёт ${month.toString().padStart(2, "0")}.${year}.pdf`);
 
 export const ratePortalTicket = (id: number, rating: number) =>
   request<PortalTicket>(`/tickets/${id}/rating`, { method: "POST", body: { rating } });

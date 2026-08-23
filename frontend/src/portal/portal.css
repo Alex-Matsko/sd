@@ -360,3 +360,108 @@
     max-width: 100%;
   }
 }
+
+/* ---------- Что нового, фильтры, файлы, смена пароля ---------- */
+
+.portal-updates {
+  border: 1px solid var(--portal-accent, #2456c9);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: rgba(36, 86, 201, 0.05);
+}
+
+.portal-updates-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.portal-update {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  border-top: 1px solid rgba(36, 86, 201, 0.15);
+  text-align: left;
+  cursor: pointer;
+}
+
+.portal-update-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.portal-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.portal-filters input[type="search"] {
+  flex: 1;
+  min-width: 200px;
+}
+
+.portal-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.portal-report-line {
+  margin: -6px 0 14px;
+}
+
+.portal-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 6px 0 2px;
+}
+
+.portal-reply-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.portal-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.05);
+  font-size: 13px;
+}
+
+.portal-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+}
+
+.portal-panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.portal-error-inline {
+  color: #b02a2a;
+}

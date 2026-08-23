@@ -14,6 +14,12 @@ import {
   replyToPortalTicket,
   requestMagicLink,
   setPortalToken,
+  fetchPortalUpdates,
+  markPortalUpdatesSeen,
+  downloadMyReport,
+  downloadPortalFile,
+  uploadPortalAttachment,
+  changePortalPassword,
 } from "./api";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -167,8 +173,19 @@ function PortalTicketList({
   onCreate: () => void;
   onLogout: () => void;
 }) {
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [search, setSearch] = useState("");
+  const [openOnly, setOpenOnly] = useState(false);
+  // Поиск отправляется не на каждое нажатие клавиши: иначе запрос уходит на
+  // каждую букву, а список дёргается под пальцами.
+  const [appliedSearch, setAppliedSearch] = useState("");
+
   const meQuery = useQuery({ queryKey: ["portal-me"], queryFn: fetchPortalMe });
-  const ticketsQuery = useQuery({ queryKey: ["portal-tickets"], queryFn: listPortalTickets, refetchInterval: 30_000 });
+  const ticketsQuery = useQuery({
+    queryKey: ["portal-tickets", appliedSearch, openOnly],
+    queryFn: () => listPortalTickets({ q: appliedSearch || undefined, open_only: openOnly }),
+    refetchInterval: 30_000,
+  });
   const usageQuery = useQuery({
     queryKey: ["portal-usage"],
     queryFn: fetchPortalUsage,
@@ -192,6 +209,9 @@ function PortalTicketList({
       {meQuery.data && (
         <p className="portal-sub">
           {meQuery.data.full_name} · {meQuery.data.organization}
+          <button className="portal-link" onClick={() => setChangingPassword(true)} style={{ marginLeft: 12 }}>
+            Сменить пароль
+          </button>
           <button className="portal-link" onClick={onLogout} style={{ marginLeft: 12 }}>
             Выйти
           </button>
@@ -217,9 +237,47 @@ function PortalTicketList({
         </div>
       )}
 
+      {changingPassword && <PortalPasswordForm onClose={() => setChangingPassword(false)} />}
+
+      <PortalUpdatesBanner onOpen={onOpen} />
+
+      <div className="portal-filters">
+        <input
+          type="search"
+          placeholder="Поиск по обращениям и номеру"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && setAppliedSearch(search.trim())}
+        />
+        <button className="portal-btn portal-btn-compact" onClick={() => setAppliedSearch(search.trim())}>
+          Найти
+        </button>
+        <label className="portal-checkbox">
+          <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
+          только открытые
+        </label>
+        {appliedSearch && (
+          <button
+            className="portal-link"
+            onClick={() => {
+              setSearch("");
+              setAppliedSearch("");
+            }}
+          >
+            сбросить
+          </button>
+        )}
+      </div>
+
+      {meQuery.data?.can_view_org_tickets && <PortalReportLink />}
+
       {ticketsQuery.isLoading && <p className="portal-muted">Загрузка…</p>}
       {tickets.length === 0 && !ticketsQuery.isLoading && (
-        <p className="portal-muted">Обращений пока нет. Нажмите «Новое обращение», чтобы написать нам.</p>
+        <p className="portal-muted">
+          {appliedSearch || openOnly
+            ? "По этим условиям ничего не нашлось."
+            : "Обращений пока нет. Нажмите «Новое обращение», чтобы написать нам."}
+        </p>
       )}
 
       <div className="portal-list">
@@ -285,6 +343,7 @@ function PortalNewTicket({ onDone }: { onDone: () => void }) {
 function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
   const qc = useQueryClient();
   const [reply, setReply] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const ticketQuery = useQuery({
     queryKey: ["portal-ticket", id],
     queryFn: () => getPortalTicket(id),
@@ -292,9 +351,18 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
   });
 
   const replyMutation = useMutation({
-    mutationFn: () => replyToPortalTicket(id, reply.trim()),
+    mutationFn: async () => {
+      const message = await replyToPortalTicket(id, reply.trim());
+      // Вложение привязывается к сообщению, поэтому файл уходит после его
+      // создания, а не вместе с ним.
+      for (const file of files) {
+        await uploadPortalAttachment(id, message.id, file);
+      }
+      return message;
+    },
     onSuccess: () => {
       setReply("");
+      setFiles([]);
       qc.invalidateQueries({ queryKey: ["portal-ticket", id] });
     },
   });
@@ -327,6 +395,13 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
             <span className="portal-muted portal-small" style={{ marginLeft: 10 }}>
               создано {formatDate(ticket.created_at)}
             </span>
+            {/* Кто ведёт заявку: в мессенджерах мы это сообщаем, а в кабинете
+                было не видно — клиент не знал, к кому обращаться. */}
+            {ticket.assigned_engineer_name && (
+              <span className="portal-muted portal-small" style={{ marginLeft: 10 }}>
+                · ведёт {ticket.assigned_engineer_name}
+              </span>
+            )}
           </p>
 
           <div className="portal-thread">
@@ -334,6 +409,21 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
               <div key={m.id} className={`portal-message ${m.is_from_support ? "from-support" : "from-me"}`}>
                 <div className="portal-message-author">{m.is_from_support ? "Поддержка" : "Вы"}</div>
                 <div className="portal-message-body">{m.body}</div>
+                {m.attachments?.length > 0 && (
+                  <div className="portal-attachments">
+                    {m.attachments.map((a) => (
+                      <button
+                        key={a.id}
+                        className="portal-link portal-small"
+                        onClick={() =>
+                          downloadPortalFile(`/tickets/${id}/attachments/${a.id}`, a.filename).catch(() => {})
+                        }
+                      >
+                        {a.filename} ({Math.max(1, Math.round(a.size_bytes / 1024))} КБ)
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="portal-message-time">{formatDate(m.created_at)}</div>
               </div>
             ))}
@@ -363,10 +453,38 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
               onChange={(e) => setReply(e.target.value)}
               placeholder="Написать в поддержку…"
             />
+            <div className="portal-reply-files">
+              <label className="portal-link portal-small">
+                Приложить файл
+                <input
+                  type="file"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    // Список читается до сброса значения: после очистки
+                    // input.files уже пуст.
+                    const picked = Array.from(e.target.files ?? []);
+                    e.target.value = "";
+                    setFiles((current) => [...current, ...picked]);
+                  }}
+                />
+              </label>
+              {files.map((file, index) => (
+                <span className="portal-file-chip" key={`${file.name}${index}`}>
+                  {file.name}
+                  <button
+                    className="portal-link"
+                    onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
             {replyMutation.isError && <div className="portal-error">{(replyMutation.error as Error).message}</div>}
             <button
               className="portal-btn portal-btn-primary"
-              disabled={!reply.trim() || replyMutation.isPending}
+              disabled={(!reply.trim() && files.length === 0) || replyMutation.isPending}
               onClick={() => replyMutation.mutate()}
             >
               Отправить
@@ -375,5 +493,145 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
         </>
       )}
     </PortalShell>
+  );
+}
+
+
+/** «Что нового» — сводка изменений с прошлого визита.
+ *
+ *  Клиент бывает в кабинете изредка: без сводки он узнаёт об ответе, только
+ *  если сам откроет заявку и заметит новое сообщение. Опрос раз в двадцать
+ *  секунд, живого соединения тут нет намеренно — см. комментарий в
+ *  /portal/updates на сервере.
+ */
+function PortalUpdatesBanner({ onOpen }: { onOpen: (id: number) => void }) {
+  const qc = useQueryClient();
+  const updatesQuery = useQuery({
+    queryKey: ["portal-updates"],
+    queryFn: fetchPortalUpdates,
+    refetchInterval: 20_000,
+  });
+
+  const seenMutation = useMutation({
+    mutationFn: markPortalUpdatesSeen,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["portal-updates"] });
+      qc.invalidateQueries({ queryKey: ["portal-tickets"] });
+    },
+  });
+
+  const updates = updatesQuery.data;
+  if (!updates || updates.tickets.length === 0) return null;
+
+  return (
+    <div className="portal-updates">
+      <div className="portal-updates-head">
+        <strong>Что нового</strong>
+        <button className="portal-link" onClick={() => seenMutation.mutate()}>
+          отметить прочитанным
+        </button>
+      </div>
+      {updates.tickets.map((u) => (
+        <button className="portal-update" key={u.ticket_id} onClick={() => onOpen(u.ticket_id)}>
+          <span className="portal-number">{u.display_number}</span>
+          <span className="portal-update-text">
+            {u.subject}
+            <span className="portal-muted portal-small">
+              {[
+                u.new_messages > 0 ? `новых сообщений: ${u.new_messages}` : null,
+                u.status_changed ? `статус: ${STATUS_LABELS[u.status] ?? u.status}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Свой отчёт за прошлый месяц: тот же документ, что присылает менеджер. */
+function PortalReportLink() {
+  const [error, setError] = useState<string | null>(null);
+  const previous = new Date();
+  previous.setMonth(previous.getMonth() - 1);
+  const year = previous.getFullYear();
+  const month = previous.getMonth() + 1;
+  const label = previous.toLocaleString("ru-RU", { month: "long", year: "numeric" });
+
+  return (
+    <p className="portal-muted portal-small portal-report-line">
+      <button
+        className="portal-link"
+        onClick={() =>
+          downloadMyReport(year, month).catch((e) =>
+            setError(e instanceof Error ? e.message : "Не удалось скачать отчёт")
+          )
+        }
+      >
+        Скачать отчёт за {label}
+      </button>
+      {error && <span className="portal-error-inline"> {error}</span>}
+    </p>
+  );
+}
+
+
+/** Смена выданного пароля.
+ *
+ *  Пароль клиенту диктует диспетчер — значит, его знает посторонний человек
+ *  и, скорее всего, он где-то записан. Возможности сменить его не было.
+ */
+function PortalPasswordForm({ onClose }: { onClose: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [done, setDone] = useState(false);
+
+  const changeMutation = useMutation({
+    mutationFn: () => changePortalPassword(current, next),
+    onSuccess: () => setDone(true),
+  });
+
+  if (done) {
+    return (
+      <div className="portal-panel">
+        <p className="portal-note">Пароль изменён.</p>
+        <button className="portal-link" onClick={onClose}>
+          Закрыть
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="portal-panel">
+      <strong>Смена пароля</strong>
+      <input
+        type="password"
+        placeholder="Текущий пароль"
+        value={current}
+        onChange={(e) => setCurrent(e.target.value)}
+      />
+      <input
+        type="password"
+        placeholder="Новый пароль, не менее 8 символов"
+        value={next}
+        onChange={(e) => setNext(e.target.value)}
+      />
+      {changeMutation.isError && <div className="portal-error">{(changeMutation.error as Error).message}</div>}
+      <div className="portal-panel-actions">
+        <button className="portal-link" onClick={onClose}>
+          Отмена
+        </button>
+        <button
+          className="portal-btn portal-btn-primary portal-btn-compact"
+          disabled={!current || next.length < 8 || changeMutation.isPending}
+          onClick={() => changeMutation.mutate()}
+        >
+          Сменить
+        </button>
+      </div>
+    </div>
   );
 }
