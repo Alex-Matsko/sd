@@ -96,6 +96,10 @@ class NotificationType(str, Enum):
     # работе, попавшей к инженеру. Раньше существовали только SLA-события,
     # то есть инженер узнавал о заявке лишь когда по ней уже горел срок.
     TICKET_ASSIGNED = "ticket_assigned"
+    # Новая заявка, которую маршрутизация никому не назначила. Без этого
+    # обращения из почты, ботов, портала и по пропущенным звонкам попадали в
+    # общую очередь, о которой никто не узнавал, — их замечали только глазами.
+    TICKET_UNASSIGNED = "ticket_unassigned"
     CUSTOMER_REPLIED = "customer_replied"
     SLA_REACTION_WARNING = "sla_reaction_warning"
     SLA_REACTION_BREACH = "sla_reaction_breach"

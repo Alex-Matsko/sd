@@ -89,6 +89,15 @@ def create_ticket(db: Session, payload: TicketCreate, actor: User | None) -> Tic
     )
     db.commit()
     db.refresh(ticket)
+
+    # После commit: уведомление ссылается на display_number, а он строится из
+    # присвоенного базой номера. И адресат не должен узнать о заявке раньше,
+    # чем она станет видимой другим сессиям.
+    staff_notifications.notify_new_ticket(db, ticket, actor)
+    # Собственный commit: pg_notify срабатывает только на коммите, иначе живой
+    # push не ушёл бы, а записи в колокольчике повисли бы до следующей записи
+    # в этой сессии.
+    db.commit()
     return ticket
 
 

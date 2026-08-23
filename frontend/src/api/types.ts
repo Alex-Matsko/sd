@@ -32,6 +32,7 @@ export type SlaTimerState = "no_rule" | "ok" | "warning" | "breached" | "met" | 
 
 export type NotificationType =
   | "ticket_assigned"
+  | "ticket_unassigned"
   | "customer_replied"
   | "sla_reaction_warning"
   | "sla_reaction_breach"

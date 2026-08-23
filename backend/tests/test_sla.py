@@ -226,8 +226,27 @@ def _assign(db: Session, ticket: Ticket, engineer: User, lead: User | None = Non
     db.commit()
 
 
+# Типы, которые создаёт SLA-движок. Уведомление о появлении самой заявки
+# (staff_notifications.notify_new_ticket) к эскалациям отношения не имеет и
+# сюда не попадает — иначе каждая проверка эскалации проверяла бы заодно
+# факт создания заявки.
+_SLA_TYPES = {
+    NotificationType.SLA_REACTION_WARNING,
+    NotificationType.SLA_REACTION_BREACH,
+    NotificationType.SLA_RESOLUTION_WARNING,
+    NotificationType.SLA_RESOLUTION_BREACH,
+}
+
+
 def _notifications(db: Session, ticket: Ticket) -> list[Notification]:
-    return db.query(Notification).filter(Notification.ticket_id == ticket.id).order_by(Notification.id).all()
+    return [
+        n
+        for n in db.query(Notification)
+        .filter(Notification.ticket_id == ticket.id)
+        .order_by(Notification.id)
+        .all()
+        if n.type in _SLA_TYPES
+    ]
 
 
 def test_escalation_warns_assignee_at_75_percent(db: Session, contact: Contact, engineer_user: User):

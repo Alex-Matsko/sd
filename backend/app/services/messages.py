@@ -65,7 +65,15 @@ def add_message(
     # ТЗ 4.2: ответ клиента «возвращает её в работу И уведомляет исполнителя».
     # Возврат работал, уведомления не было — инженер узнавал об ответе, только
     # если сам открыл заявку.
-    if payload.direction == MessageDirection.INBOUND:
+    #
+    # Первое сообщение заявки — это её текст, а не ответ: без этой проверки
+    # создание заявки с описанием давало инженеру сразу два уведомления,
+    # «новая заявка на вас» и «клиент ответил» про одно и то же (видно только
+    # вживую — в тестах заявки заводились без начального сообщения).
+    is_first_message = (
+        db.query(Message.id).filter(Message.ticket_id == ticket.id, Message.id != message.id).first() is None
+    )
+    if payload.direction == MessageDirection.INBOUND and not is_first_message:
         staff_notifications.notify_customer_reply(db, ticket)
 
     audit.record(
