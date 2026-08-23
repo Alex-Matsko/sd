@@ -59,6 +59,11 @@ class PortalTicketRead(BaseModel):
     resolved_at: datetime | None
     closed_at: datetime | None
     csat_rating: int | None
+    # Кто ведёт заявку. Боты об этом клиенту сообщают, а в кабинете было не
+    # видно — клиент не знал, к кому обращаться. Имена инженеров скрыты
+    # только в отчётах (там это сравнение сотрудников между собой), в своей
+    # заявке видеть исполнителя нормально.
+    assigned_engineer_name: str | None = None
 
 
 class PortalTicketDetail(PortalTicketRead):

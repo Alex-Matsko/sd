@@ -13,7 +13,9 @@ from app.services.contracts import resolve_contract_and_tariff
 # Allowed status transitions (section 4.2). CLOSED and CANCELLED are terminal.
 ALLOWED_TRANSITIONS: dict[TicketStatus, set[TicketStatus]] = {
     TicketStatus.NEW: {TicketStatus.ASSIGNED, TicketStatus.IN_PROGRESS, TicketStatus.CANCELLED},
-    TicketStatus.ASSIGNED: {TicketStatus.IN_PROGRESS, TicketStatus.CANCELLED},
+    # NEW добавлен ради снятия исполнителя: заявка без исполнителя со
+    # статусом «Назначена» — противоречие, она снова в общей очереди.
+    TicketStatus.ASSIGNED: {TicketStatus.NEW, TicketStatus.IN_PROGRESS, TicketStatus.CANCELLED},
     TicketStatus.IN_PROGRESS: {
         TicketStatus.WAITING_CUSTOMER,
         TicketStatus.WAITING_THIRD_PARTY,
@@ -161,6 +163,22 @@ def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, act
     return ticket
 
 
+def _follow_assignment(db: Session, ticket: Ticket, actor: User | None) -> None:
+    """Подтягивает статус за назначением.
+
+    Только между «Новой» и «Назначена»: заявка в работе или ожидании от
+    смены исполнителя статус менять не должна — там уже идёт работа, и
+    откат назад стёр бы её ход.
+    """
+    status = TicketStatus(ticket.status)
+    has_assignee = bool(ticket.assigned_engineer_id or ticket.team_id)
+
+    if status == TicketStatus.NEW and has_assignee:
+        transition_status(db, ticket, TicketStatus.ASSIGNED, actor)
+    elif status == TicketStatus.ASSIGNED and not has_assignee:
+        transition_status(db, ticket, TicketStatus.NEW, actor)
+
+
 def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: User | None) -> Ticket:
     if payload.status is not None and TicketStatus(payload.status) != TicketStatus(ticket.status):
         transition_status(db, ticket, TicketStatus(payload.status), actor)
@@ -176,19 +194,31 @@ def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: Use
         changed["assigned_engineer_id"] = {"from": ticket.assigned_engineer_id, "to": payload.assigned_engineer_id}
         ticket.assigned_engineer_id = payload.assigned_engineer_id
 
-        from app.services import max_channel, telegram_channel
+        from app.services import email_channel, max_channel, telegram_channel
 
-        # Clearing the assignee notifies nobody - both channel helpers no-op
+        # Clearing the assignee notifies nobody - the channel helpers no-op
         # on a None engineer, so unassigning stays silent for the client.
+        # Каждый помощник сам проверяет канал заявки, поэтому вызываются все:
+        # клиент узнаёт об исполнителе там, откуда написал. Почта была
+        # пропущена — писавший письмом не знал, к кому обращаться.
         assigned_engineer = db.get(User, payload.assigned_engineer_id) if payload.assigned_engineer_id else None
         max_channel.notify_assignment_change(db, ticket, assigned_engineer)
         telegram_channel.notify_assignment_change(db, ticket, assigned_engineer)
+        email_channel.notify_assignment_change(db, ticket, assigned_engineer)
         # Клиент о назначении узнавал, а сам исполнитель — нет (ТЗ р. 8).
         staff_notifications.notify_assignment(db, ticket, assigned_engineer)
 
     if "team_id" in provided and payload.team_id != ticket.team_id:
         changed["team_id"] = {"from": ticket.team_id, "to": payload.team_id}
         ticket.team_id = payload.team_id
+
+    # Статус следует за назначением сам. Раньше диспетчер назначал инженера,
+    # а заявка оставалась «Новой», и очередь новых заявок наполнялась уже
+    # разобранными — их приходилось переводить вторым действием, о котором
+    # легко забыть. Тот же расклад маршрутизация делает при создании заявки
+    # (create_ticket), так что поведение теперь одинаковое.
+    if "assigned_engineer_id" in provided or "team_id" in provided:
+        _follow_assignment(db, ticket, actor)
 
     if "is_recurring_problem" in provided and payload.is_recurring_problem != ticket.is_recurring_problem:
         # Метка попадает в историю заявки: это решение о том, что случай не

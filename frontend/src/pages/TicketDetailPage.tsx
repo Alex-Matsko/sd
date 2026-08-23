@@ -22,6 +22,8 @@ import {
 } from "../api/endpoints";
 import { formatCallDuration } from "./CallsPage";
 import { TicketTimer } from "../components/TicketTimer";
+import { StatusPipeline } from "../components/StatusPipeline";
+import { useAuth } from "../auth/AuthContext";
 import { ErrorBanner, Loading, PriorityTag, SlaTimerBadge, StatusTag, ChannelTag, WhoMini } from "../components/ui";
 import {
   CHANNEL_LABELS,
@@ -48,6 +50,7 @@ export function TicketDetailPage() {
   const { ticketId } = useParams();
   const id = Number(ticketId);
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [replyBody, setReplyBody] = useState("");
   const [replyDirection, setReplyDirection] = useState<MessageDirection>("outbound");
   const [replyTo, setReplyTo] = useState<Message | null>(null);
@@ -498,27 +501,37 @@ export function TicketDetailPage() {
 
           <div className="panel">
             <div className="panel-head">
-              <h2>Статус</h2>
+              <h2>Ход заявки</h2>
             </div>
-            <p className="muted">Текущий: {STATUS_LABELS[ticket.status]}</p>
-            <div className="status-actions">
-              {availableTransitions.map((next: TicketStatus) => (
-                <button
-                  key={next}
-                  className="btn btn-ghost"
-                  disabled={updateMutation.isPending}
-                  onClick={() => updateMutation.mutate({ status: next })}
-                >
-                  → {STATUS_LABELS[next]}
-                </button>
-              ))}
-            </div>
+            <StatusPipeline
+              status={ticket.status}
+              disabled={updateMutation.isPending}
+              onChange={(next) => updateMutation.mutate({ status: next })}
+            />
           </div>
 
           <div className="panel">
             <div className="panel-head">
-              <h2>Назначение</h2>
+              <h2>Кто занимается</h2>
+              {ticket.assigned_engineer_id !== user?.id && (
+                <button
+                  className="btn btn-ghost"
+                  disabled={updateMutation.isPending}
+                  onClick={() => updateMutation.mutate({ assigned_engineer_id: user?.id })}
+                >
+                  Взять себе
+                </button>
+              )}
             </div>
+            <p className="muted">
+              {assignee
+                ? `Ведёт ${assignee.full_name}.`
+                : ticket.team_id
+                  ? "Отдана группе — любой её участник может взять заявку себе."
+                  : "Исполнителя нет: заявка в общей очереди, её видят все."}
+              {" "}
+              Назначение само переводит заявку из «Новой» в «Назначена», а снятие возвращает в очередь.
+            </p>
             <div className="form-row">
               <label className="form-label">Исполнитель</label>
               <select

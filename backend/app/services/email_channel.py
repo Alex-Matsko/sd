@@ -30,6 +30,7 @@ from app.models.contact import Contact, ContactEmail
 from app.models.message import Message
 from app.models.organization import Organization, OrganizationEmailDomain, PublicEmailDomain
 from app.models.ticket import Ticket
+from app.models.user import User
 from app.schemas.message import MessageCreate
 from app.schemas.ticket import TicketCreate
 from app.services import attachments as attachments_service
@@ -378,3 +379,40 @@ def try_send_outbound(db: Session, ticket: Ticket, message: Message, to_address:
         db.commit()
     except Exception:
         logger.exception("Заявка %s: ошибка отправки письма клиенту", ticket.display_number)
+
+
+def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None) -> None:
+    """Сообщает клиенту по почте, кто ведёт его заявку.
+
+    Боты MAX и Telegram делали это с самого начала, а почта и кабинет —
+    нет: клиент, написавший письмом, не знал, к кому обращаться. Письмо
+    отправляется напрямую, а не через add_message: сообщение в переписке
+    закрыло бы таймер реакции, хотя инженер клиенту ещё не ответил.
+    """
+    if Channel(ticket.channel) != Channel.EMAIL or engineer is None:
+        return
+    config = load_email_config(db)
+    if config is None:
+        return
+
+    from app.models.contact import Contact
+
+    contact = db.get(Contact, ticket.contact_id)
+    to_address = None
+    if contact is not None and contact.emails:
+        primary = next((e.email for e in contact.emails if e.is_primary), None)
+        to_address = primary or contact.emails[0].email
+    if not to_address:
+        return
+
+    body = (
+        f"Здравствуйте!\n\nВашу заявку {ticket.display_number} «{ticket.subject}» "
+        f"теперь ведёт {engineer.full_name}.\n\n"
+        "Отвечайте на это письмо, если нужно что-то добавить — сообщение попадёт в заявку."
+    )
+    try:
+        send_outbound_email(config, to_address, ticket, body, None)
+    except Exception:
+        # Недоставленное уведомление не должно ронять назначение: заявка уже
+        # назначена, а клиент увидит исполнителя в кабинете и в ответе.
+        logger.exception("Заявка %s: не удалось сообщить клиенту об исполнителе", ticket.display_number)

@@ -16,6 +16,7 @@ from app.api.deps import check_login_allowed
 from app.services import login_guard
 from app.models.contact import Contact
 from app.models.ticket import Ticket
+from app.models.user import User
 from app.schemas.message import MessageCreate
 from app.schemas.portal import (
     PortalLoginRequest,
@@ -162,7 +163,16 @@ def portal_me(contact: Contact = Depends(get_current_contact), db: Session = Dep
 # --- tickets -------------------------------------------------------
 
 
-def _to_read(ticket: Ticket) -> PortalTicketRead:
+def _engineer_names(db: Session, tickets: list[Ticket]) -> dict[int, str]:
+    """Имена исполнителей одним запросом — иначе список заявок делал бы
+    обращение к базе на каждую строку ради одного имени."""
+    ids = {t.assigned_engineer_id for t in tickets if t.assigned_engineer_id}
+    if not ids:
+        return {}
+    return {row[0]: row[1] for row in db.query(User.id, User.full_name).filter(User.id.in_(ids))}
+
+
+def _to_read(ticket: Ticket, engineer_name: str | None = None) -> PortalTicketRead:
     return PortalTicketRead(
         id=ticket.id,
         display_number=ticket.display_number,
@@ -173,6 +183,7 @@ def _to_read(ticket: Ticket) -> PortalTicketRead:
         resolved_at=ticket.resolved_at,
         closed_at=ticket.closed_at,
         csat_rating=ticket.csat_rating,
+        assigned_engineer_name=engineer_name,
     )
 
 
@@ -190,7 +201,8 @@ def list_my_tickets(
         .offset(max(0, offset))
         .all()
     )
-    return [_to_read(t) for t in tickets]
+    names = _engineer_names(db, tickets)
+    return [_to_read(t, names.get(t.assigned_engineer_id)) for t in tickets]
 
 
 @router.post("/tickets", response_model=PortalTicketRead, status_code=status.HTTP_201_CREATED)
@@ -216,7 +228,7 @@ def create_my_ticket(
         ),
         actor=None,
     )
-    return _to_read(ticket)
+    return _to_read(ticket, _engineer_names(db, [ticket]).get(ticket.assigned_engineer_id))
 
 
 @router.get("/tickets/{ticket_id}", response_model=PortalTicketDetail)
@@ -227,7 +239,7 @@ def get_my_ticket(
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Заявка не найдена")
     return PortalTicketDetail(
-        **_to_read(ticket).model_dump(),
+        **_to_read(ticket, _engineer_names(db, [ticket]).get(ticket.assigned_engineer_id)).model_dump(),
         messages=[
             PortalMessageRead(
                 id=m.id,
@@ -302,7 +314,7 @@ def rate_my_ticket(
     db.add(ticket)
     db.commit()
     db.refresh(ticket)
-    return _to_read(ticket)
+    return _to_read(ticket, _engineer_names(db, [ticket]).get(ticket.assigned_engineer_id))
 
 
 @router.get("/usage", response_model=PortalUsage)
