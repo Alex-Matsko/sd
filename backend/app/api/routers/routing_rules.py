@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_manager_or_above
 from app.db import get_db
 from app.models.routing import RoutingRule
+from app.models.team import Team
 from app.models.user import User
+from app.services import routing
 from app.schemas.routing import RoutingRuleCreate, RoutingRuleRead, RoutingRuleUpdate
 
 router = APIRouter(prefix="/routing-rules", tags=["routing-rules"])
@@ -42,6 +45,54 @@ def update_rule(
     db.commit()
     db.refresh(rule)
     return rule
+
+
+class RoutingPreviewRequest(BaseModel):
+    """Признаки воображаемой заявки: «а куда уйдёт вот такая?»"""
+
+    organization_id: int
+    category_id: int | None = None
+    channel: str | None = None
+    priority: str | None = None
+    type: str | None = None
+    asset_id: int | None = None
+
+
+@router.post("/preview")
+def preview_routing(
+    payload: RoutingPreviewRequest, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> dict:
+    """Показывает, какое правило сработает на заявке с такими признаками.
+
+    С появлением условий правило перестало читаться с одного взгляда, а
+    ошибка в маршрутизации обнаруживается не сразу: заявка просто уходит не
+    туда. Проверка без создания заявки — единственный способ убедиться, что
+    правило делает то, что задумано.
+    """
+    facts = routing.TicketFacts(
+        organization_id=payload.organization_id,
+        category_id=payload.category_id,
+        channel=payload.channel,
+        priority=payload.priority,
+        ticket_type=payload.type,
+        asset_id=payload.asset_id,
+        category_path=routing._category_path(db, payload.category_id),
+    )
+
+    for rule in db.query(RoutingRule).filter(RoutingRule.is_active.is_(True)).order_by(RoutingRule.order):
+        if not routing.rule_matches(rule, facts):
+            continue
+        engineer = db.get(User, rule.target_engineer_id) if rule.target_engineer_id else None
+        team = db.get(Team, rule.target_team_id) if rule.target_team_id else None
+        return {
+            "matched": True,
+            "rule_id": rule.id,
+            "rule_name": rule.name,
+            "target": engineer.full_name if engineer else (team.name if team else None),
+            "target_kind": "engineer" if engineer else ("team" if team else None),
+        }
+
+    return {"matched": False, "rule_id": None, "rule_name": None, "target": None, "target_kind": None}
 
 
 @router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)

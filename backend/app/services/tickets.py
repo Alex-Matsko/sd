@@ -42,7 +42,17 @@ def create_ticket(db: Session, payload: TicketCreate, actor: User | None) -> Tic
     else:
         ticket_priority = priority_service.compute_priority(db, payload.impact, payload.urgency)
 
-    team_id, engineer_id = routing.resolve_assignment(db, contact.organization_id, payload.category_id)
+    # Признаки заявки передаются целиком: правила могут смотреть на канал,
+    # приоритет и тип, а не только на организацию и категорию.
+    team_id, engineer_id = routing.resolve_assignment(
+        db,
+        contact.organization_id,
+        payload.category_id,
+        channel=payload.channel.value if payload.channel else None,
+        priority=ticket_priority.value,
+        ticket_type=payload.type.value if payload.type else None,
+        asset_id=payload.asset_id,
+    )
     status = TicketStatus.ASSIGNED if (team_id or engineer_id) else TicketStatus.NEW
 
     ticket = Ticket(
