@@ -10,7 +10,7 @@ from app.core.enums import UserRole
 from app.core.security import decode_access_token
 from app.db import get_db
 from app.models.user import User
-from app.services import settings_audit
+from app.services import login_guard, settings_audit
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -72,3 +72,18 @@ def verify_webhook_secret(request: Request, expected: str | None) -> None:
     provided = request.headers.get("X-Webhook-Secret") or request.query_params.get("secret") or ""
     if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный секрет вебхука")
+
+
+def check_login_allowed(scope: str, *keys: str) -> None:
+    """Отказывает во входе, пока действует блокировка после перебора.
+
+    429, а не 401: клиенту важно понимать, что дело не в пароле, а во
+    временном запрете, иначе он будет пробовать снова и продлевать блокировку.
+    """
+    seconds = login_guard.guard.seconds_left(scope, *keys)
+    if seconds:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Слишком много неудачных попыток. Повторите через {seconds // 60 + 1} мин.",
+            headers={"Retry-After": str(seconds)},
+        )

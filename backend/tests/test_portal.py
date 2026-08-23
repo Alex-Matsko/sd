@@ -191,3 +191,52 @@ def test_client_reply_reopens_a_resolved_ticket(db: Session, client_contact: Con
     )
     db.refresh(ticket)
     assert TicketStatus(ticket.status) == TicketStatus.IN_PROGRESS
+
+
+def test_reply_to_a_closed_ticket_opens_a_linked_one(db: Session, contact: Contact):
+    """Раньше сообщение молча ложилось в закрытую заявку: она не
+    переоткрывалась, новая не заводилась, никого не уведомляли. Email в этом
+    случае заводит новую заявку, боты предлагают «поднять старую» — портал
+    вёл себя иначе, чем оба канала."""
+    from app.api.routers.portal import reply_to_my_ticket
+    from app.core.enums import TicketStatus
+    from app.schemas.portal import PortalMessageCreate
+    from app.services import tickets as tickets_service
+    from app.models.ticket import Ticket
+
+    closed = _ticket(db, contact, "Старая проблема")
+    for step in (TicketStatus.IN_PROGRESS, TicketStatus.RESOLVED, TicketStatus.CLOSED):
+        tickets_service.transition_status(db, closed, step, actor=None)
+
+    reply_to_my_ticket(
+        ticket_id=closed.id,
+        payload=PortalMessageCreate(body="Проблема вернулась"),
+        contact=contact,
+        db=db,
+    )
+
+    db.refresh(closed)
+    assert TicketStatus(closed.status) == TicketStatus.CLOSED, "закрытая заявка не должна оживать"
+
+    fresh = db.query(Ticket).filter(Ticket.parent_ticket_id == closed.id).one()
+    assert fresh.subject == "Проблема вернулась"
+    assert [m.body for m in fresh.messages] == ["Проблема вернулась"]
+
+
+def test_reply_to_an_open_ticket_still_lands_in_it(db: Session, contact: Contact):
+    """Обычный случай не должен пострадать: новая заявка заводится только для
+    закрытых."""
+    from app.api.routers.portal import reply_to_my_ticket
+    from app.schemas.portal import PortalMessageCreate
+    from app.models.ticket import Ticket
+
+    ticket = _ticket(db, contact, "Текущая проблема")
+    before = db.query(Ticket).count()
+
+    reply_to_my_ticket(
+        ticket_id=ticket.id, payload=PortalMessageCreate(body="Дополнение"), contact=contact, db=db
+    )
+
+    assert db.query(Ticket).count() == before
+    db.refresh(ticket)
+    assert "Дополнение" in [m.body for m in ticket.messages]

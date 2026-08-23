@@ -75,3 +75,10 @@ def revoke_refresh_tokens(db, user) -> int:
         .filter(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
         .update({RefreshToken.revoked_at: datetime.now(timezone.utc)})
     )
+
+
+# Хеш заведомо неподходящего пароля. Нужен, чтобы для несуществующего адреса
+# проверка занимала столько же времени, сколько для существующего: без него
+# ответ приходил заметно быстрее, и по времени ответа перебирались
+# существующие учётные записи.
+DUMMY_PASSWORD_HASH = hash_password("dummy-password-for-constant-time-login")

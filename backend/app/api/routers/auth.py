@@ -1,12 +1,13 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import check_login_allowed, get_current_user
 from app.core.security import (
+    DUMMY_PASSWORD_HASH,
     create_access_token,
     generate_refresh_token,
     hash_password,
@@ -15,6 +16,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db import get_db
+from app.services import login_guard
 from app.models.auth import RefreshToken
 from app.models.user import User
 from app.schemas.auth import PasswordChangeRequest, RefreshRequest, TelegramLinkCodeRead, TokenResponse
@@ -41,11 +43,27 @@ def _issue_tokens(user: User, db: Session) -> TokenResponse:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)) -> TokenResponse:
+def login(
+    request: Request,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    client_ip = request.client.host if request.client else ""
+    check_login_allowed("staff", form_data.username, client_ip)
+
     user = db.query(User).filter(User.email == form_data.username).first()
     invalid = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный email или пароль")
-    if user is None or not user.is_active or not verify_password(form_data.password, user.password_hash):
+    # Пароль проверяется даже для несуществующего адреса. Иначе ответ для
+    # неизвестного пользователя приходит заметно быстрее — bcrypt не
+    # выполняется, — и по времени ответа перебираются существующие учётки.
+    password_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
+    password_ok = verify_password(form_data.password, password_hash)
+
+    if user is None or not user.is_active or not password_ok:
+        login_guard.guard.register_failure("staff", form_data.username, client_ip)
         raise invalid
+
+    login_guard.guard.register_success("staff", form_data.username, client_ip)
     return _issue_tokens(user, db)
 
 

@@ -107,6 +107,8 @@ export const SLA_STATE_LABELS: Record<SlaTimerState, string> = {
 };
 
 export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
+  ticket_assigned: "Назначена заявка",
+  customer_replied: "Ответ клиента",
   sla_reaction_warning: "Риск по реакции",
   sla_reaction_breach: "Нарушение реакции",
   sla_resolution_warning: "Риск по решению",

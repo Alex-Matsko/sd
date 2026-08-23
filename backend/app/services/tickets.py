@@ -7,7 +7,7 @@ from app.models.contact import Contact
 from app.models.ticket import Ticket
 from app.models.user import User
 from app.schemas.ticket import TicketCreate, TicketUpdate
-from app.services import audit, priority as priority_service, routing, sla
+from app.services import audit, staff_notifications, priority as priority_service, routing, sla
 from app.services.contracts import resolve_contract_and_tariff
 
 # Allowed status transitions (section 4.2). CLOSED and CANCELLED are terminal.
@@ -168,6 +168,8 @@ def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: Use
         assigned_engineer = db.get(User, payload.assigned_engineer_id) if payload.assigned_engineer_id else None
         max_channel.notify_assignment_change(db, ticket, assigned_engineer)
         telegram_channel.notify_assignment_change(db, ticket, assigned_engineer)
+        # Клиент о назначении узнавал, а сам исполнитель — нет (ТЗ р. 8).
+        staff_notifications.notify_assignment(db, ticket, assigned_engineer)
 
     if "team_id" in provided and payload.team_id != ticket.team_id:
         changed["team_id"] = {"from": ticket.team_id, "to": payload.team_id}

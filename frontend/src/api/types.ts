@@ -31,6 +31,8 @@ export type OrganizationStatus = "active" | "suspended" | "archived";
 export type SlaTimerState = "no_rule" | "ok" | "warning" | "breached" | "met" | "paused";
 
 export type NotificationType =
+  | "ticket_assigned"
+  | "customer_replied"
   | "sla_reaction_warning"
   | "sla_reaction_breach"
   | "sla_resolution_warning"

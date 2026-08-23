@@ -5,13 +5,15 @@ import logging
 from datetime import date, datetime, timezone
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.core.enums import Channel, MessageDirection, Priority, TicketStatus, TicketType
 from app.core.security import create_portal_access_token, decode_access_token
 from app.db import get_db
+from app.api.deps import check_login_allowed
+from app.services import login_guard
 from app.models.contact import Contact
 from app.models.ticket import Ticket
 from app.schemas.message import MessageCreate
@@ -69,18 +71,36 @@ def get_current_contact(
 
 
 @router.post("/auth/login", response_model=PortalTokenResponse)
-def portal_login(payload: PortalLoginRequest, db: Session = Depends(get_db)) -> PortalTokenResponse:
+def portal_login(
+    request: Request, payload: PortalLoginRequest, db: Session = Depends(get_db)
+) -> PortalTokenResponse:
+    client_ip = request.client.host if request.client else ""
+    check_login_allowed("portal", payload.email, client_ip)
     try:
         contact = portal.authenticate_with_password(db, payload.email, payload.password)
     except portal.PortalAuthError as exc:
+        login_guard.guard.register_failure("portal", payload.email, client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
+    login_guard.guard.register_success("portal", payload.email, client_ip)
     return PortalTokenResponse(access_token=create_portal_access_token(contact.id))
 
 
 @router.post("/auth/magic-link", status_code=status.HTTP_202_ACCEPTED)
-def request_magic_link(payload: PortalMagicLinkRequest, db: Session = Depends(get_db)) -> dict:
+def request_magic_link(
+    request: Request, payload: PortalMagicLinkRequest, db: Session = Depends(get_db)
+) -> dict:
     """Always answers the same way, known address or not - otherwise this
-    endpoint tells an outsider who has a portal account at the client."""
+    endpoint tells an outsider who has a portal account at the client.
+
+    Ограничение частоты нужно и здесь, хотя пароль тут не подбирают: без него
+    эндпоинт превращается в средство завалить чужой ящик письмами и засорить
+    базу одноразовыми токенами. Счётчик неудач не подходит — «неудач» тут не
+    бывает, поэтому каждая выдача считается попыткой.
+    """
+    client_ip = request.client.host if request.client else ""
+    check_login_allowed("magic-link", payload.email, client_ip)
+    login_guard.guard.register_failure("magic-link", payload.email, client_ip)
+
     result = portal.issue_magic_link(db, payload.email)
     if result is not None:
         contact, link = result
@@ -230,6 +250,27 @@ def reply_to_my_ticket(
     ticket = portal.get_visible_ticket(db, contact, ticket_id)
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Заявка не найдена")
+
+    # Ответ в закрытую заявку раньше молча ложился в неё: она не
+    # переоткрывалась, новая не заводилась, никого не уведомляли — сообщение
+    # уходило в никуда. Email в этом случае заводит новую заявку, боты
+    # предлагают «поднять старую»; портал вёл себя иначе, чем оба канала.
+    # Теперь как в ботах: новая заявка, связанная с закрытой.
+    if TicketStatus(ticket.status) in (TicketStatus.CLOSED, TicketStatus.CANCELLED):
+        ticket = tickets_service.create_ticket(
+            db,
+            TicketCreate(
+                contact_id=contact.id,
+                type=TicketType(ticket.type),
+                channel=Channel.PORTAL,
+                subject=payload.body[:200] or f"Повторное обращение по {ticket.display_number}",
+                manual_priority=Priority.P3,
+                manual_priority_reason=f"Повторное обращение по закрытой заявке {ticket.display_number}",
+                parent_ticket_id=ticket.id,
+            ),
+            actor=None,
+        )
+
     message = messages_service.add_message(
         db,
         ticket,

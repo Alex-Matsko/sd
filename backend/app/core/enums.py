@@ -92,6 +92,11 @@ class OrganizationStatus(str, Enum):
 
 
 class NotificationType(str, Enum):
+    # ТЗ 4.2 требует уведомлять исполнителя об ответе клиента, ТЗ р. 8 — о
+    # работе, попавшей к инженеру. Раньше существовали только SLA-события,
+    # то есть инженер узнавал о заявке лишь когда по ней уже горел срок.
+    TICKET_ASSIGNED = "ticket_assigned"
+    CUSTOMER_REPLIED = "customer_replied"
     SLA_REACTION_WARNING = "sla_reaction_warning"
     SLA_REACTION_BREACH = "sla_reaction_breach"
     SLA_RESOLUTION_WARNING = "sla_resolution_warning"

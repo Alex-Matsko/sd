@@ -48,13 +48,39 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Открытые Горизонты — Service Desk API", version="0.1.0", lifespan=lifespan)
 
+# allow_credentials выключен намеренно. Аутентификация здесь — заголовок
+# Bearer, куки не используются, так что разрешать кросс-доменные запросы с
+# учётными данными незачем. А в паре с allow_origins=["*"] Starlette
+# отражает Origin запроса вместо звёздочки, то есть любой сайт получал бы
+# право делать к API запросы с учётными данными — при появлении первой же
+# куки это стало бы полноценной CSRF-дырой.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """Заголовки, которых не было ни в одном ответе.
+
+    Ставятся здесь, а не в nginx: перед API у заказчика может стоять свой
+    прокси, а панель отдаётся отдельным контейнером — на уровне приложения
+    заголовки не потеряются при смене обвязки.
+    """
+    response = await call_next(request)
+    # Открывать панель и портал в чужом iframe незачем — это clickjacking.
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    # Браузер не должен угадывать тип: вложение, отданное как text/plain, не
+    # должно исполниться как HTML.
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    # API отдаёт только JSON и файлы; исполнять на его origin нечего.
+    response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+    return response
 
 app.include_router(auth.router)
 app.include_router(users.router)

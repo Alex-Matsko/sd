@@ -8,7 +8,7 @@ from app.models.message import Message
 from app.models.ticket import Ticket
 from app.models.user import User
 from app.schemas.message import MessageCreate
-from app.services import audit, sla
+from app.services import audit, sla, staff_notifications
 
 
 def _resolve_recipient_email(ticket: Ticket) -> str | None:
@@ -61,6 +61,12 @@ def add_message(
         TicketStatus.RESOLVED,
     ):
         transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
+
+    # ТЗ 4.2: ответ клиента «возвращает её в работу И уведомляет исполнителя».
+    # Возврат работал, уведомления не было — инженер узнавал об ответе, только
+    # если сам открыл заявку.
+    if payload.direction == MessageDirection.INBOUND:
+        staff_notifications.notify_customer_reply(db, ticket)
 
     audit.record(
         db,
