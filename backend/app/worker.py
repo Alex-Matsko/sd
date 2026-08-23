@@ -19,6 +19,7 @@ import traceback
 
 from app.config import settings, warn_about_insecure_settings
 from app.db import SessionLocal
+from app.services import settings_audit  # noqa: F401 — подключает слушатель аудита настроек
 from app.services import (
     automation,
     client_reports,

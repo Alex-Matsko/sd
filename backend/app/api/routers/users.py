@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_manager_or_above
 from app.core.enums import UserRole
-from app.core.security import hash_password
+from app.core.security import hash_password, revoke_refresh_tokens
 from app.db import get_db
 from app.models.user import User
 from app.schemas.user import UserCreate, UserRead, UserUpdate
@@ -85,6 +85,11 @@ def update_user(
         setattr(user, field, value)
     if payload.password:
         user.password_hash = hash_password(payload.password)
+        # Пароль сбрасывают ровно тогда, когда учётку увели или сотрудник
+        # уволился — и именно тогда чужой refresh-токен обязан умереть.
+        # Самостоятельная смена пароля сессии гасила, а сброс администратором
+        # оставлял их жить ещё месяц.
+        revoke_refresh_tokens(db, user)
 
     db.add(user)
     db.commit()

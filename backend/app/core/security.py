@@ -57,3 +57,21 @@ def generate_refresh_token() -> tuple[str, str, datetime]:
 
 def hash_refresh_token(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def revoke_refresh_tokens(db, user) -> int:
+    """Гасит все живые refresh-токены пользователя.
+
+    Вынесено из auth-роутера: отзыв нужен в двух местах — при самостоятельной
+    смене пароля и при сбросе администратором, — и во втором месте его просто
+    забыли, из-за чего скомпрометированная сессия переживала смену пароля.
+    """
+    from datetime import datetime, timezone
+
+    from app.models.auth import RefreshToken
+
+    return (
+        db.query(RefreshToken)
+        .filter(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        .update({RefreshToken.revoked_at: datetime.now(timezone.utc)})
+    )

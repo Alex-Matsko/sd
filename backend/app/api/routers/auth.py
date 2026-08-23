@@ -11,6 +11,7 @@ from app.core.security import (
     generate_refresh_token,
     hash_password,
     hash_refresh_token,
+    revoke_refresh_tokens,
     verify_password,
 )
 from app.db import get_db
@@ -95,9 +96,7 @@ def change_own_password(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Текущий пароль указан неверно")
     user.password_hash = hash_password(payload.new_password)
     db.add(user)
-    db.query(RefreshToken).filter(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)).update(
-        {RefreshToken.revoked_at: datetime.now(timezone.utc)}
-    )
+    revoke_refresh_tokens(db, user)
     db.commit()
 
 

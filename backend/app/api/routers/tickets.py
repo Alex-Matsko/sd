@@ -21,6 +21,7 @@ from app.schemas.ticket import TicketCreate, TicketRead, TicketUpdate
 from app.schemas.time_entry import TimeEntryCreate, TimeEntryRead, TimeEntryUpdate
 from app.services import attachments as attachments_service
 from app.services import audit as audit_service
+from app.services import ticket_access
 from app.services import messages as messages_service
 from app.services import sla as sla_service
 from app.services import time_entries as time_entries_service
@@ -29,9 +30,15 @@ from app.services import tickets as tickets_service
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
 
-def _get_ticket_or_404(db: Session, ticket_id: int) -> Ticket:
+def _get_ticket_or_404(db: Session, ticket_id: int, actor: User) -> Ticket:
+    """Единственная точка получения заявки по id во всём сотрудническом API.
+
+    Проверка видимости стоит здесь, а не в каждом эндпоинте: так её нельзя
+    забыть, добавляя новый маршрут. Недоступная заявка отдаётся как 404, а не
+    403 — иначе по коду ответа перебирается, какие номера заявок существуют.
+    """
     ticket = db.get(Ticket, ticket_id)
-    if ticket is None:
+    if ticket is None or not ticket_access.can_see(db, actor, ticket):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Заявка не найдена")
     return ticket
 
@@ -86,13 +93,17 @@ def list_tickets(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> list[TicketRead]:
     """Paged ticket queue. The full match count goes back in `X-Total-Count`
     so the client can render "1–50 из N" without a second request, and the
     response body stays a plain array (no envelope) - every existing consumer
-    keeps working unchanged."""
-    query = db.query(Ticket)
+    keeps working unchanged.
+
+    Выдача ограничена тем, что сотруднику положено видеть (ТЗ р. 6): для
+    диспетчера и выше это вся очередь, инженеру — свои, командные и ещё не
+    распределённые заявки."""
+    query = ticket_access.visible_tickets_query(db, actor)
     if status_filter is not None:
         query = query.filter(Ticket.status == status_filter)
     if organization_id is not None:
@@ -129,17 +140,26 @@ def list_tickets(
 
 
 @router.get("/stats")
-def get_ticket_stats(db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> dict:
+def get_ticket_stats(db: Session = Depends(get_db), actor: User = Depends(get_current_user)) -> dict:
     """Whole-queue counters for the dashboard. Computed in SQL rather than by
     counting a fetched list: once the queue is paged, counting client-side
     would silently report only the current page's worth (section 8 - the
-    dashboard's numbers have to reflect the whole queue, not a window)."""
+    dashboard's numbers have to reflect the whole queue, not a window).
+
+    Считается по той же видимой области, что и очередь (ТЗ р. 6): иначе
+    инженер видел бы на дашборде цифры по всей компании, а в списке под ними
+    — только свои заявки, и счётчики читались бы как ошибка."""
+    visible = ticket_access.visible_tickets_query(db, actor).subquery()
+    scoped = db.query(Ticket).join(visible, visible.c.id == Ticket.id)
+
     by_status = {
         status_value: count
-        for status_value, count in db.query(Ticket.status, func.count(Ticket.id)).group_by(Ticket.status).all()
+        for status_value, count in scoped.with_entities(Ticket.status, func.count(Ticket.id))
+        .group_by(Ticket.status)
+        .all()
     }
     overdue = (
-        db.query(func.count(Ticket.id))
+        scoped.with_entities(func.count(Ticket.id))
         .filter(
             Ticket.status.in_(OPEN_TICKET_STATUSES),
             Ticket.sla_resolution_due_at.isnot(None),
@@ -153,7 +173,7 @@ def get_ticket_stats(db: Session = Depends(get_db), _: User = Depends(get_curren
     now = datetime.now(timezone.utc)
     end_of_day = datetime.combine(now.date(), time.max, tzinfo=timezone.utc)
     at_risk_today = (
-        db.query(func.count(Ticket.id))
+        scoped.with_entities(func.count(Ticket.id))
         .filter(
             Ticket.status.in_(OPEN_TICKET_STATUSES),
             Ticket.sla_resolution_due_at.isnot(None),
@@ -169,13 +189,13 @@ def get_ticket_stats(db: Session = Depends(get_db), _: User = Depends(get_curren
     week_start = now.date() - timedelta(days=6)
     week_start_at = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
     created_rows = (
-        db.query(func.date(Ticket.created_at), func.count(Ticket.id))
+        scoped.with_entities(func.date(Ticket.created_at), func.count(Ticket.id))
         .filter(Ticket.created_at >= week_start_at)
         .group_by(func.date(Ticket.created_at))
         .all()
     )
     closed_rows = (
-        db.query(func.date(Ticket.closed_at), func.count(Ticket.id))
+        scoped.with_entities(func.date(Ticket.closed_at), func.count(Ticket.id))
         .filter(Ticket.closed_at.isnot(None), Ticket.closed_at >= week_start_at)
         .group_by(func.date(Ticket.closed_at))
         .all()
@@ -191,7 +211,9 @@ def get_ticket_stats(db: Session = Depends(get_db), _: User = Depends(get_curren
         for day in (week_start + timedelta(days=offset) for offset in range(7))
     ]
 
-    # Engineer workload: open tickets currently on each person's plate.
+    # Загрузка инженеров — управленческий виджет: кто чем занят, показывается
+    # тем, кто ведёт всю очередь. Инженеру чужая нагрузка не нужна, а по
+    # урезанной области виджет всё равно показывал бы только его самого.
     workload_rows = (
         db.query(User.full_name, func.count(Ticket.id))
         .join(Ticket, Ticket.assigned_engineer_id == User.id)
@@ -200,6 +222,8 @@ def get_ticket_stats(db: Session = Depends(get_db), _: User = Depends(get_curren
         .order_by(func.count(Ticket.id).desc())
         .limit(10)
         .all()
+        if ticket_access.sees_full_queue(actor)
+        else []
     )
 
     return {
@@ -223,8 +247,8 @@ def create_ticket(
 
 
 @router.get("/{ticket_id}", response_model=TicketRead)
-def get_ticket(ticket_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> TicketRead:
-    return _read_with_sla(db, _get_ticket_or_404(db, ticket_id))
+def get_ticket(ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)) -> TicketRead:
+    return _read_with_sla(db, _get_ticket_or_404(db, ticket_id, actor))
 
 
 @router.patch("/{ticket_id}", response_model=TicketRead)
@@ -234,7 +258,7 @@ def update_ticket(
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
 ) -> TicketRead:
-    ticket = _get_ticket_or_404(db, ticket_id)
+    ticket = _get_ticket_or_404(db, ticket_id, actor)
     try:
         return _read_with_sla(db, tickets_service.update_ticket(db, ticket, payload, actor))
     except ValueError as exc:
@@ -243,25 +267,31 @@ def update_ticket(
 
 @router.get("/{ticket_id}/related", response_model=list[TicketRead])
 def list_related_tickets(
-    ticket_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+    ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)
 ) -> list[TicketRead]:
     """Section 8.2 "связанные заявки". `parent_ticket_id` has been written
     since the "поднять старую" bot flow, but nothing ever displayed it - so a
     revived ticket's history was recorded and invisible. Returns the parent
     and any children, both directions in one list."""
-    ticket = _get_ticket_or_404(db, ticket_id)
-    related = db.query(Ticket).filter(Ticket.parent_ticket_id == ticket.id).all()
+    ticket = _get_ticket_or_404(db, ticket_id, actor)
+    # Связанная заявка может быть чужой: сама по себе связь не даёт права
+    # её читать, поэтому список фильтруется той же видимостью.
+    related = (
+        ticket_access.visible_tickets_query(db, actor)
+        .filter(Ticket.parent_ticket_id == ticket.id)
+        .all()
+    )
     if ticket.parent_ticket_id is not None:
         parent = db.get(Ticket, ticket.parent_ticket_id)
-        if parent is not None:
+        if parent is not None and ticket_access.can_see(db, actor, parent):
             related.insert(0, parent)
     cache = sla_service.SlaCache()
     return [_read_with_sla(db, t, cache) for t in related]
 
 
 @router.get("/{ticket_id}/messages", response_model=list[MessageRead])
-def list_messages(ticket_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> list[Message]:
-    _get_ticket_or_404(db, ticket_id)
+def list_messages(ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)) -> list[Message]:
+    _get_ticket_or_404(db, ticket_id, actor)
     return db.query(Message).filter(Message.ticket_id == ticket_id).order_by(Message.created_at).all()
 
 
@@ -272,7 +302,7 @@ def create_message(
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
 ) -> Message:
-    ticket = _get_ticket_or_404(db, ticket_id)
+    ticket = _get_ticket_or_404(db, ticket_id, actor)
     return messages_service.add_message(db, ticket, payload, author_user=actor)
 
 
@@ -286,9 +316,9 @@ async def upload_attachment(
     message_id: int,
     file: UploadFile,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> Attachment:
-    ticket = _get_ticket_or_404(db, ticket_id)
+    ticket = _get_ticket_or_404(db, ticket_id, actor)
     message = db.get(Message, message_id)
     if message is None or message.ticket_id != ticket.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Сообщение не найдено")
@@ -310,14 +340,14 @@ def download_attachment(
     ticket_id: int,
     attachment_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    actor: User = Depends(get_current_user),
 ) -> FileResponse:
     """Serves a stored attachment back. Without this, files arriving over
     email/MAX/Telegram were written to disk and listed in the API but could
     never be opened by anyone (found in audit). The attachment is resolved
     through its message's ticket, so an id from another ticket 404s rather
     than leaking a file across tickets."""
-    ticket = _get_ticket_or_404(db, ticket_id)
+    ticket = _get_ticket_or_404(db, ticket_id, actor)
     attachment = (
         db.query(Attachment)
         .join(Message, Message.id == Attachment.message_id)
@@ -338,17 +368,17 @@ def download_attachment(
 
 @router.get("/{ticket_id}/history", response_model=list[AuditLogRead])
 def get_ticket_history(
-    ticket_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+    ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)
 ) -> list[AuditLog]:
-    _get_ticket_or_404(db, ticket_id)
+    _get_ticket_or_404(db, ticket_id, actor)
     return audit_service.get_ticket_history(db, ticket_id)
 
 
 @router.get("/{ticket_id}/time-entries", response_model=list[TimeEntryRead])
 def list_time_entries(
-    ticket_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+    ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)
 ) -> list[TimeEntry]:
-    _get_ticket_or_404(db, ticket_id)
+    _get_ticket_or_404(db, ticket_id, actor)
     return db.query(TimeEntry).filter(TimeEntry.ticket_id == ticket_id).order_by(TimeEntry.entry_date).all()
 
 
@@ -359,7 +389,7 @@ def create_time_entry(
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
 ) -> TimeEntry:
-    ticket = _get_ticket_or_404(db, ticket_id)
+    ticket = _get_ticket_or_404(db, ticket_id, actor)
     return time_entries_service.create_time_entry(db, ticket, payload, actor)
 
 
@@ -384,7 +414,7 @@ def get_my_timer(db: Session = Depends(get_db), actor: User = Depends(get_curren
 def start_timer(
     ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)
 ) -> dict:
-    ticket = _get_ticket_or_404(db, ticket_id)
+    ticket = _get_ticket_or_404(db, ticket_id, actor)
     timer = time_entries_service.start_timer(db, ticket, actor)
     return {"running": True, "ticket_id": timer.ticket_id, "started_at": timer.started_at}
 
@@ -404,7 +434,7 @@ def update_time_entry(
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
 ) -> TimeEntry:
-    _get_ticket_or_404(db, ticket_id)
+    _get_ticket_or_404(db, ticket_id, actor)
     entry = db.get(TimeEntry, entry_id)
     if entry is None or entry.ticket_id != ticket_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Запись времени не найдена")

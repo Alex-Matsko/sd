@@ -10,6 +10,7 @@ from app.core.enums import UserRole
 from app.core.security import decode_access_token
 from app.db import get_db
 from app.models.user import User
+from app.services import settings_audit
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -33,6 +34,10 @@ def get_current_user(
     user = db.get(User, user_id)
     if user is None or not user.is_active:
         raise credentials_error
+    # Автор запроса для автоматического аудита настроек. Кладётся в сессию,
+    # а не в contextvar: синхронные зависимости FastAPI идут в отдельном
+    # потоке, и значение из contextvar наружу не вернулось бы.
+    settings_audit.set_actor(db, user.id)
     return user
 
 

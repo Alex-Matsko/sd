@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
 
 from app.core.enums import UserRole
 
@@ -6,7 +6,9 @@ from app.core.enums import UserRole
 class UserCreate(BaseModel):
     full_name: str
     email: EmailStr
-    password: str
+    # Та же нижняя граница, что у пароля клиента портала: без неё
+    # администратор мог завести сотрудника с паролем «1».
+    password: str = Field(min_length=8)
     role: UserRole
     telegram_id: str | None = None
 
@@ -16,7 +18,7 @@ class UserUpdate(BaseModel):
     role: UserRole | None = None
     is_active: bool | None = None
     telegram_id: str | None = None
-    password: str | None = None
+    password: str | None = Field(default=None, min_length=8)
 
 
 class UserRead(BaseModel):

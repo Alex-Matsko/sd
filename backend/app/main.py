@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.services import settings_audit  # noqa: F401 — подключает слушатель аудита настроек
 from app.api.routers import (
     assets,
     auth,

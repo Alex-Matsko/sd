@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 from sqlalchemy.orm import Session
 
-from app.core.enums import Channel, Priority, TicketStatus, TicketType
+from app.core.enums import Channel, Priority, TicketStatus, TicketType, UserRole
 from app.models.active_timer import ActiveTimer
 from app.models.contact import Contact
 from app.models.ticket import Ticket
@@ -124,6 +124,16 @@ def test_timer_survives_ticket_deletion(db: Session, contact: Contact, engineer_
 # --- счётчики дашборда --------------------------------------------------
 
 
+def _admin(db: Session) -> User:
+    """Счётчики дашборда теперь считаются по видимой сотруднику области
+    (ТЗ р. 6), поэтому эндпоинту нужен конкретный пользователь. Берётся
+    администратор — он видит всю очередь, и проверки счётчиков остаются
+    проверками счётчиков, а не проверками видимости."""
+    admin = db.query(User).filter(User.role == UserRole.ADMIN).first()
+    assert admin is not None, "выполните `python -m app.seed` перед тестами"
+    return admin
+
+
 @pytest.fixture()
 def stats(db: Session):
     """Вызывает эндпоинт напрямую с сессией теста: через HTTP-клиент запрос
@@ -131,7 +141,7 @@ def stats(db: Session):
     from app.api.routers.tickets import get_ticket_stats
 
     def _stats() -> dict:
-        return get_ticket_stats(db=db, _=None)
+        return get_ticket_stats(db=db, actor=_admin(db))
 
     return _stats
 
