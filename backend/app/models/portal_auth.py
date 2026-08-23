@@ -27,6 +27,10 @@ class PortalCredential(Base, TimestampMixin):
     # state, so login has to cope with "no password set" rather than assume one.
     password_hash: Mapped[str | None] = mapped_column(String(255))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Когда клиент последний раз смотрел свои заявки. По этой отметке
+    # считается, что для него новое: без неё «непрочитанное» пришлось бы
+    # хранить по каждому сообщению отдельно ради сводки на одной странице.
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     contact: Mapped["Contact"] = relationship()
 

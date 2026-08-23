@@ -26,6 +26,11 @@ class PortalMe(BaseModel):
     can_view_org_tickets: bool
 
 
+class PortalPasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
+
+
 class PortalTicketCreate(BaseModel):
     subject: str = Field(min_length=3, max_length=500)
     body: str = Field(min_length=1)
@@ -47,6 +52,13 @@ class PortalMessageRead(BaseModel):
     # with "поддержка", and staff names are internal.
     is_from_support: bool
     created_at: datetime
+    attachments: list["PortalAttachmentRead"] = []
+
+
+class PortalAttachmentRead(BaseModel):
+    id: int
+    filename: str
+    size_bytes: int
 
 
 class PortalTicketRead(BaseModel):
@@ -68,6 +80,27 @@ class PortalTicketRead(BaseModel):
 
 class PortalTicketDetail(PortalTicketRead):
     messages: list[PortalMessageRead]
+
+
+class PortalTicketUpdate(BaseModel):
+    ticket_id: int
+    display_number: str
+    subject: str
+    status: TicketStatus
+    new_messages: int
+    status_changed: bool
+    at: datetime
+
+
+class PortalUpdates(BaseModel):
+    """Что изменилось с прошлого визита клиента.
+
+    Клиент не сидит в кабинете постоянно: без такой сводки он узнаёт об
+    ответе, только если сам откроет заявку и заметит новое сообщение.
+    """
+
+    total_new_messages: int
+    tickets: list[PortalTicketUpdate]
 
 
 class PortalUsage(BaseModel):
