@@ -18,6 +18,7 @@ import { ContractsPage } from "./pages/directory/ContractsPage";
 import { AssetsPage } from "./pages/directory/AssetsPage";
 import { PriorityMatrixPage } from "./pages/settings/PriorityMatrixPage";
 import { TariffsPage } from "./pages/settings/TariffsPage";
+import { CalendarsPage } from "./pages/settings/CalendarsPage";
 import { CategoriesPage } from "./pages/settings/CategoriesPage";
 import { RoutingRulesPage } from "./pages/settings/RoutingRulesPage";
 import { ChannelsSettingsPage } from "./pages/settings/ChannelsSettingsPage";
@@ -62,6 +63,7 @@ export default function App() {
         <Route path="directory/assets" element={<AssetsPage />} />
         <Route path="settings/priority" element={<PriorityMatrixPage />} />
         <Route path="settings/tariffs" element={<TariffsPage />} />
+        <Route path="settings/calendars" element={<CalendarsPage />} />
         <Route path="settings/categories" element={<CategoriesPage />} />
         <Route path="settings/routing" element={<RoutingRulesPage />} />
         <Route path="settings/channels" element={<ChannelsSettingsPage />} />

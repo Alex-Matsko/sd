@@ -1743,3 +1743,32 @@ button.attachment-chip:hover {
   color: var(--warning);
   font-weight: 600;
 }
+
+/* ---------- Рабочий календарь ---------- */
+
+.weekday-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.weekday-row {
+  display: grid;
+  grid-template-columns: 200px 110px 16px 110px 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.weekday-row:last-child {
+  border-bottom: none;
+}
+
+.weekday-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

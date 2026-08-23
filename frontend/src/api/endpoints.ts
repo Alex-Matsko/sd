@@ -180,6 +180,43 @@ export function replacePriorityMatrix(rules: { impact: string; urgency: string; 
 export function listCalendars() {
   return apiRequest<BusinessCalendar[]>("/calendars");
 }
+export function createCalendar(payload: {
+  name: string;
+  timezone?: string;
+  is_24x7?: boolean;
+  observes_holidays?: boolean;
+  windows?: { weekday: number; start_time: string; end_time: string }[];
+}) {
+  return apiRequest<BusinessCalendar>("/calendars", { method: "POST", body: payload });
+}
+export function updateCalendar(id: number, payload: Partial<BusinessCalendar>) {
+  return apiRequest<BusinessCalendar>(`/calendars/${id}`, { method: "PATCH", body: payload });
+}
+/** Окна заменяются целиком — как SLA-правила тарифа: это набор, а не набор
+ *  редактируемых по одному строк. */
+export function replaceCalendarWindows(
+  id: number,
+  windows: { weekday: number; start_time: string; end_time: string }[]
+) {
+  return apiRequest<BusinessCalendar>(`/calendars/${id}/windows`, { method: "PUT", body: windows });
+}
+
+// --- Holidays ---
+export interface Holiday {
+  id: number;
+  holiday_date: string;
+  name: string;
+}
+export function listHolidays() {
+  return apiRequest<Holiday[]>("/holidays");
+}
+/** until_date задаёт период: российские праздники идут блоками. */
+export function createHolidays(payload: { holiday_date: string; until_date?: string | null; name: string }) {
+  return apiRequest<Holiday[]>("/holidays", { method: "POST", body: payload });
+}
+export function deleteHoliday(id: number) {
+  return apiRequest<void>(`/holidays/${id}`, { method: "DELETE" });
+}
 
 // --- Users ---
 export function listUsers() {

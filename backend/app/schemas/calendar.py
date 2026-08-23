@@ -47,6 +47,10 @@ class BusinessCalendarRead(BaseModel):
 class HolidayCreate(BaseModel):
     holiday_date: date
     name: str
+    # Российские праздники идут блоками (новогодние каникулы, майские), и
+    # заводить их по одному — восемь одинаковых действий подряд. Пустое
+    # поле означает один день.
+    until_date: date | None = None
 
 
 class HolidayRead(BaseModel):

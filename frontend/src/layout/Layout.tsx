@@ -69,6 +69,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { to: "/settings/priority", label: "Матрица приоритетов", icon: <IconGrid size={15} /> },
       { to: "/settings/tariffs", label: "Тарифы и SLA", icon: <IconFileText size={15} /> },
+      { to: "/settings/calendars", label: "Рабочий календарь", icon: <IconClock size={15} /> },
       { to: "/settings/categories", label: "Категории", icon: <IconGrid size={15} /> },
       { to: "/settings/routing", label: "Маршрутизация", icon: <IconRoute size={15} /> },
       { to: "/settings/channels", label: "Каналы", icon: <IconInbox size={15} /> },
