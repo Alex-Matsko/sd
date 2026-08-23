@@ -137,11 +137,23 @@ export interface Team {
   member_user_ids: number[];
 }
 
+export type RoutingConditionField = "organization" | "category" | "channel" | "priority" | "type" | "asset";
+
+export interface RoutingCondition {
+  field: RoutingConditionField;
+  value: number | string | (number | string)[];
+  negate: boolean;
+}
+
 export interface RoutingRule {
   id: number;
   order: number;
+  name: string | null;
   rule_type: RoutingRuleType;
   is_active: boolean;
+  /** "all" — должны совпасть все условия, "any" — достаточно одного. */
+  match: "all" | "any";
+  conditions: RoutingCondition[];
   organization_id: number | null;
   category_id: number | null;
   target_engineer_id: number | null;

@@ -172,6 +172,23 @@ export function createRoutingRule(payload: Omit<RoutingRule, "id">) {
 export function updateRoutingRule(id: number, payload: Partial<RoutingRule>) {
   return apiRequest<RoutingRule>(`/routing-rules/${id}`, { method: "PATCH", body: payload });
 }
+/** «А куда уйдёт вот такая заявка?» — проверка правил без создания заявки. */
+export function previewRouting(payload: {
+  organization_id: number;
+  category_id?: number | null;
+  channel?: string | null;
+  priority?: string | null;
+  type?: string | null;
+  asset_id?: number | null;
+}) {
+  return apiRequest<{
+    matched: boolean;
+    rule_id: number | null;
+    rule_name: string | null;
+    target: string | null;
+    target_kind: "engineer" | "team" | null;
+  }>("/routing-rules/preview", { method: "POST", body: payload });
+}
 export function deleteRoutingRule(id: number) {
   return apiRequest<void>(`/routing-rules/${id}`, { method: "DELETE" });
 }
