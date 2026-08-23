@@ -32,6 +32,16 @@ def client_contact(db: Session, organization: Organization) -> Contact:
     return contact
 
 
+def _with_email(db, contact, email: str):
+    """Портальный логин ищется по адресу контакта."""
+    from app.models.contact import ContactEmail
+
+    db.add(ContactEmail(contact_id=contact.id, email=email, is_primary=True))
+    db.commit()
+    db.refresh(contact)
+    return contact
+
+
 def _ticket(db: Session, contact: Contact, subject="Заявка клиента") -> object:
     return tickets_service.create_ticket(
         db,
@@ -240,3 +250,78 @@ def test_reply_to_an_open_ticket_still_lands_in_it(db: Session, contact: Contact
     assert db.query(Ticket).count() == before
     db.refresh(ticket)
     assert "Дополнение" in [m.body for m in ticket.messages]
+
+
+# --- выдача и отзыв доступа в кабинет ------------------------------------
+
+
+def test_access_flag_reflects_reality(db: Session, contact: Contact):
+    """Без признака диспетчер не видит в списке, кому доступ уже выдан, —
+    и выдаёт повторно или не выдаёт вовсе."""
+    from app.services import portal as portal_service
+
+    assert contact.has_portal_access is False
+
+    portal_service.set_password(db, contact, "client-password")
+    db.refresh(contact)
+    assert contact.has_portal_access is True
+
+
+def test_revoking_access_locks_the_client_out(db: Session, contact: Contact):
+    """Уволился сотрудник клиента — отрезать его было нечем: пароль оставался
+    рабочим."""
+    from app.services import portal as portal_service
+
+    _with_email(db, contact, "leaver@romashka.ru")
+    portal_service.set_password(db, contact, "client-password")
+    assert portal_service.authenticate_with_password(db, "leaver@romashka.ru", "client-password") is not None
+
+    portal_service.revoke_access(db, contact)
+
+    db.refresh(contact)
+    assert contact.has_portal_access is False
+    with pytest.raises(portal_service.PortalAuthError):
+        portal_service.authenticate_with_password(db, "leaver@romashka.ru", "client-password")
+
+
+def test_revoking_access_kills_pending_magic_links(db: Session, contact: Contact):
+    """Живая ссылка из письма — такой же ключ, как пароль: отзыв доступа,
+    оставляющий её рабочей, ничего не отзывает."""
+    from app.models.portal_auth import PortalLoginToken
+    from app.services import portal as portal_service
+
+    _with_email(db, contact, "linkuser@romashka.ru")
+    issued = portal_service.issue_magic_link(db, "linkuser@romashka.ru")
+    assert issued is not None
+    _, link = issued
+    raw_token = link.split("token=")[1]
+
+    portal_service.revoke_access(db, contact)
+
+    assert db.query(PortalLoginToken).filter(PortalLoginToken.contact_id == contact.id).count() == 0
+    with pytest.raises(portal_service.PortalAuthError):
+        portal_service.consume_magic_link(db, raw_token)
+
+
+def test_revoking_access_twice_is_harmless(db: Session, contact: Contact):
+    from app.services import portal as portal_service
+
+    portal_service.revoke_access(db, contact)
+    portal_service.revoke_access(db, contact)
+    assert contact.has_portal_access is False
+
+
+def test_access_requires_an_email(db: Session, contact: Contact):
+    """Логином служит адрес почты — без него доступ бессмыслен, и отказ
+    должен быть внятным, а не падением при входе."""
+    from fastapi import HTTPException
+
+    from app.api.routers.contacts import PortalPasswordRequest, set_portal_password
+
+    assert contact.emails == []
+    with pytest.raises(HTTPException) as exc:
+        set_portal_password(
+            contact_id=contact.id, payload=PortalPasswordRequest(password="client-password"), db=db, _=None
+        )
+    assert exc.value.status_code == 400
+    assert "email" in exc.value.detail

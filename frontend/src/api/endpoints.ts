@@ -75,6 +75,14 @@ export function createContact(payload: {
 export function updateContact(id: number, payload: Partial<Contact>) {
   return apiRequest<Contact>(`/contacts/${id}`, { method: "PATCH", body: payload });
 }
+/** Доступ клиента в личный кабинет (ТЗ р. 7). Логином служит email контакта. */
+export function setPortalPassword(contactId: number, password: string) {
+  return apiRequest<void>(`/contacts/${contactId}/portal-password`, { method: "POST", body: { password } });
+}
+/** Отзыв доступа: снимает пароль и невыпользованные ссылки для входа. */
+export function revokePortalAccess(contactId: number) {
+  return apiRequest<void>(`/contacts/${contactId}/portal-password`, { method: "DELETE" });
+}
 export function mergeContact(contactId: number, intoContactId: number) {
   return apiRequest<Contact>(`/contacts/${contactId}/merge`, { method: "POST", body: { into_contact_id: intoContactId } });
 }

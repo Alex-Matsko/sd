@@ -82,6 +82,7 @@ export interface Contact {
   telegram_id: string | null;
   max_id: string | null;
   can_view_org_tickets: boolean;
+  has_portal_access: boolean;
   is_confirmed: boolean;
   emails: ContactEmail[];
   phones: ContactPhone[];

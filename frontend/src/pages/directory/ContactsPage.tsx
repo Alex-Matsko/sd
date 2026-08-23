@@ -1,12 +1,21 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContact, listContacts, listOrganizations, mergeContact } from "../../api/endpoints";
+import {
+  createContact,
+  listContacts,
+  listOrganizations,
+  mergeContact,
+  revokePortalAccess,
+  setPortalPassword,
+  updateContact,
+} from "../../api/endpoints";
 import { EmptyState, ErrorBanner, Loading } from "../../components/ui";
 import type { Contact } from "../../api/types";
 
 export function ContactsPage() {
   const qc = useQueryClient();
   const [showModal, setShowModal] = useState(false);
+  const [portalContact, setPortalContact] = useState<Contact | null>(null);
   const [mergingContact, setMergingContact] = useState<Contact | null>(null);
   const orgsQuery = useQuery({ queryKey: ["organizations"], queryFn: listOrganizations });
   const contactsQuery = useQuery({ queryKey: ["contacts-all"], queryFn: () => listContacts() });
@@ -32,15 +41,16 @@ export function ContactsPage() {
       {contacts.length === 0 && <EmptyState text="Контактов пока нет" />}
       {contacts.length > 0 && (
         <div className="list">
-          <div className="list-head" style={{ gridTemplateColumns: "1.8fr 1.6fr 1.4fr 1fr 110px" }}>
+          <div className="list-head" style={{ gridTemplateColumns: "1.7fr 1.4fr 1.4fr 1fr 150px 200px" }}>
             <span>Контакт</span>
             <span>Организация</span>
             <span>Email</span>
             <span>Телефон</span>
+            <span>Личный кабинет</span>
             <span></span>
           </div>
           {contacts.map((c) => (
-            <div className="list-row" style={{ gridTemplateColumns: "1.8fr 1.6fr 1.4fr 1fr 110px" }} key={c.id}>
+            <div className="list-row" style={{ gridTemplateColumns: "1.7fr 1.4fr 1.4fr 1fr 150px 200px" }} key={c.id}>
               <span className="subject">
                 {c.full_name}
                 {c.position && <span className="muted"> · {c.position}</span>}
@@ -49,7 +59,13 @@ export function ContactsPage() {
               <span>{orgsById.get(c.organization_id)?.name ?? "—"}</span>
               <span className="muted">{c.emails[0]?.email ?? "—"}</span>
               <span className="muted">{c.phones[0]?.phone ?? "—"}</span>
-              <span>
+              <span className={c.has_portal_access ? "sent-mark" : "muted"}>
+                {c.has_portal_access ? "доступ есть" : "нет доступа"}
+              </span>
+              <span style={{ display: "flex", gap: 10 }}>
+                <button className="btn-link" onClick={() => setPortalContact(c)}>
+                  Кабинет
+                </button>
                 <button className="btn-link" onClick={() => setMergingContact(c)}>
                   Объединить
                 </button>
@@ -66,6 +82,22 @@ export function ContactsPage() {
           onCreated={() => {
             setShowModal(false);
             qc.invalidateQueries({ queryKey: ["contacts-all"] });
+          }}
+        />
+      )}
+
+      {portalContact && (
+        <PortalAccessModal
+          contact={portalContact}
+          onClose={() => setPortalContact(null)}
+          onChanged={() => {
+            setPortalContact(null);
+            // Список контактов живёт под ключом contacts-all; сброс
+            // «contacts» его не касается, и строка оставалась со старым
+            // признаком доступа. Сбрасываются оба: под «contacts» лежат
+            // выборки по организации, которые тоже показывают этот признак.
+            qc.invalidateQueries({ queryKey: ["contacts-all"] });
+            qc.invalidateQueries({ queryKey: ["contacts"] });
           }}
         />
       )}
@@ -230,6 +262,140 @@ export function NewContactModal({
           </button>
           <button className="btn btn-primary" onClick={handleSubmit} disabled={submitting}>
             Создать
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/** Доступ клиента в личный кабинет (ТЗ р. 7).
+ *
+ *  Логином служит email контакта, поэтому без адреса доступ выдать нельзя —
+ *  форма говорит об этом прямо, а не отдаёт отказ сервера.
+ */
+function PortalAccessModal({
+  contact,
+  onClose,
+  onChanged,
+}: {
+  contact: Contact;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [seesOrgTickets, setSeesOrgTickets] = useState(contact.can_view_org_tickets);
+  const [error, setError] = useState<string | null>(null);
+
+  const email = contact.emails.find((e) => e.is_primary)?.email ?? contact.emails[0]?.email ?? null;
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (password) await setPortalPassword(contact.id, password);
+      if (seesOrgTickets !== contact.can_view_org_tickets) {
+        await updateContact(contact.id, { can_view_org_tickets: seesOrgTickets });
+      }
+    },
+    onSuccess: onChanged,
+    onError: (e) => setError(e instanceof Error ? e.message : "Не удалось сохранить"),
+  });
+
+  const revokeMutation = useMutation({
+    mutationFn: () => revokePortalAccess(contact.id),
+    onSuccess: onChanged,
+    onError: (e) => setError(e instanceof Error ? e.message : "Не удалось отозвать доступ"),
+  });
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3>Личный кабинет — {contact.full_name}</h3>
+          <button className="icon-btn" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <div className="modal-body">
+          {error && <ErrorBanner message={error} />}
+
+          {email === null ? (
+            <p className="muted">
+              У контакта нет email, а он служит логином в кабинете. Добавьте адрес — тогда можно будет выдать
+              доступ.
+            </p>
+          ) : (
+            <>
+              <div className="form-row">
+                <label className="form-label">Логин</label>
+                <input type="text" readOnly value={email} className="mono" />
+              </div>
+
+              <div className="form-row">
+                <label className="form-label">
+                  {contact.has_portal_access ? "Новый пароль" : "Пароль"}
+                </label>
+                <input
+                  type="text"
+                  placeholder={contact.has_portal_access ? "оставьте пустым, чтобы не менять" : "не менее 8 символов"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Пароль показан открыто, чтобы его можно было передать клиенту. Дальше он сможет входить и по
+                  ссылке на почту, не запоминая его.
+                </span>
+              </div>
+
+              <div className="form-row form-row-inline">
+                <input
+                  id="sees-org"
+                  type="checkbox"
+                  checked={seesOrgTickets}
+                  onChange={(e) => setSeesOrgTickets(e.target.checked)}
+                />
+                <label htmlFor="sees-org">
+                  Видит обращения всей организации
+                  <span className="muted"> — иначе только свои</span>
+                </label>
+              </div>
+
+              {contact.has_portal_access && (
+                <p className="muted">
+                  Доступ выдан. Отзыв снимает пароль и неиспользованные ссылки для входа — это то, что нужно
+                  сделать, когда сотрудник клиента уволился.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+        <div className="modal-foot">
+          {contact.has_portal_access && (
+            <button
+              className="btn-link"
+              disabled={revokeMutation.isPending}
+              onClick={() => {
+                if (window.confirm(`Отозвать доступ в кабинет у ${contact.full_name}?`)) revokeMutation.mutate();
+              }}
+            >
+              Отозвать доступ
+            </button>
+          )}
+          <div className="spacer" />
+          <button className="btn btn-ghost" onClick={onClose}>
+            Отмена
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={
+              email === null ||
+              saveMutation.isPending ||
+              (password.length > 0 && password.length < 8) ||
+              (!password && seesOrgTickets === contact.can_view_org_tickets)
+            }
+            onClick={() => saveMutation.mutate()}
+          >
+            Сохранить
           </button>
         </div>
       </div>

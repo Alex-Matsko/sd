@@ -110,6 +110,23 @@ def set_portal_password(
     portal.set_password(db, contact, payload.password)
 
 
+@router.delete("/{contact_id}/portal-password", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_portal_access(
+    contact_id: int, db: Session = Depends(get_db), _: User = Depends(require_dispatcher_or_above)
+) -> None:
+    """Отзывает доступ в личный кабинет.
+
+    Нужно, когда сотрудник клиента уволился: отрезать его было нечем —
+    пароль оставался рабочим, а magic-link выдавался по адресу почты,
+    который никуда не делся. Снимается и пароль, и невыпользованные ссылки
+    для входа: живая ссылка из письма — такой же ключ, как пароль.
+    """
+    contact = db.get(Contact, contact_id)
+    if contact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Контакт не найден")
+    portal.revoke_access(db, contact)
+
+
 @router.patch("/{contact_id}", response_model=ContactRead)
 def update_contact(
     contact_id: int,

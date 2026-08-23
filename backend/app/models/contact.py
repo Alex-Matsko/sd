@@ -20,6 +20,18 @@ class Contact(Base, TimestampMixin):
     emails: Mapped[list["ContactEmail"]] = relationship(back_populates="contact", cascade="all, delete-orphan")
     phones: Mapped[list["ContactPhone"]] = relationship(back_populates="contact", cascade="all, delete-orphan")
 
+    # Доступ в личный кабинет. selectin, а не ленивая загрузка: список
+    # контактов иначе делал бы запрос на каждую строку ради одного флага.
+    portal_credential: Mapped["PortalCredential | None"] = relationship(
+        "PortalCredential", uselist=False, lazy="selectin", viewonly=True
+    )
+
+    @property
+    def has_portal_access(self) -> bool:
+        """Выдан ли доступ в кабинет. Без этого признака диспетчер не видит
+        в списке, кому доступ уже дан, — и выдаёт повторно или не выдаёт."""
+        return self.portal_credential is not None and bool(self.portal_credential.password_hash)
+
 
 class ContactEmail(Base):
     __tablename__ = "contact_emails"
