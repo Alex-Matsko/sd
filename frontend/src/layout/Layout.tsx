@@ -7,6 +7,13 @@ import { Avatar } from "../components/ui";
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from "../api/endpoints";
 import { connectNotifications } from "../api/realtime";
 import {
+  isSoundEnabled,
+  playNotificationSound,
+  setSoundEnabled,
+  startTitleFlash,
+  stopTitleFlash,
+} from "../lib/notificationAlerts";
+import {
   IconBell,
   IconBuilding,
   IconChevronDown,
@@ -25,6 +32,7 @@ import {
   IconUsers,
 } from "../components/icons";
 import { NOTIFICATION_TYPE_LABELS, USER_ROLE_LABELS, formatDateTime } from "../lib/labels";
+import type { Notification } from "../api/types";
 
 interface NavGroup {
   key: string;
@@ -73,10 +81,67 @@ const GROUPS: NavGroup[] = [
   },
 ];
 
+/** Звук и мигающая вкладка при новом уведомлении.
+ *
+ *  Колокольчик виден, только когда инженер смотрит на панель, а заявка
+ *  приходит, пока он в другой вкладке. Сигналить нужно ровно на новых
+ *  уведомлениях: без сравнения с уже виденными звук раздавался бы на каждом
+ *  опросе списка, а при загрузке страницы — на всём накопившемся хвосте.
+ */
+function useNotificationAlerts(notifications: Notification[], unreadCount: number, isLoaded: boolean) {
+  const seenIds = useRef<Set<number> | null>(null);
+
+  useEffect(() => {
+    // Пока список не загружен, он пуст — и запоминать эту пустоту как
+    // «уже виденное» нельзя: пришедший следом хвост непрочитанных выглядел
+    // бы новым, и панель звенела бы при каждом открытии.
+    if (!isLoaded) return;
+
+    const unread = notifications.filter((n) => !n.read_at);
+
+    if (seenIds.current === null) {
+      // Первая загрузка: то, что накопилось до прихода на страницу, — не
+      // новость, звонить об этом не нужно.
+      seenIds.current = new Set(unread.map((n) => n.id));
+      return;
+    }
+
+    const fresh = unread.filter((n) => !seenIds.current!.has(n.id));
+    unread.forEach((n) => seenIds.current!.add(n.id));
+    if (fresh.length === 0) return;
+
+    playNotificationSound();
+    // Мигать имеет смысл только в фоновой вкладке: если человек смотрит на
+    // панель, он и так увидел колокольчик.
+    if (document.hidden) startTitleFlash(unreadCount);
+  }, [notifications, unreadCount, isLoaded]);
+
+  // Вернулись на вкладку — мигание больше не нужно.
+  useEffect(() => {
+    function onVisible() {
+      if (!document.hidden) stopTitleFlash();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      stopTitleFlash();
+    };
+  }, []);
+
+  // Все уведомления прочитаны в другой вкладке — заголовок вернуть.
+  useEffect(() => {
+    if (unreadCount === 0) stopTitleFlash();
+  }, [unreadCount]);
+}
+
+
 function NotificationBell() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [soundOn, setSoundOn] = useState(isSoundEnabled);
   const ref = useRef<HTMLDivElement>(null);
 
   const notificationsQuery = useQuery({
@@ -111,6 +176,8 @@ function NotificationBell() {
   const notifications = notificationsQuery.data ?? [];
   const unreadCount = notifications.filter((n) => !n.read_at).length;
 
+  useNotificationAlerts(notifications, unreadCount, notificationsQuery.isSuccess);
+
   return (
     <div className="notification-bell" ref={ref}>
       <button className="icon-btn" title="Уведомления" onClick={() => setOpen((v) => !v)}>
@@ -121,6 +188,22 @@ function NotificationBell() {
         <div className="notification-dropdown">
           <div className="notification-dropdown-head">
             <span>Уведомления</span>
+            <div className="spacer" />
+            {/* В открытом офисе звук нужен не всем, а выключать его через
+                настройки браузера — не вариант: он и так тихий. */}
+            <button
+              className="btn-link"
+              title={soundOn ? "Выключить звук уведомлений" : "Включить звук уведомлений"}
+              onClick={() => {
+                const next = !soundOn;
+                setSoundEnabled(next);
+                setSoundOn(next);
+                // Проба вслух: иначе непонятно, что именно включилось.
+                if (next) playNotificationSound();
+              }}
+            >
+              {soundOn ? "Звук вкл." : "Звук выкл."}
+            </button>
             {unreadCount > 0 && (
               <button className="btn-link" onClick={() => readAllMutation.mutate()}>
                 Прочитать все

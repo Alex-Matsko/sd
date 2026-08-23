@@ -424,7 +424,9 @@ h3 {
 .notification-dropdown-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* Кнопок в шапке стало две (звук и «прочитать все») — распорка их
+     разводит, а space-between растащил бы вразнобой. */
+  gap: 12px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   font-weight: 600;
