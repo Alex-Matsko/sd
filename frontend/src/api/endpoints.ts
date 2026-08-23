@@ -269,6 +269,9 @@ export function createTimeEntry(
 export function updateTimeEntry(ticketId: number, entryId: number, payload: Partial<TimeEntry>) {
   return apiRequest<TimeEntry>(`/tickets/${ticketId}/time-entries/${entryId}`, { method: "PATCH", body: payload });
 }
+export function deleteTimeEntry(ticketId: number, entryId: number) {
+  return apiRequest<void>(`/tickets/${ticketId}/time-entries/${entryId}`, { method: "DELETE" });
+}
 
 // Таймер принадлежит сотруднику, а не заявке: одновременно он может быть
 // запущен только один, поэтому «активный таймер» спрашивается без id заявки.

@@ -1355,7 +1355,8 @@ button.attachment-chip:hover {
 
 .time-entry-row {
   display: grid;
-  grid-template-columns: 90px 1fr auto;
+  /* Четвёртая колонка — кнопка удаления ошибочного списания. */
+  grid-template-columns: 90px 1fr auto auto;
   gap: 10px;
   font-size: 13px;
   padding: 6px 0;
@@ -1733,4 +1734,10 @@ button.attachment-chip:hover {
 
 .sent-mark {
   color: var(--success);
+}
+
+/* Заявка возвращалась — повод разобрать причину, а не просто факт. */
+.reopen-mark {
+  color: var(--warning);
+  font-weight: 600;
 }

@@ -146,3 +146,24 @@ def update_time_entry(db: Session, entry: TimeEntry, payload: TimeEntryUpdate, a
     db.commit()
     db.refresh(entry)
     return entry
+
+
+def delete_time_entry(db: Session, entry: TimeEntry, actor: User) -> None:
+    """Убирает списание вместе со следом в истории заявки.
+
+    Пересчитывать раскладку у остальных записей не нужно: пакет считается
+    суммой существующих записей, поэтому освободившиеся минуты сами вернутся
+    в остаток при следующем списании. Уже посчитанные записи сохраняют свою
+    раскладку — так же, как при изменении договора задним числом
+    (docs/decisions.md, «Биллинг на границе пакета часов»).
+    """
+    audit.record(
+        db,
+        entity_type="time_entry",
+        entity_id=entry.id,
+        action="deleted",
+        user_id=actor.id,
+        changes={"duration_minutes": entry.duration_minutes, "is_billable": entry.is_billable},
+    )
+    db.delete(entry)
+    db.commit()

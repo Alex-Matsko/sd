@@ -39,6 +39,9 @@ class TicketUpdate(BaseModel):
     urgency: ImpactUrgencyLevel | None = None
     manual_priority: Priority | None = None
     manual_priority_reason: str | None = None
+    # ТЗ р. 4: Problem Management здесь — «только метка "повторяющаяся
+    # проблема" и связь заявок parent/child».
+    is_recurring_problem: bool | None = None
 
 
 class SlaTimerView(BaseModel):
@@ -78,6 +81,8 @@ class TicketRead(BaseModel):
     assigned_engineer_id: int | None
     team_id: int | None
     parent_ticket_id: int | None
+    reopen_count: int
+    is_recurring_problem: bool
     sla_reaction_due_at: datetime | None
     sla_resolution_due_at: datetime | None
     sla_paused_at: datetime | None

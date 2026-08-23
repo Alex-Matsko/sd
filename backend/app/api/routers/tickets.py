@@ -8,7 +8,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
-from app.core.enums import OPEN_TICKET_STATUSES, Channel, Priority, TicketStatus
+from app.core.enums import OPEN_TICKET_STATUSES, Channel, Priority, TicketStatus, UserRole
 from app.db import get_db
 from app.models.audit import AuditLog
 from app.models.message import Attachment, Message
@@ -424,6 +424,34 @@ def stop_timer(db: Session = Depends(get_db), actor: User = Depends(get_current_
     """Returns the booked entry, or null when the timer ran for under a
     minute (a mis-click) and nothing was written."""
     return time_entries_service.stop_timer(db, actor)
+
+
+@router.delete("/{ticket_id}/time-entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_time_entry(
+    ticket_id: int,
+    entry_id: int,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> None:
+    """Удаление ошибочного списания.
+
+    Раньше запись можно было только исправить, но не убрать: списание,
+    заведённое не на ту заявку, оставалось в счёте клиенту навсегда. Удалять
+    может автор записи или руководитель — чужое время инженер не трогает.
+    Операция попадает в историю заявки: это изменение суммы, которая уйдёт
+    клиенту, и оно должно быть прослеживаемым.
+    """
+    _get_ticket_or_404(db, ticket_id, actor)
+    entry = db.get(TimeEntry, entry_id)
+    if entry is None or entry.ticket_id != ticket_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Запись времени не найдена")
+
+    if entry.engineer_id != actor.id and UserRole(actor.role) not in (UserRole.MANAGER, UserRole.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Удалить чужую запись времени может только руководитель"
+        )
+
+    time_entries_service.delete_time_entry(db, entry, actor)
 
 
 @router.patch("/{ticket_id}/time-entries/{entry_id}", response_model=TimeEntryRead)

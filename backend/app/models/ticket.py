@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Identity, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Identity, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import Channel, ImpactUrgencyLevel, Priority, TicketStatus, TicketType
@@ -81,6 +81,18 @@ class Ticket(Base, TimestampMixin):
     sla_reaction_escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_resolution_warned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_resolution_escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ITIL считает долю переоткрытых заявок базовым показателем качества
+    # решения: «решено» и «решено так, что не вернулось» — разные вещи.
+    # Раньше переоткрытие не оставляло следа, и в отчётах его не было видно.
+    reopen_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+    # ТЗ р. 4 задаёт Problem Management именно так: «только как метка
+    # "повторяющаяся проблема" и связь заявок между собой (parent/child)».
+    # Связь была сделана, метки не было.
+    is_recurring_problem: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+
     first_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_reaction_met: Mapped[bool | None] = mapped_column()
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

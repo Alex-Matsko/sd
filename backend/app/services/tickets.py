@@ -110,6 +110,12 @@ def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, act
         sla.apply_resume(db, ticket, now)
         ticket.sla_paused_at = None
 
+    # Переоткрытие: «решено» и «решено так, что не вернулось» — разные вещи,
+    # и доля возвратов в ITIL считается показателем качества решения. Раньше
+    # переоткрытие не оставляло следа вообще.
+    if old_status == TicketStatus.RESOLVED and new_status == TicketStatus.IN_PROGRESS:
+        ticket.reopen_count = (ticket.reopen_count or 0) + 1
+
     # First resolution is fixed permanently - reopening never overwrites it
     # (docs/decisions.md: "SLA при переоткрытии заявки клиентом").
     if new_status == TicketStatus.RESOLVED and ticket.resolved_at is None:
@@ -174,6 +180,15 @@ def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: Use
     if "team_id" in provided and payload.team_id != ticket.team_id:
         changed["team_id"] = {"from": ticket.team_id, "to": payload.team_id}
         ticket.team_id = payload.team_id
+
+    if "is_recurring_problem" in provided and payload.is_recurring_problem != ticket.is_recurring_problem:
+        # Метка попадает в историю заявки: это решение о том, что случай не
+        # разовый, и по нему потом ищут связанные обращения.
+        changed["is_recurring_problem"] = {
+            "from": ticket.is_recurring_problem,
+            "to": payload.is_recurring_problem,
+        }
+        ticket.is_recurring_problem = bool(payload.is_recurring_problem)
 
     if "category_id" in provided:
         ticket.category_id = payload.category_id

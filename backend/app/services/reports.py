@@ -110,7 +110,23 @@ def _sla_section(db: Session, start: datetime, end: datetime, organization_id: i
         for row in violation_rows
     ]
 
-    return {**summarize(rows), "by_priority": by_priority, "violations": violations}
+    # Доля переоткрытых: «решено» и «решено так, что не вернулось» — разные
+    # вещи, и в ITIL возвраты считают показателем качества решения.
+    resolved_total, reopened_total = _period_filter(
+        db.query(
+            func.count(Ticket.id),
+            func.count(case((Ticket.reopen_count > 0, 1))),
+        ).filter(Ticket.resolved_at.isnot(None)),
+        start, end, organization_id,
+    ).one()
+
+    return {
+        **summarize(rows),
+        "by_priority": by_priority,
+        "violations": violations,
+        "reopened_count": int(reopened_total or 0),
+        "reopened_pct": _pct(int(reopened_total or 0), int(resolved_total or 0)),
+    }
 
 
 def _flow_section(db: Session, start: datetime, end: datetime, organization_id: int | None) -> dict:

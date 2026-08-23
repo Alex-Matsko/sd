@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createMessage,
   createTimeEntry,
+  deleteTimeEntry,
   downloadAttachment,
   getOrganizationUsage,
   getTicket,
@@ -122,6 +123,15 @@ export function TicketDetailPage() {
       setPendingFiles([]);
       qc.invalidateQueries({ queryKey: ["ticket", id, "messages"] });
       qc.invalidateQueries({ queryKey: ["ticket", id] });
+    },
+  });
+
+  const deleteTimeMutation = useMutation({
+    mutationFn: (entryId: number) => deleteTimeEntry(id, entryId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ticket", id, "time"] });
+      qc.invalidateQueries({ queryKey: ["organization-usage"] });
+      qc.invalidateQueries({ queryKey: ["ticket", id, "history"] });
     },
   });
 
@@ -345,6 +355,20 @@ export function TicketDetailPage() {
                   <span className="mono">{formatMinutes(entry.duration_minutes)}</span>
                   <span className="muted">{entry.comment ?? "—"}</span>
                   <span className="muted">{formatDateTime(entry.entry_date)}</span>
+                  {/* Списание, заведённое не на ту заявку, попадает в счёт
+                      клиенту — убрать его должно быть можно. */}
+                  <button
+                    className="btn-link"
+                    title="Удалить запись"
+                    disabled={deleteTimeMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm("Удалить запись о времени? Она исчезнет из отчёта клиенту.")) {
+                        deleteTimeMutation.mutate(entry.id);
+                      }
+                    }}
+                  >
+                    Удалить
+                  </button>
                 </div>
               ))}
               {timeEntriesQuery.isSuccess && (timeEntriesQuery.data ?? []).length === 0 && <p className="muted">Записей о времени нет</p>}
@@ -401,6 +425,27 @@ export function TicketDetailPage() {
               <dd>{ticket.has_no_active_contract ? "Нет активного договора (тариф по умолчанию)" : "Активный договор"}</dd>
               <dt>Решена</dt>
               <dd>{formatDateTime(ticket.resolved_at)}</dd>
+              {ticket.reopen_count > 0 && (
+                <>
+                  <dt>Переоткрывалась</dt>
+                  {/* Доля возвратов — показатель качества решения; на карточке
+                      это подсказка, что случай стоит разобрать глубже. */}
+                  <dd className="reopen-mark">{ticket.reopen_count} раз(а)</dd>
+                </>
+              )}
+              <dt>Повторяющаяся</dt>
+              <dd>
+                {/* ТЗ р. 4: Problem Management здесь — метка «повторяющаяся
+                    проблема» плюс связь заявок parent/child. */}
+                <label className="form-row-inline" style={{ marginBottom: 0, gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={ticket.is_recurring_problem}
+                    onChange={(e) => updateMutation.mutate({ is_recurring_problem: e.target.checked })}
+                  />
+                  <span className="muted">случай не разовый</span>
+                </label>
+              </dd>
               <dt>Оценка клиента</dt>
               <dd>
                 {ticket.csat_rating ? (

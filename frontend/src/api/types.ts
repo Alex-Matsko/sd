@@ -205,6 +205,8 @@ export interface Ticket {
   assigned_engineer_id: number | null;
   team_id: number | null;
   parent_ticket_id: number | null;
+  reopen_count: number;
+  is_recurring_problem: boolean;
   sla_reaction_due_at: string | null;
   sla_resolution_due_at: string | null;
   sla_paused_at: string | null;
