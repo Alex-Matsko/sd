@@ -4,10 +4,24 @@
 
 ## Документация
 
-- [docs/TZ.md](docs/TZ.md) — техническое задание (включая план этапов в разделе 11)
-- [docs/decisions.md](docs/decisions.md) — решения и уточнения, принятые по ходу разработки
-- [docs/deployment.md](docs/deployment.md) — развёртывание, секреты, бэкапы, обновление, типичные неполадки
-- [docs/monitoring.md](docs/monitoring.md) — настройка интеграции с Zabbix (форма в SD + media type в Zabbix)
+**Работа в системе**
+
+- [docs/user-guide.md](docs/user-guide.md) — руководство сотрудника: инженер, диспетчер, руководитель
+- [docs/client-guide.md](docs/client-guide.md) — памятка для клиента (можно отправлять как есть)
+
+**Эксплуатация**
+
+- [docs/deployment.md](docs/deployment.md) — развёртывание, секреты, TLS, бэкапы, обновление, неполадки
+- [docs/monitoring.md](docs/monitoring.md) — интеграция с Zabbix
+
+**Разработка**
+
+- [docs/architecture.md](docs/architecture.md) — устройство системы, слои, ключевые решения
+- [docs/api.md](docs/api.md) — аутентификация, права, пагинация, данные для биллинга
+- [docs/decisions.md](docs/decisions.md) — журнал решений: что и почему сделано именно так
+- [docs/TZ.md](docs/TZ.md) — техническое задание
+
+Интерактивная документация API — на самом сервере: `http://<сервер>:8080/docs`.
 
 ## Статус
 
