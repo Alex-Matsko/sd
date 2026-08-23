@@ -81,7 +81,6 @@ export interface Contact {
   position: string | null;
   telegram_id: string | null;
   max_id: string | null;
-  is_vip: boolean;
   can_view_org_tickets: boolean;
   is_confirmed: boolean;
   emails: ContactEmail[];

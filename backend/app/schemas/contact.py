@@ -7,7 +7,6 @@ class ContactCreate(BaseModel):
     position: str | None = None
     telegram_id: str | None = None
     max_id: str | None = None
-    is_vip: bool = False
     can_view_org_tickets: bool = False
     is_confirmed: bool = True
     emails: list[str] = []
@@ -19,7 +18,6 @@ class ContactUpdate(BaseModel):
     position: str | None = None
     telegram_id: str | None = None
     max_id: str | None = None
-    is_vip: bool | None = None
     can_view_org_tickets: bool | None = None
     is_confirmed: bool | None = None
 
@@ -49,8 +47,11 @@ class ContactRead(BaseModel):
     position: str | None
     telegram_id: str | None
     max_id: str | None
-    is_vip: bool
     can_view_org_tickets: bool
     is_confirmed: bool
+    # Выдан ли доступ в личный кабинет. Без этого признака диспетчер не
+    # видит в списке, кому доступ уже дан, а кому нет, — и выдаёт повторно
+    # или не выдаёт вовсе.
+    has_portal_access: bool = False
     emails: list[ContactEmailRead] = []
     phones: list[ContactPhoneRead] = []

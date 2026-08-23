@@ -32,16 +32,15 @@ export function ContactsPage() {
       {contacts.length === 0 && <EmptyState text="Контактов пока нет" />}
       {contacts.length > 0 && (
         <div className="list">
-          <div className="list-head" style={{ gridTemplateColumns: "1.8fr 1.6fr 1.4fr 1fr 60px 110px" }}>
+          <div className="list-head" style={{ gridTemplateColumns: "1.8fr 1.6fr 1.4fr 1fr 110px" }}>
             <span>Контакт</span>
             <span>Организация</span>
             <span>Email</span>
             <span>Телефон</span>
-            <span>VIP</span>
             <span></span>
           </div>
           {contacts.map((c) => (
-            <div className="list-row" style={{ gridTemplateColumns: "1.8fr 1.6fr 1.4fr 1fr 60px 110px" }} key={c.id}>
+            <div className="list-row" style={{ gridTemplateColumns: "1.8fr 1.6fr 1.4fr 1fr 110px" }} key={c.id}>
               <span className="subject">
                 {c.full_name}
                 {c.position && <span className="muted"> · {c.position}</span>}
@@ -50,7 +49,6 @@ export function ContactsPage() {
               <span>{orgsById.get(c.organization_id)?.name ?? "—"}</span>
               <span className="muted">{c.emails[0]?.email ?? "—"}</span>
               <span className="muted">{c.phones[0]?.phone ?? "—"}</span>
-              <span>{c.is_vip ? "★" : ""}</span>
               <span>
                 <button className="btn-link" onClick={() => setMergingContact(c)}>
                   Объединить
@@ -158,7 +156,6 @@ export function NewContactModal({
   const [position, setPosition] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [isVip, setIsVip] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -174,7 +171,6 @@ export function NewContactModal({
         organization_id: organizationId,
         full_name: fullName.trim(),
         position: position.trim() || null,
-        is_vip: isVip,
         emails: email.trim() ? [email.trim()] : [],
         phones: phone.trim() ? [phone.trim()] : [],
       });
@@ -226,11 +222,6 @@ export function NewContactModal({
               <label className="form-label">Телефон</label>
               <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} />
             </div>
-          </div>
-          <div className="form-row form-row-inline">
-            <label>
-              <input type="checkbox" checked={isVip} onChange={(e) => setIsVip(e.target.checked)} /> VIP-контакт
-            </label>
           </div>
         </div>
         <div className="modal-foot">

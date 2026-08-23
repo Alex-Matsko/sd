@@ -56,6 +56,30 @@ def set_password(db: Session, contact: Contact, password: str) -> PortalCredenti
     return credential
 
 
+def has_access(db: Session, contact: Contact) -> bool:
+    credential = db.query(PortalCredential).filter(PortalCredential.contact_id == contact.id).first()
+    return credential is not None and bool(credential.password_hash)
+
+
+def revoke_access(db: Session, contact: Contact) -> None:
+    """Отзывает доступ в кабинет.
+
+    Нужно, когда сотрудник клиента уволился: без этого отрезать его было
+    нечем — пароль оставался рабочим, а magic-link выдавался по адресу
+    почты, который никуда не делся.
+
+    Убирается и пароль, и невыпользованные ссылки для входа: живая ссылка
+    из почты — такой же ключ, как пароль.
+    """
+    credential = db.query(PortalCredential).filter(PortalCredential.contact_id == contact.id).first()
+    if credential is not None:
+        db.delete(credential)
+    db.query(PortalLoginToken).filter(
+        PortalLoginToken.contact_id == contact.id, PortalLoginToken.used_at.is_(None)
+    ).delete()
+    db.commit()
+
+
 def authenticate_with_password(db: Session, email: str, password: str) -> Contact:
     """Deliberately returns the same error whether the address is unknown or
     the password is wrong - distinguishing them would let anyone enumerate

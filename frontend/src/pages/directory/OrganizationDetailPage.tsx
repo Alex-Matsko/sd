@@ -253,14 +253,13 @@ export function OrganizationDetailPage() {
         {(contactsQuery.data ?? []).length === 0 && <p className="muted">Контактов пока нет</p>}
         {(contactsQuery.data ?? []).length > 0 && (
           <div className="list">
-            <div className="list-head" style={{ gridTemplateColumns: "1.8fr 1.4fr 1fr 90px" }}>
+            <div className="list-head" style={{ gridTemplateColumns: "1.8fr 1.4fr 1fr" }}>
               <span>Контакт</span>
               <span>Email</span>
               <span>Телефон</span>
-              <span>VIP</span>
             </div>
             {(contactsQuery.data ?? []).map((c) => (
-              <div className="list-row" style={{ gridTemplateColumns: "1.8fr 1.4fr 1fr 90px" }} key={c.id}>
+              <div className="list-row" style={{ gridTemplateColumns: "1.8fr 1.4fr 1fr" }} key={c.id}>
                 <span className="subject">
                   {c.full_name}
                   {c.position && <span className="muted"> · {c.position}</span>}
@@ -268,7 +267,6 @@ export function OrganizationDetailPage() {
                 </span>
                 <span className="muted">{c.emails[0]?.email ?? "—"}</span>
                 <span className="muted">{c.phones[0]?.phone ?? "—"}</span>
-                <span>{c.is_vip ? "★" : ""}</span>
               </div>
             ))}
           </div>

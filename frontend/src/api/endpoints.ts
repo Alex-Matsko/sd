@@ -66,7 +66,6 @@ export function createContact(payload: {
   organization_id: number;
   full_name: string;
   position?: string | null;
-  is_vip?: boolean;
   can_view_org_tickets?: boolean;
   emails?: string[];
   phones?: string[];

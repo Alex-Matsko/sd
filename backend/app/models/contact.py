@@ -13,7 +13,6 @@ class Contact(Base, TimestampMixin):
     position: Mapped[str | None] = mapped_column(String(255))
     telegram_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     max_id: Mapped[str | None] = mapped_column(String(64), unique=True)
-    is_vip: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     can_view_org_tickets: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 

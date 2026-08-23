@@ -42,7 +42,6 @@ def create_contact(
         position=payload.position,
         telegram_id=payload.telegram_id,
         max_id=payload.max_id,
-        is_vip=payload.is_vip,
         can_view_org_tickets=payload.can_view_org_tickets,
         is_confirmed=payload.is_confirmed,
     )
