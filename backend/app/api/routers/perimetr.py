@@ -65,3 +65,78 @@ def list_messages(key: str, after: int = 0, db: Session = Depends(get_db)) -> di
     # Переписки ещё нет — это не ошибка: окно продукта открыто, писать пока
     # не о чем.
     return result or {"tickets": [], "messages": []}
+
+
+# --- Обращения: несколько заявок с историей ---------------------------------
+
+
+class PerimetrTicketIn(BaseModel):
+    product: str = Field(min_length=1, max_length=64)
+    text: str = Field(min_length=1, max_length=8000)
+    subject: str = Field(default="", max_length=200)
+    topic: str = Field(default="other", max_length=32)
+    name: str = Field(default="", max_length=200)
+    customer: str = Field(default="", max_length=200)
+    email: str = Field(default="", max_length=255)
+    phone: str = Field(default="", max_length=32)
+    email_verified: bool = False
+    server: str = Field(default="", max_length=500)
+    report: str = Field(default="", max_length=32000)
+
+
+class PerimetrReplyIn(BaseModel):
+    text: str = Field(min_length=1, max_length=8000)
+
+
+def _gone() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Обращение не найдено")
+
+
+@router.get("/c/{key}/tickets", dependencies=[Depends(require_perimetr_secret)])
+def list_tickets(key: str, db: Session = Depends(get_db)) -> dict:
+    _check_key(key)
+    return {"tickets": perimetr_channel.list_tickets(db, key)}
+
+
+@router.post("/c/{key}/tickets", dependencies=[Depends(require_perimetr_secret)])
+def create_ticket(key: str, payload: PerimetrTicketIn, db: Session = Depends(get_db)) -> dict:
+    _check_key(key)
+    if not payload.text.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пустое сообщение")
+    fields = payload.model_dump()
+    subject = fields.pop("subject")
+    ticket = perimetr_channel.create_ticket(db, perimetr_channel.Inbound(key=key, **fields), subject=subject)
+    return perimetr_channel.ticket_detail(db, key, ticket.number)
+
+
+@router.get("/c/{key}/tickets/{number}", dependencies=[Depends(require_perimetr_secret)])
+def ticket_detail(key: str, number: int, db: Session = Depends(get_db)) -> dict:
+    _check_key(key)
+    try:
+        return perimetr_channel.ticket_detail(db, key, number)
+    except perimetr_channel.TicketGone:
+        raise _gone()
+
+
+@router.post("/c/{key}/tickets/{number}/messages", dependencies=[Depends(require_perimetr_secret)])
+def reply(key: str, number: int, payload: PerimetrReplyIn, db: Session = Depends(get_db)) -> dict:
+    _check_key(key)
+    if not payload.text.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пустое сообщение")
+    try:
+        perimetr_channel.reply(db, key, number, payload.text)
+    except perimetr_channel.TicketGone:
+        raise _gone()
+    except perimetr_channel.TicketFinal:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Обращение закрыто — создайте новое")
+    return perimetr_channel.ticket_detail(db, key, number)
+
+
+@router.post("/c/{key}/tickets/{number}/close", dependencies=[Depends(require_perimetr_secret)])
+def close(key: str, number: int, db: Session = Depends(get_db)) -> dict:
+    _check_key(key)
+    try:
+        perimetr_channel.close_by_client(db, key, number)
+    except perimetr_channel.TicketGone:
+        raise _gone()
+    return perimetr_channel.ticket_detail(db, key, number)

@@ -198,3 +198,290 @@ def list_messages(db: Session, key: str, after_id: int = 0) -> dict | None:
             for m, name in rows
         ],
     }
+
+
+# --- Обращения: несколько заявок с историей ----------------------------------
+#
+# Окно продукта показывает обращения списком, у каждого — статус, исполнитель,
+# группа и лента: сообщения и события из журнала (взята в работу, назначен
+# исполнитель, решена, закрыта). Новое обращение — всегда новая заявка;
+# ответ уходит в выбранную. Видно только то, что относится к переписке
+# (ключ продукта), внутренние заметки — никогда.
+
+CLIENT_STATUS = {
+    TicketStatus.NEW: "Новая",
+    TicketStatus.ASSIGNED: "Назначена",
+    TicketStatus.IN_PROGRESS: "В работе",
+    TicketStatus.WAITING_CUSTOMER: "Ждём вашего ответа",
+    TicketStatus.WAITING_THIRD_PARTY: "Ждём ответа третьей стороны",
+    TicketStatus.RESOLVED: "Решена",
+    TicketStatus.CLOSED: "Закрыта",
+    TicketStatus.CANCELLED: "Отменена",
+}
+
+# Закрытая и отменённая заявка ответов не принимает: вопрос задают новым
+# обращением (CLOSED в ALLOWED_TRANSITIONS конечен).
+FINAL_STATUSES = {TicketStatus.CLOSED, TicketStatus.CANCELLED}
+
+
+class TicketGone(Exception):
+    """Заявки нет в этой переписке — для продукта это «не найдено»."""
+
+
+class TicketFinal(Exception):
+    """Заявка закрыта или отменена."""
+
+
+def _organization_for(db: Session, customer: str):
+    """Юрлицо из кабинета продукта: заказчик по лицензии у VMS, организация
+    у облака. Ищется по названию и по юридическому названию; если такой
+    организации ещё нет — заводится, чтобы обращение сразу легло к своему
+    клиенту, а не в «Неизвестные»."""
+    from sqlalchemy import func as sa_func
+
+    from app.models.organization import Organization
+
+    name = customer.strip()
+    if not name:
+        return get_or_create_unknown_organization(db)
+    lowered = name.lower()
+    org = (
+        db.query(Organization)
+        .filter((sa_func.lower(Organization.name) == lowered) | (sa_func.lower(Organization.legal_name) == lowered))
+        .first()
+    )
+    if org is None:
+        org = Organization(name=name[:255], legal_name=name[:255])
+        db.add(org)
+        db.flush()
+    return org
+
+
+def _contact_v2(db: Session, msg: Inbound) -> Contact:
+    """Контакт по почте учётной записи продукта. Существующий контакт с этой
+    почтой берётся, если почту подтвердил продукт или он из той же
+    организации; иначе заводится новый. Читать переписку это не даёт: ответы
+    отдаются только по ключу продукта."""
+    organization = _organization_for(db, msg.customer)
+    email = msg.email.strip().lower()
+    if email:
+        row = db.query(ContactEmail).filter(ContactEmail.email == email).first()
+        if row is not None and (msg.email_verified or row.contact.organization_id == organization.id):
+            return row.contact
+        if row is None:
+            contact = Contact(organization_id=organization.id, full_name=(msg.name or email)[:255], is_confirmed=msg.email_verified)
+            db.add(contact)
+            db.flush()
+            contact.emails.append(ContactEmail(email=email, is_primary=True))
+            db.flush()
+            return contact
+    title = msg.name or msg.customer or msg.product
+    contact = (
+        db.query(Contact)
+        .filter(Contact.organization_id == organization.id, Contact.full_name == f"{msg.product}: {title}"[:255])
+        .first()
+    )
+    if contact is None:
+        contact = Contact(organization_id=organization.id, full_name=f"{msg.product}: {title}"[:255], is_confirmed=False)
+        db.add(contact)
+        db.flush()
+    return contact
+
+
+def _conversation_v2(db: Session, msg: Inbound, contact: Contact) -> PerimetrConversation:
+    conv = db.query(PerimetrConversation).filter(PerimetrConversation.key == msg.key).with_for_update().first()
+    if conv is None:
+        conv = PerimetrConversation(key=msg.key, product=msg.product[:64], contact_id=contact.id)
+        db.add(conv)
+        db.flush()
+    return conv
+
+
+def _ticket_of(db: Session, key: str, number: int) -> Ticket:
+    conv = db.query(PerimetrConversation).filter(PerimetrConversation.key == key).first()
+    if conv is None:
+        raise TicketGone()
+    ticket = (
+        db.query(Ticket)
+        .join(PerimetrConversationTicket, PerimetrConversationTicket.ticket_id == Ticket.id)
+        .filter(PerimetrConversationTicket.conversation_id == conv.id, Ticket.number == number)
+        .first()
+    )
+    if ticket is None:
+        raise TicketGone()
+    return ticket
+
+
+def create_ticket(db: Session, msg: Inbound, subject: str = "") -> Ticket:
+    """Новое обращение — всегда новая заявка."""
+    contact = _contact_v2(db, msg)
+    conv = _conversation_v2(db, msg, contact)
+    topic = TOPICS.get(msg.topic, TOPICS["other"])
+    first_line = (subject or (msg.text.strip().splitlines() or [""])[0]).strip()
+    ticket = tickets_service.create_ticket(
+        db,
+        TicketCreate(
+            contact_id=contact.id,
+            type=TicketType.INCIDENT,
+            channel=Channel.PERIMETR,
+            subject=f"{topic}: {first_line}"[:500] if first_line else topic,
+            impact=ImpactUrgencyLevel.MEDIUM,
+            urgency=ImpactUrgencyLevel.MEDIUM,
+            initial_message=msg.text,
+        ),
+        actor=None,
+    )
+    db.add(PerimetrConversationTicket(conversation_id=conv.id, ticket_id=ticket.id))
+    conv.active_ticket_id = ticket.id
+    db.add(conv)
+    db.commit()
+    note = f"Обращение из {msg.product}. Контакт: {_who(msg) or 'не указан'}."
+    if msg.server:
+        note += "\n" + msg.server
+    if msg.report:
+        note += "\n\n" + msg.report
+    messages_service.add_message(
+        db, ticket, MessageCreate(direction=MessageDirection.INTERNAL_NOTE, body=note, channel=Channel.PERIMETR)
+    )
+    db.refresh(ticket)
+    return ticket
+
+
+def reply(db: Session, key: str, number: int, text: str) -> Ticket:
+    ticket = _ticket_of(db, key, number)
+    if TicketStatus(ticket.status) in FINAL_STATUSES:
+        raise TicketFinal()
+    messages_service.add_message(
+        db,
+        ticket,
+        MessageCreate(direction=MessageDirection.INBOUND, body=text, channel=Channel.PERIMETR),
+        author_contact=db.get(Contact, ticket.contact_id),
+    )
+    db.refresh(ticket)
+    return ticket
+
+
+def close_by_client(db: Session, key: str, number: int) -> Ticket:
+    """«Вопрос решён» из окна продукта — та же цепочка, что у мессенджеров."""
+    from app.services.messenger_common import close_ticket_chain
+
+    ticket = _ticket_of(db, key, number)
+    if TicketStatus(ticket.status) in FINAL_STATUSES:
+        return ticket
+    return close_ticket_chain(db, ticket)
+
+
+def _summary(db: Session, ticket: Ticket) -> dict:
+    from app.models.team import Team
+
+    status = TicketStatus(ticket.status)
+    engineer = db.get(User, ticket.assigned_engineer_id) if ticket.assigned_engineer_id else None
+    team = db.get(Team, ticket.team_id) if ticket.team_id else None
+    visible = [MessageDirection.INBOUND, MessageDirection.OUTBOUND]
+    last = (
+        db.query(Message)
+        .filter(Message.ticket_id == ticket.id, Message.direction.in_(visible))
+        .order_by(Message.id.desc())
+        .first()
+    )
+    last_support = (
+        db.query(Message.id)
+        .filter(Message.ticket_id == ticket.id, Message.direction == MessageDirection.OUTBOUND)
+        .order_by(Message.id.desc())
+        .first()
+    )
+    return {
+        "number": ticket.number,
+        "display": ticket.display_number,
+        "subject": ticket.subject,
+        "status": status.value,
+        "status_label": CLIENT_STATUS.get(status, status.value),
+        "final": status in FINAL_STATUSES,
+        "assignee": engineer.full_name if engineer else "",
+        "team": getattr(team, "name", "") if team else "",
+        "created_at": ticket.created_at.isoformat(),
+        "updated_at": (last.created_at if last and last.created_at > ticket.updated_at else ticket.updated_at).isoformat(),
+        "last_message": (
+            {"from": "client" if last.direction == MessageDirection.INBOUND else "support", "text": last.body[:200], "at": last.created_at.isoformat()}
+            if last
+            else None
+        ),
+        "last_support_id": last_support[0] if last_support else 0,
+    }
+
+
+def list_tickets(db: Session, key: str) -> list[dict]:
+    conv = db.query(PerimetrConversation).filter(PerimetrConversation.key == key).first()
+    if conv is None:
+        return []
+    tickets = (
+        db.query(Ticket)
+        .join(PerimetrConversationTicket, PerimetrConversationTicket.ticket_id == Ticket.id)
+        .filter(PerimetrConversationTicket.conversation_id == conv.id)
+        .all()
+    )
+    rows = [_summary(db, t) for t in tickets]
+    # Сначала открытые, внутри — по последнему движению.
+    open_rows = sorted([r for r in rows if not r["final"]], key=lambda r: r["updated_at"], reverse=True)
+    done_rows = sorted([r for r in rows if r["final"]], key=lambda r: r["updated_at"], reverse=True)
+    return open_rows + done_rows
+
+
+def ticket_detail(db: Session, key: str, number: int) -> dict:
+    """Карточка обращения: сводка и лента — сообщения и события журнала."""
+    from app.models.audit import AuditLog
+    from app.models.team import Team
+
+    ticket = _ticket_of(db, key, number)
+    events: list[dict] = []
+    for m, name in (
+        db.query(Message, User.full_name)
+        .outerjoin(User, User.id == Message.author_user_id)
+        .filter(Message.ticket_id == ticket.id, Message.direction.in_([MessageDirection.INBOUND, MessageDirection.OUTBOUND]))
+        .order_by(Message.id)
+    ):
+        events.append(
+            {
+                "id": f"m{m.id}",
+                "kind": "message",
+                "from": "client" if m.direction == MessageDirection.INBOUND else "support",
+                "author": (name or "Поддержка") if m.direction == MessageDirection.OUTBOUND else "",
+                "text": m.body,
+                "at": m.created_at.isoformat(),
+            }
+        )
+    users: dict[int, str] = {}
+
+    def user_name(uid):
+        if not uid:
+            return ""
+        if uid not in users:
+            u = db.get(User, uid)
+            users[uid] = u.full_name if u else ""
+        return users[uid]
+
+    for a in (
+        db.query(AuditLog)
+        .filter(AuditLog.entity_type == "ticket", AuditLog.entity_id == ticket.id)
+        .order_by(AuditLog.id)
+    ):
+        changes = a.changes or {}
+        text = ""
+        if a.action == "created":
+            text = "Обращение зарегистрировано"
+        elif a.action == "status_changed":
+            try:
+                text = "Статус: " + CLIENT_STATUS[TicketStatus(changes.get("to"))]
+            except (KeyError, ValueError):
+                continue
+        elif a.action == "updated" and "assigned_engineer_id" in changes:
+            to = changes["assigned_engineer_id"].get("to")
+            text = f"Исполнитель: {user_name(to)}" if to else "Исполнитель снят"
+        elif a.action == "updated" and "team_id" in changes:
+            to = changes["team_id"].get("to")
+            team = db.get(Team, to) if to else None
+            text = f"Передана группе: {team.name}" if team else ""
+        if text:
+            events.append({"id": f"a{a.id}", "kind": "event", "from": "system", "author": user_name(a.user_id), "text": text, "at": a.created_at.isoformat()})
+    events.sort(key=lambda e: (e["at"], e["id"]))
+    return {**_summary(db, ticket), "events": events}
