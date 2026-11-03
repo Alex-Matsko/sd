@@ -148,7 +148,7 @@ def test_лента_показывает_исполнителя_статусы_�
     )
     detail = perimetr_channel.ticket_detail(db, "vms:tickets00000001", ticket.number)
     texts = [e["text"] for e in detail["events"]]
-    assert "Обращение зарегистрировано" in texts
+    assert texts[0] == "Обращение зарегистрировано"
     assert "Смотрим" in texts and "Ворота" in texts
     assert f"Исполнитель: {engineer.full_name}" in texts
     assert detail["assignee"] == engineer.full_name

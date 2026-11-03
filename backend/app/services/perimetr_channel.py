@@ -467,8 +467,12 @@ def ticket_detail(db: Session, key: str, number: int) -> dict:
     ):
         changes = a.changes or {}
         text = ""
+        author = user_name(a.user_id)
+        at = a.created_at
         if a.action == "created":
-            text = "Обращение зарегистрировано"
+            # Регистрация — первым событием, со временем самой заявки:
+            # журнал пишется после первого сообщения.
+            text, author, at = "Обращение зарегистрировано", "", ticket.created_at
         elif a.action == "status_changed":
             try:
                 text = "Статус: " + CLIENT_STATUS[TicketStatus(changes.get("to"))]
@@ -476,12 +480,14 @@ def ticket_detail(db: Session, key: str, number: int) -> dict:
                 continue
         elif a.action == "updated" and "assigned_engineer_id" in changes:
             to = changes["assigned_engineer_id"].get("to")
-            text = f"Исполнитель: {user_name(to)}" if to else "Исполнитель снят"
+            # Кто назначил — неважно клиенту и повторяло бы имя исполнителя.
+            text, author = (f"Исполнитель: {user_name(to)}" if to else "Исполнитель снят"), ""
         elif a.action == "updated" and "team_id" in changes:
             to = changes["team_id"].get("to")
             team = db.get(Team, to) if to else None
             text = f"Передана группе: {team.name}" if team else ""
         if text:
-            events.append({"id": f"a{a.id}", "kind": "event", "from": "system", "author": user_name(a.user_id), "text": text, "at": a.created_at.isoformat()})
-    events.sort(key=lambda e: (e["at"], e["id"]))
+            events.append({"id": f"a{a.id}", "kind": "event", "from": "system", "author": author, "text": text, "at": at.isoformat()})
+    # При равном времени регистрация — раньше всего остального.
+    events.sort(key=lambda e: (e["at"], e["text"] != "Обращение зарегистрировано"))
     return {**_summary(db, ticket), "events": events}
