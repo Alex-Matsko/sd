@@ -40,6 +40,7 @@ class PerimetrMessageIn(BaseModel):
     email: str = Field(default="", max_length=255)
     phone: str = Field(default="", max_length=32)
     email_verified: bool = False
+    server: str = Field(default="", max_length=500)
     report: str = Field(default="", max_length=32000)
 
 

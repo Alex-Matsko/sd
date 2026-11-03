@@ -67,7 +67,10 @@ class Inbound:
     # адресом: на сервере VMS адрес вписывают от руки, и чужой адрес
     # открыл бы чужие заявки.
     email_verified: bool = False
-    # Сводка о сервере или кабинете — внутренней заметкой.
+    # Кто на стороне продукта: версия, отпечаток, адрес сервера — в заметку
+    # при открытии заявки.
+    server: str = ""
+    # Сводка о сервере или кабинете, если клиент её приложил, — заметкой.
     report: str = ""
 
 
@@ -138,6 +141,8 @@ def post_message(db: Session, msg: Inbound) -> Ticket:
     # клиент приложил сводку. На каждое сообщение она засоряла бы переписку.
     if created or msg.report:
         note = f"Из окна «Поддержка» {msg.product}. Контакт для ответа: {_who(msg) or 'не указан'}."
+        if msg.server:
+            note += "\n" + msg.server
         if msg.report:
             note += "\n\n" + msg.report
         messages_service.add_message(

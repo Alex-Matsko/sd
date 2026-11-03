@@ -33,7 +33,7 @@ def test_первое_сообщение_открывает_заявку_сле�
     contact = db.get(Contact, ticket.contact_id)
     assert contact.organization.name == UNKNOWN_ORGANIZATION_NAME
 
-    again = perimetr_channel.post_message(db, _inbound("С утра так"))
+    again = perimetr_channel.post_message(db, _inbound("С утра так", server="Версия 2.1.9"))
     assert again.id == ticket.id
 
     notes = db.query(Message).filter(Message.ticket_id == ticket.id, Message.direction == MessageDirection.INTERNAL_NOTE).all()
