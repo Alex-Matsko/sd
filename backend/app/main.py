@@ -15,6 +15,7 @@ from app.api.routers import (
     contracts,
     integration_settings,
     monitoring,
+    perimetr,
     notifications,
     organizations,
     portal,
@@ -106,6 +107,7 @@ app.include_router(portal.router)
 app.include_router(saved_filters.router)
 app.include_router(schedules.router)
 app.include_router(monitoring.router)
+app.include_router(perimetr.router)
 app.include_router(ws.router)
 
 

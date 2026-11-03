@@ -37,8 +37,11 @@ from app.models.ticket_schedule import TicketSchedule
 from app.models.monitoring_alert import MonitoringAlert
 from app.models.active_timer import ActiveTimer
 from app.models.client_report import ClientReport
+from app.models.perimetr_conversation import PerimetrConversation, PerimetrConversationTicket
 
 __all__ = [
+    "PerimetrConversation",
+    "PerimetrConversationTicket",
     "Base",
     "Organization",
     "OrganizationEmailDomain",

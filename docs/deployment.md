@@ -63,6 +63,7 @@ POSTGRES_PASSWORD=<произвольный длинный пароль>
 SEED_ADMIN_PASSWORD=<временный, сменить после первого входа>
 CORS_ORIGINS=["https://sd.example.com"]
 FRONTEND_API_BASE_URL=https://api.sd.example.com
+PERIMETR_SECRET=<секрет канала «Периметр», если он нужен>
 ```
 
 При `ENVIRONMENT=production` приложение и воркер при старте пишут в лог явное

@@ -160,6 +160,12 @@ def merge_contacts(db: Session, from_contact: Contact, into_contact: Contact) ->
     db.query(ChannelConversationState).filter(ChannelConversationState.contact_id == from_contact.id).update(
         {"contact_id": into_contact.id}
     )
+    # Переписка из окна «Периметр» держит контакт так же, как состояние бота.
+    from app.models.perimetr_conversation import PerimetrConversation
+
+    db.query(PerimetrConversation).filter(PerimetrConversation.contact_id == from_contact.id).update(
+        {"contact_id": into_contact.id}
+    )
 
     from_max_id, from_telegram_id = from_contact.max_id, from_contact.telegram_id
     from_contact.max_id = None

@@ -43,6 +43,9 @@ class Channel(str, Enum):
     EMAIL = "email"
     PHONE = "phone"
     PORTAL = "portal"
+    # Окно «Поддержка» в продуктах «Периметр» (VMS и облако): сообщения
+    # приходят от служб продукта, ответы они забирают сами (perimetr_channel).
+    PERIMETR = "perimetr"
     WHATSAPP = "whatsapp"  # future channel, interface reserved, not implemented
 
 

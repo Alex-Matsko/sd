@@ -43,6 +43,7 @@ export const CHANNEL_LABELS: Record<Channel, string> = {
   phone: "Телефон",
   portal: "Портал",
   whatsapp: "WhatsApp",
+  perimetr: "Периметр",
 };
 
 export const PRIORITY_LABELS: Record<Priority, string> = {

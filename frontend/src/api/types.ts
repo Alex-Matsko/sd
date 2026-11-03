@@ -12,7 +12,7 @@ export type TicketStatus =
   | "closed"
   | "cancelled";
 
-export type Channel = "telegram" | "max" | "email" | "phone" | "portal" | "whatsapp";
+export type Channel = "telegram" | "max" | "email" | "phone" | "portal" | "whatsapp" | "perimetr";
 
 export type MessageDirection = "inbound" | "outbound" | "internal_note";
 

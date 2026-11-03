@@ -37,6 +37,11 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["*"]
 
+    # Общий секрет служб «Периметра» (облако, издатель), которые передают
+    # сюда переписку из окна «Поддержка». Пусто — канал выключен: без
+    # секрета вход был бы открыт всему интернету.
+    perimetr_secret: str = ""
+
     seed_admin_email: str = "admin@o-horizons.com"
     seed_admin_password: str = "ChangeMe123!"
 
