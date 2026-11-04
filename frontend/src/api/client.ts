@@ -138,11 +138,15 @@ export async function apiPage<T>(
   path: string,
   query: Record<string, string | number | boolean | undefined | null> = {}
 ): Promise<Page<T>> {
-  const url = new URL(`${API_BASE_URL}${path}`, window.location.origin);
+  // Здесь собирается только путь с параметрами: адрес API подставляет
+  // authorizedFetch. С относительным адресом (/api) полный адрес дал бы путь
+  // /api/tickets, и запрос ушёл бы на /api/api/tickets.
+  const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, String(value));
+    if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
   }
-  const res = await authorizedFetch(url.pathname + url.search, { method: "GET" });
+  const search = params.toString();
+  const res = await authorizedFetch(search ? `${path}${path.includes("?") ? "&" : "?"}${search}` : path, { method: "GET" });
   const items = (await res.json()) as T[];
   const header = res.headers.get("X-Total-Count");
   return { items, total: header === null ? items.length : Number(header) };
