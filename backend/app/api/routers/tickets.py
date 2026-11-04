@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_dispatcher_or_above
 from app.core.enums import OPEN_TICKET_STATUSES, Channel, Priority, TicketStatus, UserRole
 from app.db import get_db
 from app.models.audit import AuditLog
@@ -17,7 +17,7 @@ from app.models.time_entry import TimeEntry
 from app.models.user import User
 from app.schemas.audit import AuditLogRead
 from app.schemas.message import AttachmentRead, MessageCreate, MessageRead
-from app.schemas.ticket import TicketCreate, TicketRead, TicketUpdate
+from app.schemas.ticket import TicketClientChange, TicketCreate, TicketRead, TicketUpdate
 from app.schemas.time_entry import TimeEntryCreate, TimeEntryRead, TimeEntryUpdate
 from app.services import attachments as attachments_service
 from app.services import audit as audit_service
@@ -261,6 +261,21 @@ def update_ticket(
     ticket = _get_ticket_or_404(db, ticket_id, actor)
     try:
         return _read_with_sla(db, tickets_service.update_ticket(db, ticket, payload, actor))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/{ticket_id}/client", response_model=TicketRead)
+def change_ticket_client(
+    ticket_id: int,
+    payload: TicketClientChange,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_dispatcher_or_above),
+) -> TicketRead:
+    """Организация и контакт заявки — см. tickets_service.change_client."""
+    ticket = _get_ticket_or_404(db, ticket_id, actor)
+    try:
+        return _read_with_sla(db, tickets_service.change_client(db, ticket, payload, actor))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 

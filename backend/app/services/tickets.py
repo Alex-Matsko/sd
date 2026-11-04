@@ -4,9 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.core.enums import ImpactUrgencyLevel, SLA_PAUSING_STATUSES, TicketStatus
 from app.models.contact import Contact
+from app.models.organization import Organization
 from app.models.ticket import Ticket
 from app.models.user import User
-from app.schemas.ticket import TicketCreate, TicketUpdate
+from app.schemas.ticket import TicketClientChange, TicketCreate, TicketUpdate
 from app.services import audit, staff_notifications, priority as priority_service, routing, sla
 from app.services.contracts import resolve_contract_and_tariff
 
@@ -281,6 +282,80 @@ def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: Use
         )
 
     db.add(ticket)
+    db.commit()
+    db.refresh(ticket)
+    return ticket
+
+
+def change_client(db: Session, ticket: Ticket, payload: TicketClientChange, actor: User | None) -> Ticket:
+    """Привязка заявки к организации и контакту — прежде всего пришедших из
+    бота: незнакомый отправитель попадает в «Неизвестные» (unknown_queue).
+
+    Контакт заявки не подменяется: ответы инженера уходят в Telegram и MAX
+    по контакту, и чужой контакт оборвал бы переписку. Поэтому либо тот же
+    человек переносится в организацию, либо его контакт объединяется с уже
+    заведённым контактом организации — с привязками бота и всей историей.
+    Объединять можно только контакт из «Неизвестных»: два заведённых
+    контакта — это, скорее всего, два разных человека.
+
+    Вместе с заявкой переезжают все заявки этого человека, оставшиеся в
+    прежней организации: из бота он обычно успевает написать не одну.
+    Договор, тариф и сроки SLA пересчитываются по новой организации."""
+    from app.services import messenger_common
+    from app.services.unknown_queue import UNKNOWN_ORGANIZATION_NAME
+
+    organization = db.get(Organization, payload.organization_id)
+    if organization is None:
+        raise ValueError("Организация не найдена")
+    current = db.get(Contact, ticket.contact_id)
+    old_org_id = ticket.organization_id
+    old_contact_id = current.id
+
+    person = current
+    if payload.contact_id is not None and payload.contact_id != current.id:
+        target = db.get(Contact, payload.contact_id)
+        if target is None or target.organization_id != organization.id:
+            raise ValueError("Контакт не из выбранной организации")
+        current_org = db.get(Organization, current.organization_id)
+        if current_org is None or current_org.name != UNKNOWN_ORGANIZATION_NAME:
+            raise ValueError(
+                f"Контакт «{current.full_name}» уже заведён в организации — объединять можно только контакты из «Неизвестных»"
+            )
+        moved_ids = [
+            t.id for t in db.query(Ticket).filter(Ticket.contact_id == current.id, Ticket.organization_id == old_org_id)
+        ]
+        messenger_common.merge_contacts(db, from_contact=current, into_contact=target)
+        person = target
+    else:
+        if old_org_id == organization.id and current.organization_id == organization.id:
+            return ticket
+        moved_ids = [
+            t.id for t in db.query(Ticket).filter(Ticket.contact_id == current.id, Ticket.organization_id == old_org_id)
+        ]
+        current.organization_id = organization.id
+        db.add(current)
+
+    contract, tariff, has_no_active_contract = resolve_contract_and_tariff(db, organization.id)
+    for moved in db.query(Ticket).filter(Ticket.id.in_(moved_ids)).all():
+        changes: dict = {"organization_id": {"from": moved.organization_id, "to": organization.id}}
+        if old_contact_id != person.id:
+            changes["contact_id"] = {"from": old_contact_id, "to": person.id}
+        moved.organization_id = organization.id
+        moved.contact_id = person.id
+        moved.contract_id = contract.id if contract else None
+        moved.tariff_id = tariff.id
+        moved.has_no_active_contract = has_no_active_contract
+        sla.recompute_after_priority_change(db, moved)
+        audit.record(
+            db,
+            entity_type="ticket",
+            entity_id=moved.id,
+            action="client_changed",
+            user_id=actor.id if actor else None,
+            changes=changes,
+        )
+        db.add(moved)
+
     db.commit()
     db.refresh(ticket)
     return ticket

@@ -44,6 +44,14 @@ class TicketUpdate(BaseModel):
     is_recurring_problem: bool | None = None
 
 
+class TicketClientChange(BaseModel):
+    """Смена клиента заявки: организация и контакт. contact_id пустой —
+    тот же человек переносится в организацию вместе со своими заявками."""
+
+    organization_id: int
+    contact_id: int | None = None
+
+
 class SlaTimerView(BaseModel):
     due_at: datetime | None
     met: bool | None

@@ -62,6 +62,9 @@ export function removeOrganizationEmailDomain(id: number, domainId: number) {
 export function listContacts(organizationId?: number) {
   return apiRequest<Contact[]>("/contacts", { query: { organization_id: organizationId } });
 }
+export function getContact(id: number) {
+  return apiRequest<Contact>(`/contacts/${id}`);
+}
 export function createContact(payload: {
   organization_id: number;
   full_name: string;
@@ -302,6 +305,15 @@ export function createTicket(payload: {
 }
 export function updateTicket(id: number, payload: Record<string, unknown>) {
   return apiRequest<Ticket>(`/tickets/${id}`, { method: "PATCH", body: payload });
+}
+/** Организация и контакт заявки. contactId пустой — тот же человек
+ * переносится в организацию; иначе его контакт из «Неизвестных»
+ * объединяется с выбранным, и переписка в боте продолжается. */
+export function changeTicketClient(id: number, organizationId: number, contactId: number | null) {
+  return apiRequest<Ticket>(`/tickets/${id}/client`, {
+    method: "POST",
+    body: { organization_id: organizationId, contact_id: contactId },
+  });
 }
 export function listMessages(ticketId: number) {
   return apiRequest<Message[]>(`/tickets/${ticketId}/messages`);

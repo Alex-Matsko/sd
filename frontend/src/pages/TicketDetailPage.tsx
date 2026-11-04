@@ -2,13 +2,16 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  changeTicketClient,
   createMessage,
   createTimeEntry,
   deleteTimeEntry,
   downloadAttachment,
+  getContact,
   getOrganizationUsage,
   getTicket,
   getTicketHistory,
+  listContacts,
   listMessages,
   listOrganizations,
   listTeams,
@@ -88,6 +91,11 @@ export function TicketDetailPage() {
 
   const ticket = ticketQuery.data;
 
+  const contactQuery = useQuery({
+    queryKey: ["contact", ticket?.contact_id],
+    queryFn: () => getContact(ticket!.contact_id),
+    enabled: !!ticket,
+  });
   const usageQuery = useQuery({
     queryKey: ["organization-usage", ticket?.organization_id],
     queryFn: () => getOrganizationUsage(ticket!.organization_id),
@@ -156,6 +164,7 @@ export function TicketDetailPage() {
   if (ticketQuery.isError || !ticket) return <div className="view"><ErrorBanner message={(ticketQuery.error as Error)?.message ?? "Заявка не найдена"} /></div>;
 
   const org = (orgsQuery.data ?? []).find((o) => o.id === ticket.organization_id);
+  const canChangeClient = user?.role === "dispatcher" || user?.role === "manager" || user?.role === "admin";
   const assignee = (usersQuery.data ?? []).find((u) => u.id === ticket.assigned_engineer_id);
   const availableTransitions = STATUS_TRANSITIONS[ticket.status] ?? [];
 
@@ -416,6 +425,8 @@ export function TicketDetailPage() {
             <dl className="props-list">
               <dt>Организация</dt>
               <dd>{org?.name ?? "—"}</dd>
+              <dt>Контакт</dt>
+              <dd>{contactQuery.data?.full_name ?? "—"}</dd>
               <dt>Канал</dt>
               <dd>
                 <ChannelTag channel={ticket.channel} />
@@ -463,6 +474,16 @@ export function TicketDetailPage() {
               </dd>
             </dl>
           </div>
+
+          {canChangeClient && (
+            <ClientPanel
+              ticketId={ticket.id}
+              organizationId={ticket.organization_id}
+              currentContactId={ticket.contact_id}
+              contactName={contactQuery.data?.full_name ?? ""}
+              organizations={orgsQuery.data ?? []}
+            />
+          )}
 
           {ticket.has_no_active_contract === false && usageQuery.data && (
             <div className="panel">
@@ -563,6 +584,119 @@ export function TicketDetailPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Организация и контакт заявки. Нужен прежде всего для заявок из бота:
+ * незнакомый отправитель попадает в «Неизвестные», и диспетчер относит его
+ * к организации. Контакт не подменяется — ответы уходят в бот по контакту,
+ * поэтому либо тот же человек переносится, либо объединяется с контактом
+ * организации (см. tickets.change_client на сервере). */
+function ClientPanel({
+  ticketId,
+  organizationId,
+  currentContactId,
+  contactName,
+  organizations,
+}: {
+  ticketId: number;
+  organizationId: number;
+  currentContactId: number;
+  contactName: string;
+  organizations: { id: number; name: string }[];
+}) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [orgId, setOrgId] = useState<number>(organizationId);
+  const [contactId, setContactId] = useState<number | null>(null);
+  const contactsQuery = useQuery({
+    queryKey: ["contacts", orgId],
+    queryFn: () => listContacts(orgId),
+    enabled: editing,
+  });
+  const mutation = useMutation({
+    mutationFn: () => changeTicketClient(ticketId, orgId, contactId),
+    onSuccess: () => {
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: ["ticket", ticketId] });
+      qc.invalidateQueries({ queryKey: ["contact"] });
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["tickets"] });
+      qc.invalidateQueries({ queryKey: ["organization-usage"] });
+    },
+  });
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h2>Клиент</h2>
+        {!editing && (
+          <button
+            className="btn-link"
+            onClick={() => {
+              setOrgId(organizationId);
+              setContactId(null);
+              mutation.reset();
+              setEditing(true);
+            }}
+          >
+            Изменить
+          </button>
+        )}
+      </div>
+      {!editing ? (
+        <p className="muted" style={{ margin: 0 }}>
+          Заявку из бота от незнакомого отправителя можно отнести к организации: договор и SLA пересчитаются, вместе с ней
+          переедут и другие его заявки.
+        </p>
+      ) : (
+        <>
+          {mutation.isError && <ErrorBanner message={(mutation.error as Error).message} />}
+          <div className="form-row">
+            <label className="form-label">Организация</label>
+            <select
+              value={orgId}
+              onChange={(e) => {
+                setOrgId(Number(e.target.value));
+                setContactId(null);
+              }}
+            >
+              {organizations.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-row">
+            <label className="form-label">Контакт</label>
+            <select value={contactId ?? ""} onChange={(e) => setContactId(e.target.value ? Number(e.target.value) : null)}>
+              <option value="">{contactName || "Тот же контакт"}</option>
+              {(contactsQuery.data ?? [])
+                .filter((c) => c.id !== currentContactId)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.full_name} — объединить
+                  </option>
+                ))}
+            </select>
+          </div>
+          <p className="muted" style={{ marginTop: 0 }}>
+            {contactId === null
+              ? "Контакт переедет в выбранную организацию вместе со своими заявками."
+              : "Контакт из бота объединится с выбранным: заявки и переписка в боте перейдут к нему."}
+          </p>
+          <div className="form-row-inline">
+            <button className="btn btn-primary" disabled={mutation.isPending} onClick={() => mutation.mutate()}>
+              Сохранить
+            </button>
+            <button className="btn" onClick={() => setEditing(false)}>
+              Отмена
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
