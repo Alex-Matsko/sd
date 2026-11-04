@@ -26,7 +26,10 @@ export function connectNotifications(onMessage: (n: RealtimeNotification) => voi
 
     // The browser WebSocket API can't set headers, so the token goes in the
     // query string - matches what the server expects.
-    const url = `${API_BASE_URL.replace(/^http/, "ws")}/ws/notifications?token=${encodeURIComponent(token)}`;
+    // Адрес API бывает относительным (/api — через тот же домен, что и
+    // панель): WebSocket принимает только полный адрес.
+    const base = new URL(API_BASE_URL, window.location.origin).href.replace(/\/$/, "");
+    const url = `${base.replace(/^http/, "ws")}/ws/notifications?token=${encodeURIComponent(token)}`;
     socket = new WebSocket(url);
 
     socket.onopen = () => {

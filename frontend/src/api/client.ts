@@ -59,7 +59,7 @@ interface RequestOptions {
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}, retry = true): Promise<T> {
-  const url = new URL(`${API_BASE_URL}${path}`);
+  const url = new URL(`${API_BASE_URL}${path}`, window.location.origin);
   if (options.query) {
     for (const [key, value] of Object.entries(options.query)) {
       if (value !== undefined && value !== null && value !== "") {
@@ -138,7 +138,7 @@ export async function apiPage<T>(
   path: string,
   query: Record<string, string | number | boolean | undefined | null> = {}
 ): Promise<Page<T>> {
-  const url = new URL(`${API_BASE_URL}${path}`);
+  const url = new URL(`${API_BASE_URL}${path}`, window.location.origin);
   for (const [key, value] of Object.entries(query)) {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, String(value));
   }

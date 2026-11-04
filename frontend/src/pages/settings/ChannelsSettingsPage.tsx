@@ -393,7 +393,7 @@ function TelephonyChannelCard({ setting }: { setting: IntegrationSetting }) {
   const [secretCleared, setSecretCleared] = useState(false);
 
   const isSecretSet = setting.secret_keys_set.includes("webhook_secret");
-  const webhookUrl = `${import.meta.env.VITE_API_BASE_URL ?? window.location.origin}/webhooks/telephony`;
+  const webhookUrl = `${new URL(import.meta.env.VITE_API_BASE_URL ?? "", window.location.origin).href.replace(/\/$/, "")}/webhooks/telephony`;
 
   const saveMutation = useMutation({
     mutationFn: () => {
