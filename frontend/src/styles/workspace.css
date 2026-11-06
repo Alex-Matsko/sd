@@ -175,3 +175,28 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px
   .portal-brand { font-size: 12px; }
   .portal-title-row h1 { font-size: 22px; }
 }
+
+.users-list > .list-head, .users-list > .list-row { grid-template-columns: minmax(220px,1.6fr) minmax(135px,1fr) 90px 130px 145px; min-width: 850px; }
+.user-identity { display: flex; flex-direction: column; gap: 5px; overflow-wrap: anywhere; }
+.user-identity strong { font-size: 13px; font-weight: 550; }
+.user-identity > .muted { font-size: 11px; }
+.users-list select { width: 100%; font-size: 12px; }
+.users-list .btn { min-height: 36px; padding: 7px 10px; font-size: 11px; white-space: nowrap; }
+.user-reset-notice { padding: 14px 16px; margin-bottom: 18px; color: var(--success); background: var(--success-bg); border-radius: 10px; font-size: 13px; }
+.user-reset-dialog { padding: 0; width: 480px; border: 1px solid var(--border); color: var(--text); border-radius: 16px; }
+.user-reset-dialog::backdrop { background: rgb(10 14 24 / 45%); backdrop-filter: blur(3px); }
+.user-reset-dialog .modal-body { padding: 20px; gap: 16px; }
+.user-reset-dialog .muted { font-size: 12px; line-height: 1.6; margin: 0; }
+.user-reset-target { padding: 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); display: flex; flex-direction: column; gap: 5px; overflow-wrap: anywhere; }
+.user-reset-target strong { font-size: 14px; }
+.user-reset-dialog input { width: 100%; min-height: 42px; }
+@media (max-width: 600px) {
+  .users-list > .list-head { display: none; }
+  .users-list > .list-row { min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 16px; align-items: center; padding: 18px 16px; }
+  .users-list .user-identity { grid-column: 1 / -1; }
+  .users-list > .list-row > span:nth-child(2) { grid-row: 2; }
+  .users-list > .list-row > span:nth-child(3) { display: none; }
+  .users-list > .list-row > span:nth-child(4) { grid-column: 1; grid-row: 3; }
+  .users-list > .list-row > span:nth-child(5) { grid-column: 2; grid-row: 3; }
+  .user-reset-dialog .modal-body { padding: 16px; }
+}
