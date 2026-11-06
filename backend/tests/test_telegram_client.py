@@ -24,6 +24,37 @@ def captured():
     return {}
 
 
+@pytest.mark.parametrize("proxy", [None, "", " http://user:password@proxy.internal:1081 "])
+@pytest.mark.parametrize("operation,timeout", [
+    (lambda: telegram_client.get_updates("https://api.telegram.org", "test-token", None), 30),
+    (lambda: telegram_client.send_message("https://api.telegram.org", "test-token", "42", "text"), 15),
+    (lambda: telegram_client.answer_callback_query("https://api.telegram.org", "test-token", "cb"), 15),
+    (lambda: telegram_client.set_commands("https://api.telegram.org", "test-token", []), 15),
+    (lambda: telegram_client.get_file_path("https://api.telegram.org", "test-token", "file"), 15),
+    (lambda: telegram_client.download_file("https://api.telegram.org", "test-token", "file.txt"), 30),
+    (lambda: telegram_client.send_document("https://api.telegram.org", "test-token", "42", "f.txt", b"x", "text/plain"), 60),
+])
+def test_all_telegram_requests_use_optional_proxy(monkeypatch, proxy, operation, timeout):
+    if proxy is None:
+        monkeypatch.delenv("TELEGRAM_PROXY_URL", raising=False)
+    else:
+        monkeypatch.setenv("TELEGRAM_PROXY_URL", proxy)
+    options = []
+
+    def handler(request):
+        result = [] if request.url.path.endswith("getUpdates") else {"file_path": "file.txt"}
+        return httpx.Response(200, json={"ok": True, "result": result})
+
+    def factory(**kwargs):
+        options.append(kwargs)
+        return _RealClient(transport=httpx.MockTransport(handler), timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(httpx, "Client", factory)
+    operation()
+    expected_proxy = proxy.strip() or None if proxy is not None else None
+    assert options == [{"timeout": timeout, "proxy": expected_proxy}]
+
+
 def test_send_message_puts_chat_id_and_text_in_body(monkeypatch, captured):
     def handler(request: httpx.Request) -> httpx.Response:
         captured["path"] = request.url.path

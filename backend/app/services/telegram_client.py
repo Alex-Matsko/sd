@@ -9,6 +9,8 @@ the server's TLS certificate chains to a standard public CA - no special
 trust-store handling needed the way MAX's Russian state CA required.
 """
 
+import os
+
 import httpx
 
 DEFAULT_BASE_URL = "https://api.telegram.org"
@@ -16,6 +18,11 @@ DEFAULT_BASE_URL = "https://api.telegram.org"
 
 class TelegramApiError(RuntimeError):
     pass
+
+
+def _client(timeout: int) -> httpx.Client:
+    """Route only Telegram requests through the optional deployment proxy."""
+    return httpx.Client(timeout=timeout, proxy=os.environ.get("TELEGRAM_PROXY_URL", "").strip() or None)
 
 
 def _url(base_url: str, token: str, method: str) -> str:
@@ -37,7 +44,7 @@ def get_updates(base_url: str, token: str, offset: int | None, timeout: int = 20
     params: dict = {"timeout": timeout, "limit": limit}
     if offset is not None:
         params["offset"] = offset
-    with httpx.Client(timeout=timeout + 10) as client:
+    with _client(timeout=timeout + 10) as client:
         response = client.get(_url(base_url, token, "getUpdates"), params=params)
     return _check(response, "getUpdates")["result"]
 
@@ -61,7 +68,7 @@ def send_message(
         }
     if reply_to_message_id:
         payload["reply_to_message_id"] = reply_to_message_id
-    with httpx.Client(timeout=15) as client:
+    with _client(timeout=15) as client:
         response = client.post(_url(base_url, token, "sendMessage"), json=payload)
     return _check(response, "sendMessage")["result"]
 
@@ -70,7 +77,7 @@ def answer_callback_query(base_url: str, token: str, callback_query_id: str) -> 
     """Telegram clients show a loading spinner on a tapped inline button
     until this is called - purely cosmetic (no functional effect if
     skipped), but cheap to always do."""
-    with httpx.Client(timeout=15) as client:
+    with _client(timeout=15) as client:
         response = client.post(
             _url(base_url, token, "answerCallbackQuery"), json={"callback_query_id": callback_query_id}
         )
@@ -81,7 +88,7 @@ def set_commands(base_url: str, token: str, commands: list[dict]) -> dict:
     """POST setMyCommands - {"commands": [{"command": "start", "description":
     ...}]}. Unlike MAX's /me/commands, this is Telegram's own long-standing
     feature and reliably renders as the "/" command menu in the client."""
-    with httpx.Client(timeout=15) as client:
+    with _client(timeout=15) as client:
         response = client.post(_url(base_url, token, "setMyCommands"), json={"commands": commands})
     return _check(response, "setMyCommands")
 
@@ -90,21 +97,21 @@ def get_file_path(base_url: str, token: str, file_id: str) -> str | None:
     """getFile resolves a file_id to a download path - Telegram attachments
     arrive as an opaque id, not a direct URL (unlike MAX's occasional direct
     `url`), so this extra hop is required before downloading."""
-    with httpx.Client(timeout=15) as client:
+    with _client(timeout=15) as client:
         response = client.get(_url(base_url, token, "getFile"), params={"file_id": file_id})
     data = _check(response, "getFile")
     return data["result"].get("file_path")
 
 
 def download_file(base_url: str, token: str, file_path: str) -> bytes:
-    with httpx.Client(timeout=30) as client:
+    with _client(timeout=30) as client:
         from app.services.attachments import download_limited
         return download_limited(client, f"{base_url}/file/bot{token}/{file_path}")
 
 
 def send_document(base_url: str, token: str, chat_id: str, filename: str, content: bytes, mime_type: str) -> dict:
     """Upload a private file directly; no publicly accessible attachment URL."""
-    with httpx.Client(timeout=60) as client:
+    with _client(timeout=60) as client:
         response = client.post(_url(base_url, token, "sendDocument"), data={"chat_id": chat_id},
                                files={"document": (filename, content, mime_type)})
     return _check(response, "sendDocument")["result"]
