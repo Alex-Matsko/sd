@@ -3,6 +3,9 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.core.enums import ImpactUrgencyLevel, SLA_PAUSING_STATUSES, TicketStatus
+from app.models.asset import Asset
+from app.models.category import Category
+from app.models.team import Team
 from app.models.contact import Contact
 from app.models.organization import Organization
 from app.models.ticket import Ticket
@@ -31,11 +34,21 @@ ALLOWED_TRANSITIONS: dict[TicketStatus, set[TicketStatus]] = {
 }
 
 
+def _validate_references(db: Session, organization_id: int, asset_id: int | None, category_id: int | None) -> None:
+    if asset_id is not None:
+        asset = db.get(Asset, asset_id)
+        if asset is None or asset.organization_id != organization_id:
+            raise ValueError("Актив не найден в выбранной организации")
+    if category_id is not None and db.get(Category, category_id) is None:
+        raise ValueError("Категория не найдена")
+
+
 def create_ticket(db: Session, payload: TicketCreate, actor: User | None) -> Ticket:
     contact = db.get(Contact, payload.contact_id)
     if contact is None:
         raise ValueError("Контакт не найден")
 
+    _validate_references(db, contact.organization_id, payload.asset_id, payload.category_id)
     contract, tariff, has_no_active_contract = resolve_contract_and_tariff(db, contact.organization_id)
 
     if payload.manual_priority is not None:
@@ -191,6 +204,20 @@ def _follow_assignment(db: Session, ticket: Ticket, actor: User | None) -> None:
 
 
 def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: User | None) -> Ticket:
+    provided = payload.model_fields_set
+    _validate_references(
+        db, ticket.organization_id,
+        payload.asset_id if "asset_id" in provided else ticket.asset_id,
+        payload.category_id if "category_id" in provided else ticket.category_id,
+    )
+    if payload.assigned_engineer_id is not None:
+        engineer = db.get(User, payload.assigned_engineer_id)
+        if engineer is None or not engineer.is_active:
+            raise ValueError("Исполнитель не найден или неактивен")
+    if payload.team_id is not None and db.get(Team, payload.team_id) is None:
+        raise ValueError("Команда не найдена")
+    if payload.manual_priority is not None and not (payload.manual_priority_reason or "").strip():
+        raise ValueError("При ручном приоритете нужно указать manual_priority_reason")
     if payload.status is not None and TicketStatus(payload.status) != TicketStatus(ticket.status):
         transition_status(db, ticket, TicketStatus(payload.status), actor)
 
@@ -342,6 +369,11 @@ def change_client(db: Session, ticket: Ticket, payload: TicketClientChange, acto
             changes["contact_id"] = {"from": old_contact_id, "to": person.id}
         moved.organization_id = organization.id
         moved.contact_id = person.id
+        if moved.asset_id is not None:
+            asset = db.get(Asset, moved.asset_id)
+            if asset is None or asset.organization_id != organization.id:
+                changes["asset_id"] = {"from": moved.asset_id, "to": None}
+                moved.asset_id = None
         moved.contract_id = contract.id if contract else None
         moved.tariff_id = tariff.id
         moved.has_no_active_contract = has_no_active_contract

@@ -12,7 +12,7 @@ class Message(Base):
 
     # Переписка грузится по ticket_id при каждом открытии карточки, а поиск
     # по тексту ходит сюда через EXISTS.
-    __table_args__ = (Index("ix_messages_ticket_id", "ticket_id"),)
+    __table_args__ = (Index("ix_messages_ticket_id", "ticket_id"), Index("uq_messages_request_key", "request_key", unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id", ondelete="CASCADE"))
@@ -23,6 +23,8 @@ class Message(Base):
     author_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     author_contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
     body: Mapped[str] = mapped_column(Text)
+    request_key: Mapped[str | None] = mapped_column(String(96))
+    request_digest: Mapped[str | None] = mapped_column(String(64))
     # Email threading (section 2.3): the RFC 5322 Message-ID this message was
     # sent/received with, and the In-Reply-To header of an inbound message -
     # used to attach a client's reply to the right ticket ahead of the
@@ -48,6 +50,13 @@ class Message(Base):
 
     ticket: Mapped["Ticket"] = relationship(back_populates="messages")
     reply_to: Mapped["Message"] = relationship(remote_side="Message.id")
+    channel_job: Mapped["ChannelJob | None"] = relationship(lazy="selectin", uselist=False)
+
+    @property
+    def delivery(self):
+        job = self.channel_job
+        return job if job is not None and job.kind == "outbound" else None
+
     attachments: Mapped[list["Attachment"]] = relationship(back_populates="message", cascade="all, delete-orphan")
 
 

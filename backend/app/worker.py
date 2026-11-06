@@ -18,10 +18,14 @@ import time
 import traceback
 
 from app.config import settings, warn_about_insecure_settings
+from app.core.enums import Channel
 from app.db import SessionLocal
 from app.services import settings_audit  # noqa: F401 — подключает слушатель аудита настроек
 from app.services import (
     automation,
+    channel_queue,
+    worker_health,
+    integration_settings,
     client_reports,
     email_channel,
     max_channel,
@@ -80,14 +84,21 @@ def run_monthly_client_reports() -> int:
         db.close()
 
 
-def run_email_poll() -> tuple[int, int]:
+def check_disabled_channel(db, channel):
+    setting = integration_settings.get(db, channel)
+    if setting is not None and setting.is_enabled:
+        raise channel_queue.ChannelFailure(f"Канал {channel.value} включён, но обязательные настройки не заполнены")
+
+
+def run_email_poll() -> tuple[int, int, bool]:
     """Returns (messages processed, seconds until the next poll)."""
     db = SessionLocal()
     try:
         config = email_channel.load_email_config(db)
         if config is None:
-            return 0, EMAIL_POLL_FALLBACK_SECONDS
-        return email_channel.poll_inbox(db, config), config.poll_interval_seconds
+            check_disabled_channel(db, Channel.EMAIL)
+            return 0, EMAIL_POLL_FALLBACK_SECONDS, False
+        return email_channel.poll_inbox(db, config), config.poll_interval_seconds, True
     finally:
         db.close()
 
@@ -97,17 +108,48 @@ def run_max_poll_once() -> int:
     try:
         config = max_channel.load_max_config(db)
         if config is None:
+            check_disabled_channel(db, Channel.MAX)
             return -1  # signals "not configured" to the poller loop below
         return max_channel.poll_updates(db, config)
     finally:
         db.close()
 
 
+def observed(component, callback, interval=60, enabled=True):
+    with SessionLocal() as db:
+        worker_health.pulse(db, component, started=True, interval=interval, enabled=enabled)
+    try:
+        result = callback()
+    except Exception as error:
+        with SessionLocal() as db:
+            worker_health.pulse(db, component, error=error, interval=interval, enabled=enabled)
+        raise
+    with SessionLocal() as db:
+        worker_health.pulse(db, component, success=True, interval=interval,
+                            enabled=enabled and result != -1)
+    return result
+
+
+def queue_loop(kind):
+    component = "inbound" if kind == "inbound" else "outbound"
+    while True:
+        def run():
+            with SessionLocal() as db:
+                return channel_queue.run_batch(db, kind, limit=1)
+        try:
+            # One transport job can contain ten files, each with a bounded timeout.
+            touched = observed(component, run, interval=300)
+            time.sleep(0.2 if touched else TICK_SECONDS)
+        except Exception:
+            traceback.print_exc()
+            time.sleep(TICK_SECONDS)
+
+
 def max_poller_loop() -> None:
     print("[worker] поток MAX запущен", flush=True)
     while True:
         try:
-            processed = run_max_poll_once()
+            processed = observed("max", run_max_poll_once, interval=60)
             if processed == -1:
                 time.sleep(MAX_IDLE_RETRY_SECONDS)
             elif processed > 0:
@@ -122,6 +164,7 @@ def run_telegram_poll_once() -> int:
     try:
         config = telegram_channel.load_telegram_config(db)
         if config is None:
+            check_disabled_channel(db, Channel.TELEGRAM)
             return -1  # signals "not configured" to the poller loop below
         return telegram_channel.poll_updates(db, config)
     finally:
@@ -132,7 +175,7 @@ def telegram_poller_loop() -> None:
     print("[worker] поток Telegram запущен", flush=True)
     while True:
         try:
-            processed = run_telegram_poll_once()
+            processed = observed("telegram", run_telegram_poll_once, interval=60)
             if processed == -1:
                 time.sleep(TELEGRAM_IDLE_RETRY_SECONDS)
             elif processed > 0:
@@ -140,6 +183,24 @@ def telegram_poller_loop() -> None:
         except Exception:
             traceback.print_exc()
             time.sleep(TELEGRAM_IDLE_RETRY_SECONDS)
+
+
+def email_poller_loop():
+    while True:
+        interval = EMAIL_POLL_FALLBACK_SECONDS
+        try:
+            processed, interval, enabled = observed("email", run_email_poll, interval=300)
+            if not enabled:
+                with SessionLocal() as db:
+                    worker_health.pulse(db, "email", success=True, enabled=False, interval=interval)
+        except Exception:
+            traceback.print_exc()
+        time.sleep(interval)
+
+
+def run_retention():
+    with SessionLocal() as db:
+        return channel_queue.prune_completed(db)
 
 
 def main() -> None:
@@ -152,47 +213,50 @@ def main() -> None:
     threading.Thread(target=max_poller_loop, daemon=True).start()
     threading.Thread(target=telegram_poller_loop, daemon=True).start()
 
+    threading.Thread(target=queue_loop, args=("inbound",), daemon=True).start()
+    threading.Thread(target=queue_loop, args=("outbound",), daemon=True).start()
+
+    threading.Thread(target=email_poller_loop, daemon=True).start()
+
     next_sla_run = 0.0
-    next_email_poll = 0.0
     while True:
         now = time.monotonic()
+        try:
+            with SessionLocal() as db:
+                worker_health.pulse(db, "main", success=True, interval=TICK_SECONDS)
+        except Exception:
+            traceback.print_exc()
 
         if now >= next_sla_run:
             try:
-                touched = run_sla_sweep()
+                touched = observed("sla", run_sla_sweep, interval=settings.worker_interval_seconds)
                 if touched:
                     print(f"[worker] эскалации: обновлено заявок - {touched}", flush=True)
             except Exception:
                 traceback.print_exc()
             try:
-                closed = run_automation_sweep()
+                closed = observed("automation", run_automation_sweep, interval=settings.worker_interval_seconds)
                 if closed:
                     print(f"[worker] автоматизация: обновлено заявок - {closed}", flush=True)
             except Exception:
                 traceback.print_exc()
             try:
-                planned = run_schedule_sweep()
+                planned = observed("schedules", run_schedule_sweep, interval=settings.worker_interval_seconds)
                 if planned:
                     print(f"[worker] расписания: создано плановых заявок - {planned}", flush=True)
             except Exception:
                 traceback.print_exc()
             try:
-                generated = run_monthly_client_reports()
+                generated = observed("client_reports", run_monthly_client_reports, interval=settings.worker_interval_seconds)
                 if generated:
                     print(f"[worker] отчёты клиентам: сформировано - {generated}", flush=True)
             except Exception:
                 traceback.print_exc()
-            next_sla_run = now + settings.worker_interval_seconds
-
-        if now >= next_email_poll:
-            interval = EMAIL_POLL_FALLBACK_SECONDS
             try:
-                processed, interval = run_email_poll()
-                if processed:
-                    print(f"[worker] почта: обработано писем - {processed}", flush=True)
+                observed("retention", run_retention, interval=settings.worker_interval_seconds)
             except Exception:
                 traceback.print_exc()
-            next_email_poll = now + interval
+            next_sla_run = now + settings.worker_interval_seconds
 
         time.sleep(TICK_SECONDS)
 

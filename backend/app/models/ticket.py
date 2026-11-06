@@ -116,7 +116,7 @@ class Ticket(Base, TimestampMixin):
     team: Mapped["Team"] = relationship()
     parent_ticket: Mapped["Ticket"] = relationship(remote_side="Ticket.id")
 
-    messages: Mapped[list["Message"]] = relationship(back_populates="ticket", order_by="Message.created_at")
+    messages: Mapped[list["Message"]] = relationship(back_populates="ticket", order_by="(Message.created_at, Message.id)")
     time_entries: Mapped[list["TimeEntry"]] = relationship(back_populates="ticket")
 
     @property

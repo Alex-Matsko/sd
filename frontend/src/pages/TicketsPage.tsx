@@ -1,3 +1,4 @@
+import { readTicketFilters } from "../lib/ticketFilters";
 import { useEffect, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
@@ -41,31 +42,27 @@ const PRIORITY_OPTIONS: { value: Priority | ""; label: string }[] = [
 ];
 
 export function TicketsPage() {
-  const [searchParams] = useSearchParams();
-  const initialOrgId = searchParams.get("organization_id");
-
-  const [statusFilter, setStatusFilter] = useState<TicketStatus | "">("");
-  const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
-  const [organizationFilter, setOrganizationFilter] = useState<number | "">(initialOrgId ? Number(initialOrgId) : "");
-  const [assigneeFilter, setAssigneeFilter] = useState<number | "">("");
-  const [slaRiskFilter, setSlaRiskFilter] = useState<"" | "warning" | "breached">("");
-  const [search, setSearch] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const {
+    status: statusFilter, priority: priorityFilter, organization: organizationFilter,
+    assignee: assigneeFilter, risk: slaRiskFilter, search, openOnly, overdue: overdueOnly,
+  } = readTicketFilters(searchParams);
   const [view, setView] = useState<"list" | "kanban">("list");
   const [page, setPage] = useState(0);
 
   // Search moved server-side along with paging: filtering the fetched array
   // would only ever search the page in hand. Debounced so typing doesn't
   // fire a request per keystroke.
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
 
-  const filters = [statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter, debouncedSearch];
+  const filters = [statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter, debouncedSearch, openOnly, overdueOnly];
   // Any filter change invalidates the current page number - staying on page 5
   // of a result set that now has two pages would show an empty screen.
-  useEffect(() => setPage(0), filters);
+  useEffect(() => setPage(0), [statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter, debouncedSearch, openOnly, overdueOnly]);
 
   // The Kanban board is a board of work in flight, so it needs the whole
   // (filtered) set at once rather than the list view's page.
@@ -85,6 +82,8 @@ export function TicketsPage() {
         assigned_engineer_id: assigneeFilter || undefined,
         sla_risk: slaRiskFilter || undefined,
         q: debouncedSearch || undefined,
+        open_only: openOnly ? 1 : undefined,
+        overdue: overdueOnly ? 1 : undefined,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["saved-filters"] }),
   });
@@ -93,13 +92,21 @@ export function TicketsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["saved-filters"] }),
   });
 
+  function updateUrl(key: string, value: string | number | boolean) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value === "" || value === false) next.delete(key);
+      else next.set(key, value === true ? "1" : String(value));
+      return next;
+    }, { replace: true });
+  }
+
   function applySavedFilter(criteria: Record<string, string | number | undefined>) {
-    setStatusFilter((criteria.status_filter as TicketStatus) ?? "");
-    setPriorityFilter((criteria.priority as Priority) ?? "");
-    setOrganizationFilter((criteria.organization_id as number) ?? "");
-    setAssigneeFilter((criteria.assigned_engineer_id as number) ?? "");
-    setSlaRiskFilter((criteria.sla_risk as "warning" | "breached") ?? "");
-    setSearch((criteria.q as string) ?? "");
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(criteria)) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
+    setSearchParams(params, { replace: true });
   }
 
   const ticketsQuery = useQuery({
@@ -112,6 +119,9 @@ export function TicketsPage() {
         assigned_engineer_id: assigneeFilter || undefined,
         sla_risk: slaRiskFilter || undefined,
         q: debouncedSearch || undefined,
+        open_only: view === "list" && openOnly || undefined,
+        exclude_archived: view === "kanban" || undefined,
+        overdue: overdueOnly || undefined,
         limit: pageSize,
         offset: view === "kanban" ? 0 : page * pageSize,
       }),
@@ -136,10 +146,10 @@ export function TicketsPage() {
         </h1>
         <div className="spacer" />
         <div className="view-toggle">
-          <button className={view === "list" ? "active" : ""} onClick={() => setView("list")}>
+          <button className={view === "list" ? "active" : ""} aria-pressed={view === "list"} onClick={() => { setView("list"); setPage(0); }}>
             Список
           </button>
-          <button className={view === "kanban" ? "active" : ""} onClick={() => setView("kanban")}>
+          <button className={view === "kanban" ? "active" : ""} aria-pressed={view === "kanban"} onClick={() => { setView("kanban"); setPage(0); }}>
             Канбан
           </button>
         </div>
@@ -153,17 +163,18 @@ export function TicketsPage() {
           type="text"
           placeholder="Поиск по теме, номеру и переписке…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { updateUrl("q", e.target.value); }}
+          aria-label="Поиск заявок"
           className="filter-search"
         />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as TicketStatus | "")}>
+        <select value={statusFilter} onChange={(e) => updateUrl("status_filter", e.target.value)} aria-label="Статус">
           {STATUS_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
         </select>
-        <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as Priority | "")}>
+        <select value={priorityFilter} onChange={(e) => updateUrl("priority", e.target.value)} aria-label="Приоритет">
           {PRIORITY_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
@@ -172,7 +183,7 @@ export function TicketsPage() {
         </select>
         <select
           value={organizationFilter}
-          onChange={(e) => setOrganizationFilter(e.target.value ? Number(e.target.value) : "")}
+          onChange={(e) => updateUrl("organization_id", e.target.value)} aria-label="Организация"
         >
           <option value="">Все организации</option>
           {(orgsQuery.data ?? []).map((o) => (
@@ -183,7 +194,7 @@ export function TicketsPage() {
         </select>
         <select
           value={assigneeFilter}
-          onChange={(e) => setAssigneeFilter(e.target.value ? Number(e.target.value) : "")}
+          onChange={(e) => updateUrl("assigned_engineer_id", e.target.value)} aria-label="Исполнитель"
         >
           <option value="">Все исполнители</option>
           {(usersQuery.data ?? []).map((u) => (
@@ -192,7 +203,7 @@ export function TicketsPage() {
             </option>
           ))}
         </select>
-        <select value={slaRiskFilter} onChange={(e) => setSlaRiskFilter(e.target.value as "" | "warning" | "breached")}>
+        <select value={slaRiskFilter} onChange={(e) => updateUrl("sla_risk", e.target.value)} aria-label="SLA">
           {SLA_RISK_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
@@ -201,6 +212,13 @@ export function TicketsPage() {
         </select>
       </div>
 
+      <div className="queue-scope">
+        <label><input type="checkbox" checked={openOnly || view === "kanban"} disabled={view === "kanban"} onChange={(e) => updateUrl("open_only", e.target.checked)} /> {view === "kanban" ? "Активные и решённые" : "Только открытые"}</label>
+        {overdueOnly && <span className="status-tag status-waiting">Просрочен срок решения</span>}
+        <button className="btn-link" onClick={() => setSearchParams({}, { replace: true })}>Сбросить фильтры</button>
+        <span className="muted">{ticketsQuery.isSuccess ? `Найдено: ${total}` : ""}</span>
+      </div>
+      {(saveFilterMutation.isError || deleteFilterMutation.isError) && <ErrorBanner message={(saveFilterMutation.error ?? deleteFilterMutation.error)?.message ?? "Не удалось изменить фильтр"} />}
       <div className="saved-filters">
         {(savedFiltersQuery.data ?? []).map((f) => (
           <span className="saved-filter-chip" key={f.id}>
@@ -216,6 +234,7 @@ export function TicketsPage() {
         ))}
         <button
           className="btn-link"
+          disabled={saveFilterMutation.isPending}
           onClick={() => {
             const name = window.prompt("Название фильтра");
             if (name?.trim()) saveFilterMutation.mutate(name.trim());
@@ -232,8 +251,8 @@ export function TicketsPage() {
         <KanbanBoard tickets={filtered} orgsById={orgsById} usersById={usersById} />
       )}
       {ticketsQuery.isSuccess && filtered.length > 0 && view === "list" && (
-        <div className="list">
-          <div className="list-head" style={{ gridTemplateColumns: "90px 2fr 1fr 1fr 1fr 1.2fr 1fr 1fr 1fr" }}>
+        <div className="list ticket-list">
+          <div className="list-head" style={{ gridTemplateColumns: "76px minmax(190px, 2.4fr) minmax(95px, 1fr) 60px 83px 120px 86px 104px 106px" }}>
             <span>№</span>
             <span>Тема</span>
             <span>Организация</span>
@@ -247,7 +266,7 @@ export function TicketsPage() {
           {filtered.map((t) => (
             <Link
               className="list-row"
-              style={{ gridTemplateColumns: "90px 2fr 1fr 1fr 1fr 1.2fr 1fr 1fr 1fr" }}
+              style={{ gridTemplateColumns: "76px minmax(190px, 2.4fr) minmax(95px, 1fr) 60px 83px 120px 86px 104px 106px" }}
               key={t.id}
               to={`/tickets/${t.id}`}
             >
@@ -281,7 +300,7 @@ export function TicketsPage() {
             {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} из {total}
           </span>
           <div className="spacer" />
-          <button className="btn btn-ghost" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+          <button className="btn btn-ghost" disabled={page === 0 || ticketsQuery.isPlaceholderData} onClick={() => setPage((p) => p - 1)}>
             ← Назад
           </button>
           <span className="muted">
@@ -289,7 +308,7 @@ export function TicketsPage() {
           </span>
           <button
             className="btn btn-ghost"
-            disabled={page + 1 >= pageCount}
+            disabled={page + 1 >= pageCount || ticketsQuery.isPlaceholderData}
             onClick={() => setPage((p) => p + 1)}
           >
             Вперёд →

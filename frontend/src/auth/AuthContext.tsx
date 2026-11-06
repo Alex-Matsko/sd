@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { fetchCurrentUser, login as loginRequest, logout as logoutRequest } from "../api/auth";
+import { useQueryClient } from "@tanstack/react-query";
 import { getAccessToken } from "../api/client";
 import type { User } from "../api/types";
 
@@ -14,6 +15,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -28,15 +30,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setIsLoading(false));
   }, []);
 
+  useEffect(() => {
+    function endSession() {
+      setUser(null);
+      queryClient.clear();
+    }
+    window.addEventListener("sd:session-ended", endSession);
+    return () => window.removeEventListener("sd:session-ended", endSession);
+  }, [queryClient]);
+
   async function login(email: string, password: string) {
-    await loginRequest(email, password);
+    await queryClient.cancelQueries();
+    queryClient.clear();
+    await loginRequest(email.trim(), password);
     const me = await fetchCurrentUser();
     setUser(me);
   }
 
   async function logout() {
-    await logoutRequest();
     setUser(null);
+    queryClient.clear();
+    await logoutRequest();
   }
 
   return <AuthContext.Provider value={{ user, isLoading, login, logout }}>{children}</AuthContext.Provider>;

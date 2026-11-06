@@ -1,3 +1,4 @@
+import { useAuth } from "../../auth/AuthContext";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -7,6 +8,9 @@ import { ORGANIZATION_STATUS_LABELS } from "../../lib/labels";
 import { NewOrganizationModal } from "./NewOrganizationModal";
 
 export function OrganizationsPage() {
+  const { user } = useAuth();
+  const canManage = user?.role === "manager" || user?.role === "admin";
+  const canEdit = canManage || user?.role === "dispatcher";
   const qc = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const orgsQuery = useQuery({ queryKey: ["organizations"], queryFn: listOrganizations });
@@ -23,9 +27,9 @@ export function OrganizationsPage() {
           Организации
         </h1>
         <div className="spacer" />
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+        {canEdit && <button className="btn btn-primary" onClick={() => setShowModal(true)}>
           Добавить организацию
-        </button>
+        </button>}
       </div>
 
       {organizations.length === 0 && <EmptyState text="Организаций пока нет" />}

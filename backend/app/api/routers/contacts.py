@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from app.models.organization import Organization
 
 from app.api.deps import get_current_user, require_dispatcher_or_above
 from app.db import get_db
@@ -36,6 +38,18 @@ def list_contacts(
 def create_contact(
     payload: ContactCreate, db: Session = Depends(get_db), _: User = Depends(require_dispatcher_or_above)
 ) -> Contact:
+    if db.get(Organization, payload.organization_id) is None:
+        raise HTTPException(status_code=404, detail="Организация не найдена")
+    emails = list(dict.fromkeys(email.strip().lower() for email in payload.emails if email.strip()))
+    phones = list(dict.fromkeys(phone.strip() for phone in payload.phones if phone.strip()))
+    if emails and db.query(ContactEmail).filter(ContactEmail.email.in_(emails)).first():
+        raise HTTPException(status_code=409, detail="Контакт с таким email уже существует")
+    if phones and db.query(ContactPhone).filter(ContactPhone.phone.in_(phones)).first():
+        raise HTTPException(status_code=409, detail="Контакт с таким телефоном уже существует")
+    for field in ("telegram_id", "max_id"):
+        value = getattr(payload, field)
+        if value and db.query(Contact).filter(getattr(Contact, field) == value).first():
+            raise HTTPException(status_code=409, detail="Этот аккаунт мессенджера уже привязан к контакту")
     contact = Contact(
         organization_id=payload.organization_id,
         full_name=payload.full_name,
@@ -45,13 +59,17 @@ def create_contact(
         can_view_org_tickets=payload.can_view_org_tickets,
         is_confirmed=payload.is_confirmed,
     )
-    db.add(contact)
-    db.flush()
-    for i, email in enumerate(payload.emails):
-        db.add(ContactEmail(contact_id=contact.id, email=email.lower(), is_primary=(i == 0)))
-    for i, phone in enumerate(payload.phones):
-        db.add(ContactPhone(contact_id=contact.id, phone=phone, is_primary=(i == 0)))
-    db.commit()
+    try:
+        db.add(contact)
+        db.flush()
+        for i, email in enumerate(emails):
+            db.add(ContactEmail(contact_id=contact.id, email=email.lower(), is_primary=(i == 0)))
+        for i, phone in enumerate(phones):
+            db.add(ContactPhone(contact_id=contact.id, phone=phone, is_primary=(i == 0)))
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Контакт с такими реквизитами уже существует") from exc
     db.refresh(contact)
     return contact
 
@@ -140,6 +158,10 @@ def update_contact(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(contact, field, value)
     db.add(contact)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Контакт с такими реквизитами уже существует") from exc
     db.refresh(contact)
     return contact

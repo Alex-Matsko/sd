@@ -7,6 +7,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import { PortalApp } from "./portal/PortalApp";
 import "./styles/global.css";
 import "./portal/portal.css";
+import "./styles/workspace.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,7 +24,7 @@ const queryClient = new QueryClient({
  * means nothing under /portal can fall through to a staff screen. In
  * production it is meant to live on its own subdomain - nginx points that
  * subdomain here and the same bundle serves both. */
-const isPortal = window.location.pathname.startsWith("/portal");
+const isPortal = window.location.pathname === "/portal" || window.location.pathname.startsWith("/portal/");
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

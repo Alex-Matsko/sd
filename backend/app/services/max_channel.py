@@ -278,6 +278,9 @@ def _list_open_tickets(db: Session, contact: Contact) -> list[Ticket]:
 
 
 def _send(config: MaxConfig, chat_id: str, text: str, buttons: list[list[dict]] | None = None) -> None:
+    from app.services.channel_queue import defer_bot_reply
+    if defer_bot_reply("max", chat_id, text, buttons):
+        return
     try:
         max_client.send_message(config.base_url, config.token, chat_id, text, buttons=buttons)
     except max_client.MaxApiError:
@@ -293,16 +296,14 @@ def _store_max_attachment(db: Session, message: Message, attachment: dict) -> No
     url = payload.get("url")
     att_type = attachment.get("type", "unknown")
     if not url:
-        logger.info("MAX: вложение типа %s без прямой ссылки - пропущено (docs/decisions.md)", att_type)
-        return
+        from app.services.channel_queue import PermanentChannelFailure
+        raise PermanentChannelFailure("MAX не передал адрес для скачивания вложения. Проверьте исходное событие.")
     try:
         with httpx.Client(timeout=30) as client:
-            response = client.get(url)
-            response.raise_for_status()
-            content = response.content
+            content = attachments_service.download_limited(client, url)
     except Exception:
         logger.exception("MAX: не удалось скачать вложение")
-        return
+        raise
     filename = payload.get("filename") or att_type
     db.add(attachments_service.store_attachment(message.id, filename, content, None))
 
@@ -664,11 +665,9 @@ def poll_updates(db: Session, config: MaxConfig) -> int:
     _ensure_commands_registered(config)
     marker = get_marker(db)
     updates, next_marker = max_client.get_updates(config.base_url, config.token, marker, timeout=config.poll_timeout_seconds)
+    from app.services.channel_queue import capture_update
     for update in updates:
-        try:
-            handle_update(db, update)
-        except Exception:
-            logger.exception("MAX: ошибка обработки update")
+        capture_update(db, Channel.MAX, update, config)
     save_marker(db, next_marker)
     return len(updates)
 
@@ -696,7 +695,8 @@ def notify_status_change(db: Session, ticket: Ticket, new_status: TicketStatus) 
     if state is None:
         return
     label = _STATUS_LABELS_RU.get(new_status, new_status.value)
-    _send(config, state.chat_id, f"Статус заявки {ticket.display_number} изменён: {label}.")
+    from app.services.channel_queue import enqueue_notification
+    enqueue_notification(db, "max", state.chat_id, f"Статус заявки {ticket.display_number} изменён: {label}.", ticket=ticket)
 
 
 def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None) -> None:
@@ -711,7 +711,8 @@ def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None)
     state = _find_chat_state(db, ticket.contact_id)
     if state is None:
         return
-    _send(config, state.chat_id, f"Заявку {ticket.display_number} теперь ведёт: {engineer.full_name}.")
+    from app.services.channel_queue import enqueue_notification
+    enqueue_notification(db, "max", state.chat_id, f"Заявку {ticket.display_number} теперь ведёт: {engineer.full_name}.", ticket=ticket)
 
 
 def request_csat(db: Session, ticket: Ticket) -> None:
@@ -727,13 +728,10 @@ def request_csat(db: Session, ticket: Ticket) -> None:
         return
     buttons = [[{"type": "callback", "text": str(n), "payload": f"csat:{ticket.id}:{n}"} for n in range(1, 6)]]
     try:
-        max_client.send_message(
-            config.base_url,
-            config.token,
-            state.chat_id,
+        from app.services.channel_queue import enqueue_notification
+        enqueue_notification(db, "max", state.chat_id,
             f"Заявка {ticket.display_number} закрыта. Оцените, пожалуйста, качество решения от 1 до 5.",
-            buttons=buttons,
-        )
+            buttons=buttons, ticket=ticket)
         ticket.csat_requested_at = datetime.now(timezone.utc)
         db.add(ticket)
         db.commit()
@@ -742,35 +740,7 @@ def request_csat(db: Session, ticket: Ticket) -> None:
 
 
 def try_send_outbound(db: Session, ticket: Ticket, message: Message) -> None:
-    config = load_max_config(db)
-    if config is None:
-        logger.warning("Заявка %s: канал MAX не настроен, сообщение не отправлено", ticket.display_number)
-        return
-    state = _find_chat_state(db, ticket.contact_id)
-    if state is None:
-        logger.warning("Заявка %s: нет сохранённого MAX-чата для контакта, сообщение не отправлено", ticket.display_number)
-        return
-    reply_to_mid = None
-    if message.reply_to_message_id is not None:
-        parent = db.get(Message, message.reply_to_message_id)
-        reply_to_mid = parent.max_message_id if parent else None
-    try:
-        # MAX doesn't render the registered /me/commands as a visible menu on
-        # every client (confirmed live - docs/decisions.md), so the menu
-        # buttons ride along on every engineer reply too, same as the
-        # gluing ack (_acknowledge_gluing).
-        response = max_client.send_message(
-            config.base_url,
-            config.token,
-            state.chat_id,
-            message.body,
-            buttons=_menu_buttons_for(ticket),
-            reply_to_mid=reply_to_mid,
-        )
-        sent_mid = ((response.get("message") or {}).get("body") or {}).get("mid")
-        if sent_mid:
-            message.max_message_id = sent_mid
-            db.add(message)
-            db.commit()
-    except Exception:
-        logger.exception("Заявка %s: ошибка отправки сообщения в MAX", ticket.display_number)
+    """Compatibility entrypoint: queue delivery instead of doing network I/O."""
+    from app.services.channel_queue import enqueue_message
+    job = enqueue_message(db, message)
+    db.commit()

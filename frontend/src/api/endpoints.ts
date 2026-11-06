@@ -1,4 +1,4 @@
-import { apiDownload, apiPage, apiRequest, apiUpload } from "./client";
+import { apiDownload, apiForm, apiPage, apiRequest, apiUpload } from "./client";
 import type {
   Asset,
   Attachment,
@@ -265,12 +265,15 @@ export interface TicketFilters {
   priority?: Priority;
   channel?: Channel;
   sla_risk?: "warning" | "breached";
+  open_only?: boolean;
+  exclude_archived?: boolean;
+  overdue?: boolean;
   q?: string;
   limit?: number;
   offset?: number;
 }
 export function listTickets(filters: TicketFilters = {}) {
-  return apiPage<Ticket>("/tickets", filters as Record<string, string | number | undefined>);
+  return apiPage<Ticket>("/tickets", filters as Record<string, string | number | boolean | undefined>);
 }
 export interface TicketStats {
   by_status: Record<TicketStatus, number>;
@@ -283,7 +286,7 @@ export interface TicketStats {
   workload: { engineer_name: string; open_tickets: number }[];
 }
 export function getTicketStats() {
-  return apiRequest<TicketStats>("/tickets/stats");
+  return apiRequest<TicketStats>("/tickets/stats", { query: { tz: Intl.DateTimeFormat().resolvedOptions().timeZone } });
 }
 export function getTicket(id: number) {
   return apiRequest<Ticket>(`/tickets/${id}`);
@@ -320,9 +323,13 @@ export function listMessages(ticketId: number) {
 }
 export function createMessage(
   ticketId: number,
-  payload: { direction: string; body: string; channel?: string | null; reply_to_message_id?: number | null }
+  payload: { direction: string; body: string; request_id?: string; channel?: string | null; reply_to_message_id?: number | null },
+  files: File[] = []
 ) {
-  return apiRequest<Message>(`/tickets/${ticketId}/messages`, { method: "POST", body: payload });
+  const form = new FormData();
+  form.append("payload", JSON.stringify(payload));
+  files.forEach((file) => form.append("files", file));
+  return apiForm<Message>(`/tickets/${ticketId}/messages/send`, form);
 }
 export function uploadAttachment(ticketId: number, messageId: number, file: File) {
   return apiUpload<Attachment>(`/tickets/${ticketId}/messages/${messageId}/attachments`, file);

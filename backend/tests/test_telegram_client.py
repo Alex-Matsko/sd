@@ -139,3 +139,16 @@ def test_get_file_path_returns_result_path(monkeypatch):
 
     path = telegram_client.get_file_path("https://api.telegram.org", "test-token", "file-abc")
     assert path == "documents/file.pdf"
+
+
+def test_send_document_uploads_private_bytes_without_a_public_url(monkeypatch):
+    captured = {}
+    def handler(request):
+        captured["path"], captured["body"] = request.url.path, request.content
+        assert "multipart/form-data" in request.headers["content-type"]
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 45}})
+    monkeypatch.setattr(httpx, "Client", _mock_client_factory(handler))
+    result = telegram_client.send_document("https://api.telegram.org", "test-token", "42", "private.txt", b"private bytes", "text/plain")
+    assert result["message_id"] == 45
+    assert captured["path"] == "/bottest-token/sendDocument"
+    assert b'filename="private.txt"' in captured["body"] and b"private bytes" in captured["body"]

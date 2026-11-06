@@ -98,6 +98,13 @@ def get_file_path(base_url: str, token: str, file_id: str) -> str | None:
 
 def download_file(base_url: str, token: str, file_path: str) -> bytes:
     with httpx.Client(timeout=30) as client:
-        response = client.get(f"{base_url}/file/bot{token}/{file_path}")
-        response.raise_for_status()
-        return response.content
+        from app.services.attachments import download_limited
+        return download_limited(client, f"{base_url}/file/bot{token}/{file_path}")
+
+
+def send_document(base_url: str, token: str, chat_id: str, filename: str, content: bytes, mime_type: str) -> dict:
+    """Upload a private file directly; no publicly accessible attachment URL."""
+    with httpx.Client(timeout=60) as client:
+        response = client.post(_url(base_url, token, "sendDocument"), data={"chat_id": chat_id},
+                               files={"document": (filename, content, mime_type)})
+    return _check(response, "sendDocument")["result"]

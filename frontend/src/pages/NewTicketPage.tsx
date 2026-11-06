@@ -86,17 +86,19 @@ export function NewTicketPage() {
     <div className="view">
       <h1 className="view-title">Новая заявка</h1>
 
-      <div className="panel form-panel">
+      <form className="panel form-panel" onSubmit={(event) => { event.preventDefault(); void handleSubmit(); }}>
         {error && <ErrorBanner message={error} />}
 
         <div className="form-grid">
           <div className="form-row">
-            <label className="form-label">Организация</label>
-            <select
+            <label className="form-label" htmlFor="new-ticket-1">Организация</label>
+            <select id="new-ticket-1"
+              required
               value={organizationId}
               onChange={(e) => {
                 setOrganizationId(e.target.value ? Number(e.target.value) : "");
                 setContactId("");
+                setAssetId("");
               }}
             >
               <option value="">Выберите организацию</option>
@@ -108,8 +110,8 @@ export function NewTicketPage() {
             </select>
           </div>
           <div className="form-row">
-            <label className="form-label">Контакт</label>
-            <select value={contactId} onChange={(e) => setContactId(e.target.value ? Number(e.target.value) : "")} disabled={!organizationId}>
+            <label className="form-label" htmlFor="new-ticket-2">Контакт</label>
+            <select id="new-ticket-2" required value={contactId} onChange={(e) => setContactId(e.target.value ? Number(e.target.value) : "")} disabled={!organizationId}>
               <option value="">Выберите контакт</option>
               {(contactsQuery.data ?? []).map((c) => (
                 <option key={c.id} value={c.id}>
@@ -122,8 +124,8 @@ export function NewTicketPage() {
 
         <div className="form-grid">
           <div className="form-row">
-            <label className="form-label">Тип</label>
-            <select value={type} onChange={(e) => setType(e.target.value as TicketType)}>
+            <label className="form-label" htmlFor="new-ticket-3">Тип</label>
+            <select id="new-ticket-3" value={type} onChange={(e) => setType(e.target.value as TicketType)}>
               {Object.entries(TICKET_TYPE_LABELS).map(([v, label]) => (
                 <option key={v} value={v}>
                   {label}
@@ -132,8 +134,8 @@ export function NewTicketPage() {
             </select>
           </div>
           <div className="form-row">
-            <label className="form-label">Канал</label>
-            <select value={channel} onChange={(e) => setChannel(e.target.value as Channel)}>
+            <label className="form-label" htmlFor="new-ticket-4">Канал</label>
+            <select id="new-ticket-4" value={channel} onChange={(e) => setChannel(e.target.value as Channel)}>
               {Object.entries(CHANNEL_LABELS).map(([v, label]) => (
                 <option key={v} value={v}>
                   {label}
@@ -144,14 +146,14 @@ export function NewTicketPage() {
         </div>
 
         <div className="form-row">
-          <label className="form-label">Тема</label>
-          <input type="text" style={{ width: "100%" }} value={subject} onChange={(e) => setSubject(e.target.value)} />
+          <label className="form-label" htmlFor="new-ticket-5">Тема</label>
+          <input id="new-ticket-5" type="text" required maxLength={500} style={{ width: "100%" }} value={subject} onChange={(e) => setSubject(e.target.value)} />
         </div>
 
         <div className="form-grid">
           <div className="form-row">
-            <label className="form-label">Категория</label>
-            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : "")}>
+            <label className="form-label" htmlFor="new-ticket-6">Категория</label>
+            <select id="new-ticket-6" value={categoryId} onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : "")}>
               <option value="">Без категории</option>
               {(categoriesQuery.data ?? []).map((c) => (
                 <option key={c.id} value={c.id}>
@@ -161,8 +163,8 @@ export function NewTicketPage() {
             </select>
           </div>
           <div className="form-row">
-            <label className="form-label">Актив</label>
-            <select value={assetId} onChange={(e) => setAssetId(e.target.value ? Number(e.target.value) : "")} disabled={!organizationId}>
+            <label className="form-label" htmlFor="new-ticket-7">Актив</label>
+            <select id="new-ticket-7" value={assetId} onChange={(e) => setAssetId(e.target.value ? Number(e.target.value) : "")} disabled={!organizationId}>
               <option value="">Без привязки к активу</option>
               {(assetsQuery.data ?? []).map((a) => (
                 <option key={a.id} value={a.id}>
@@ -176,7 +178,7 @@ export function NewTicketPage() {
         <div className="priority-source">
           <div className="form-row-inline">
             <label>
-              <input type="radio" checked={priorityMode === "matrix"} onChange={() => setPriorityMode("matrix")} /> Impact / Urgency
+              <input type="radio" checked={priorityMode === "matrix"} onChange={() => setPriorityMode("matrix")} /> По влиянию и срочности
             </label>
             <label>
               <input type="radio" checked={priorityMode === "manual"} onChange={() => setPriorityMode("manual")} /> Приоритет вручную
@@ -186,8 +188,8 @@ export function NewTicketPage() {
           {priorityMode === "matrix" ? (
             <div className="form-grid">
               <div className="form-row">
-                <label className="form-label">Impact</label>
-                <select value={impact} onChange={(e) => setImpact(e.target.value as ImpactUrgencyLevel)}>
+                <label className="form-label" htmlFor="new-ticket-8">Влияние</label>
+                <select id="new-ticket-8" value={impact} onChange={(e) => setImpact(e.target.value as ImpactUrgencyLevel)}>
                   {Object.entries(IMPACT_URGENCY_LABELS).map(([v, label]) => (
                     <option key={v} value={v}>
                       {label}
@@ -196,8 +198,8 @@ export function NewTicketPage() {
                 </select>
               </div>
               <div className="form-row">
-                <label className="form-label">Urgency</label>
-                <select value={urgency} onChange={(e) => setUrgency(e.target.value as ImpactUrgencyLevel)}>
+                <label className="form-label" htmlFor="new-ticket-9">Срочность</label>
+                <select id="new-ticket-9" value={urgency} onChange={(e) => setUrgency(e.target.value as ImpactUrgencyLevel)}>
                   {Object.entries(IMPACT_URGENCY_LABELS).map(([v, label]) => (
                     <option key={v} value={v}>
                       {label}
@@ -209,8 +211,8 @@ export function NewTicketPage() {
           ) : (
             <>
               <div className="form-row">
-                <label className="form-label">Приоритет</label>
-                <select value={manualPriority} onChange={(e) => setManualPriority(e.target.value as Priority)}>
+                <label className="form-label" htmlFor="new-ticket-10">Приоритет</label>
+                <select id="new-ticket-10" value={manualPriority} onChange={(e) => setManualPriority(e.target.value as Priority)}>
                   {Object.entries(PRIORITY_LABELS).map(([v, label]) => (
                     <option key={v} value={v}>
                       {label}
@@ -219,24 +221,24 @@ export function NewTicketPage() {
                 </select>
               </div>
               <div className="form-row">
-                <label className="form-label">Причина ручного приоритета</label>
-                <input type="text" style={{ width: "100%" }} value={manualReason} onChange={(e) => setManualReason(e.target.value)} />
+                <label className="form-label" htmlFor="new-ticket-11">Причина ручного приоритета</label>
+                <input id="new-ticket-11" type="text" style={{ width: "100%" }} value={manualReason} onChange={(e) => setManualReason(e.target.value)} />
               </div>
             </>
           )}
         </div>
 
         <div className="form-row">
-          <label className="form-label">Первое сообщение</label>
-          <textarea rows={4} value={initialMessage} onChange={(e) => setInitialMessage(e.target.value)} />
+          <label className="form-label" htmlFor="new-ticket-12">Первое сообщение</label>
+          <textarea id="new-ticket-12" rows={4} value={initialMessage} onChange={(e) => setInitialMessage(e.target.value)} />
         </div>
 
         <div className="modal-foot" style={{ padding: 0, borderTop: "none" }}>
-          <button className="btn btn-primary" onClick={handleSubmit} disabled={submitting}>
+          <button type="submit" className="btn btn-primary" disabled={submitting}>
             {submitting ? "Создаём…" : "Создать заявку"}
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

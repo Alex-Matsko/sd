@@ -1,3 +1,4 @@
+import { useAuth } from "../../auth/AuthContext";
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,7 +20,6 @@ import {
   ASSET_TYPE_LABELS,
   CONTRACT_STATUS_LABELS,
   ORGANIZATION_STATUS_LABELS,
-  formatDateTime,
   formatMinutes,
 } from "../../lib/labels";
 import type { OrganizationStatus } from "../../api/types";
@@ -28,6 +28,9 @@ import { NewContractModal } from "./ContractsPage";
 import { NewAssetModal } from "./AssetsPage";
 
 export function OrganizationDetailPage() {
+  const { user } = useAuth();
+  const canManage = user?.role === "manager" || user?.role === "admin";
+  const canEdit = canManage || user?.role === "dispatcher";
   const { organizationId } = useParams();
   const id = Number(organizationId);
   const qc = useQueryClient();
@@ -122,7 +125,7 @@ export function OrganizationDetailPage() {
           {ORGANIZATION_STATUS_LABELS[org.status]}
         </span>
         <div className="spacer" />
-        {!editing && (
+        {canEdit && !editing && (
           <button className="btn btn-ghost" onClick={() => setEditing(true)}>
             Редактировать
           </button>
@@ -191,7 +194,7 @@ export function OrganizationDetailPage() {
           <h2>Домены почты для автопривязки</h2>
         </div>
         <p className="muted" style={{ marginTop: -6, fontSize: 12.5 }}>
-          Письма с этих доменов автоматически привязываются к организации (раздел 2.3 ТЗ); контакт создаётся неподтверждённым.
+          Письма с этих доменов автоматически привязываются к организации; контакт создаётся неподтверждённым.
         </p>
         <div className="tag-row" style={{ marginBottom: 10 }}>
           {org.email_domains.length === 0 && <span className="muted">Доменов не зарегистрировано</span>}
@@ -202,6 +205,7 @@ export function OrganizationDetailPage() {
                 className="icon-btn"
                 style={{ width: 16, height: 16 }}
                 title="Удалить домен"
+                disabled={!canEdit || removeDomainMutation.isPending}
                 onClick={() => removeDomainMutation.mutate(d.id)}
               >
                 ×
@@ -215,10 +219,12 @@ export function OrganizationDetailPage() {
             type="text"
             placeholder="example.ru"
             style={{ width: 220 }}
+            disabled={!canEdit}
+            aria-label="Новый домен почты"
             value={newDomain}
             onChange={(e) => setNewDomain(e.target.value)}
           />
-          <button className="btn btn-ghost" disabled={!newDomain.trim() || addDomainMutation.isPending} onClick={() => addDomainMutation.mutate()}>
+          <button className="btn btn-ghost" disabled={!canEdit || !newDomain.trim() || addDomainMutation.isPending} onClick={() => addDomainMutation.mutate()}>
             Добавить домен
           </button>
         </div>
@@ -246,9 +252,9 @@ export function OrganizationDetailPage() {
         <div className="panel-head">
           <h2>Контакты</h2>
           <div className="spacer" />
-          <button className="btn btn-ghost" onClick={() => setShowContactModal(true)}>
+          {canEdit && <button className="btn btn-ghost" onClick={() => setShowContactModal(true)}>
             Добавить контакт
-          </button>
+          </button>}
         </div>
         {(contactsQuery.data ?? []).length === 0 && <p className="muted">Контактов пока нет</p>}
         {(contactsQuery.data ?? []).length > 0 && (
@@ -277,9 +283,9 @@ export function OrganizationDetailPage() {
         <div className="panel-head">
           <h2>Договоры</h2>
           <div className="spacer" />
-          <button className="btn btn-ghost" onClick={() => setShowContractModal(true)}>
+          {canManage && <button className="btn btn-ghost" onClick={() => setShowContractModal(true)}>
             Добавить договор
-          </button>
+          </button>}
         </div>
         {(contractsQuery.data ?? []).length === 0 && <p className="muted">Договоров пока нет</p>}
         {(contractsQuery.data ?? []).length > 0 && (
@@ -313,9 +319,9 @@ export function OrganizationDetailPage() {
         <div className="panel-head">
           <h2>Активы</h2>
           <div className="spacer" />
-          <button className="btn btn-ghost" onClick={() => setShowAssetModal(true)}>
+          {canEdit && <button className="btn btn-ghost" onClick={() => setShowAssetModal(true)}>
             Добавить актив
-          </button>
+          </button>}
         </div>
         {(assetsQuery.data ?? []).length === 0 && <p className="muted">Активов пока нет</p>}
         {(assetsQuery.data ?? []).length > 0 && (

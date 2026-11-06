@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { updateTicket } from "../api/endpoints";
-import { PriorityTag, SlaTag } from "../components/ui";
+import { ErrorBanner, PriorityTag, SlaTag } from "../components/ui";
 import { STATUS_LABELS, STATUS_TRANSITIONS } from "../lib/labels";
 import type { Organization, Ticket, TicketStatus, User } from "../api/types";
 
@@ -80,6 +80,8 @@ export function KanbanBoard({
   const draggedTicket = dragTicketId != null ? tickets.find((t) => t.id === dragTicketId) : undefined;
 
   return (
+    <>
+    {moveMutation.isError && <ErrorBanner message={moveMutation.error.message} />}
     <div className="kanban-board">
       {BOARD_COLUMNS.map((column) => {
         const columnTickets = byColumn.get(column) ?? [];
@@ -145,5 +147,6 @@ export function KanbanBoard({
         );
       })}
     </div>
+    </>
   );
 }

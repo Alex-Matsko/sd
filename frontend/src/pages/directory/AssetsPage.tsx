@@ -1,3 +1,4 @@
+import { useAuth } from "../../auth/AuthContext";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createAsset, listAssets, listOrganizations } from "../../api/endpoints";
@@ -6,6 +7,9 @@ import { ASSET_TYPE_LABELS } from "../../lib/labels";
 import type { AssetType } from "../../api/types";
 
 export function AssetsPage() {
+  const { user } = useAuth();
+  const canManage = user?.role === "manager" || user?.role === "admin";
+  const canEdit = canManage || user?.role === "dispatcher";
   const qc = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const orgsQuery = useQuery({ queryKey: ["organizations"], queryFn: listOrganizations });
@@ -24,9 +28,9 @@ export function AssetsPage() {
           Активы
         </h1>
         <div className="spacer" />
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+        {canEdit && <button className="btn btn-primary" onClick={() => setShowModal(true)}>
           Добавить актив
-        </button>
+        </button>}
       </div>
 
       {assets.length === 0 && <EmptyState text="Активов пока нет" />}

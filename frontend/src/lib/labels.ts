@@ -47,10 +47,10 @@ export const CHANNEL_LABELS: Record<Channel, string> = {
 };
 
 export const PRIORITY_LABELS: Record<Priority, string> = {
-  P1: "P1 — critical",
-  P2: "P2 — high",
-  P3: "P3 — medium",
-  P4: "P4 — low",
+  P1: "P1 — критический",
+  P2: "P2 — высокий",
+  P3: "P3 — средний",
+  P4: "P4 — низкий",
 };
 
 export const IMPACT_URGENCY_LABELS: Record<ImpactUrgencyLevel, string> = {
@@ -108,6 +108,10 @@ export const SLA_STATE_LABELS: Record<SlaTimerState, string> = {
 };
 
 export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
+  work_assigned: "Назначение в проект",
+  work_approval: "Согласование проекта",
+  work_updated: "Изменение проекта",
+  channel_error: "Ошибка фоновой обработки",
   ticket_assigned: "Назначена заявка",
   ticket_unassigned: "Новая заявка",
   customer_replied: "Ответ клиента",

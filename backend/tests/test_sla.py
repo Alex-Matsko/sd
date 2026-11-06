@@ -293,7 +293,7 @@ def test_escalation_notifies_telegram_when_engineer_linked(db: Session, contact:
     sent = []
     monkeypatch.setattr(
         "app.services.telegram_client.send_message",
-        lambda base_url, token, chat_id, text, **kw: sent.append((chat_id, text)),
+        lambda base_url, token, chat_id, text, **kw: sent.append((chat_id, text)) or {"message_id": len(sent)},
     )
     integration_settings.upsert(
         db, Channel.TELEGRAM, IntegrationSettingUpdate(is_enabled=True, config={}, secrets={"bot_token": "test-token"})
@@ -304,6 +304,8 @@ def test_escalation_notifies_telegram_when_engineer_linked(db: Session, contact:
     ticket = _make_ticket(db, contact)
     _assign(db, ticket, engineer_user)
     touched = sla.run_escalations(db, now=msk(2026, 7, 21, 10, 23))  # 76% - warning
+    from app.services import channel_queue
+    channel_queue.run_batch(db, "outbound")
     assert touched == 1
     assert sent == [("tg-engineer-1", sent[0][1])]
     assert "SLA" in sent[0][1] or "реак" in sent[0][1].lower()

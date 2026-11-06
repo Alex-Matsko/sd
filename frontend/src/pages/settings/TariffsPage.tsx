@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createTariff, listCalendars, listTariffs } from "../../api/endpoints";
 import { EmptyState, ErrorBanner, Loading } from "../../components/ui";
 import { PRIORITY_LABELS } from "../../lib/labels";

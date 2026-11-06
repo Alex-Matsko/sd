@@ -1,15 +1,24 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/+$/, "");
 
 let accessToken: string | null = localStorage.getItem("sd_access_token");
 let refreshToken: string | null = localStorage.getItem("sd_refresh_token");
 
+let sessionGeneration = 0;
+
 export function setTokens(access: string | null, refresh: string | null) {
+  sessionGeneration += 1;
+  refreshPromise = null;
+  storeTokens(access, refresh);
+}
+
+function storeTokens(access: string | null, refresh: string | null) {
   accessToken = access;
   refreshToken = refresh;
   if (access) localStorage.setItem("sd_access_token", access);
   else localStorage.removeItem("sd_access_token");
   if (refresh) localStorage.setItem("sd_refresh_token", refresh);
   else localStorage.removeItem("sd_refresh_token");
+  if (!access && !refresh) window.dispatchEvent(new Event("sd:session-ended"));
 }
 
 export function getAccessToken() {
@@ -33,7 +42,8 @@ let refreshPromise: Promise<boolean> | null = null;
 async function tryRefresh(): Promise<boolean> {
   if (!refreshToken) return false;
   if (!refreshPromise) {
-    refreshPromise = fetch(`${API_BASE_URL}/auth/refresh`, {
+    const generation = sessionGeneration;
+    const request: Promise<boolean> = fetch(`${API_BASE_URL}/auth/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: refreshToken }),
@@ -41,13 +51,15 @@ async function tryRefresh(): Promise<boolean> {
       .then(async (res) => {
         if (!res.ok) return false;
         const data = await res.json();
-        setTokens(data.access_token, data.refresh_token);
+        if (generation !== sessionGeneration) return false;
+        storeTokens(data.access_token, data.refresh_token);
         return true;
       })
       .catch(() => false)
       .finally(() => {
-        refreshPromise = null;
+        if (refreshPromise === request) refreshPromise = null;
       });
+    refreshPromise = request;
   }
   return refreshPromise;
 }
@@ -71,14 +83,17 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}, 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
+  const generation = sessionGeneration;
   const res = await fetch(url.toString(), {
     method: options.method ?? "GET",
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
 
-  if (res.status === 401 && retry) {
-    const refreshed = await tryRefresh();
+  if (res.status === 401) {
+    if (generation !== sessionGeneration) throw new ApiError(401, "Сессия изменена");
+    const refreshed = retry && await tryRefresh();
+    if (generation !== sessionGeneration) throw new ApiError(401, "Сессия изменена");
     if (refreshed) return apiRequest<T>(path, options, false);
     setTokens(null, null);
     throw new ApiError(401, "Сессия истекла, войдите снова");
@@ -106,10 +121,13 @@ async function authorizedFetch(path: string, init: RequestInit, retry = true): P
   const headers = new Headers(init.headers);
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
 
+  const generation = sessionGeneration;
   const res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
 
-  if (res.status === 401 && retry) {
-    const refreshed = await tryRefresh();
+  if (res.status === 401) {
+    if (generation !== sessionGeneration) throw new ApiError(401, "Сессия изменена");
+    const refreshed = retry && await tryRefresh();
+    if (generation !== sessionGeneration) throw new ApiError(401, "Сессия изменена");
     if (refreshed) return authorizedFetch(path, init, false);
     setTokens(null, null);
     throw new ApiError(401, "Сессия истекла, войдите снова");
@@ -174,4 +192,9 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+export async function apiForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await authorizedFetch(path, { method: "POST", body: form });
+  return res.json();
 }

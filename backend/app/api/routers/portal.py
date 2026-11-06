@@ -7,7 +7,8 @@ from datetime import date, datetime, timezone
 import jwt
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
+from uuid import UUID
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, or_, select
@@ -339,6 +340,32 @@ def reply_to_my_ticket(
         author_contact=contact,
     )
     return PortalMessageRead(id=message.id, body=message.body, is_from_support=False, created_at=message.created_at)
+
+
+@router.post("/tickets/{ticket_id}/messages/send", response_model=PortalMessageRead, status_code=201)
+async def send_message_with_files(
+    ticket_id: int, body: str = Form(""), request_id: UUID | None = Form(None),
+    files: list[UploadFile] = File(default=[]), contact: Contact = Depends(get_current_contact),
+    db: Session = Depends(get_db),
+):
+    ticket = portal.get_visible_ticket(db, contact, ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+    try:
+        uploads = await attachments_service.read_uploads(files)
+        if not body.strip() and not uploads:
+            raise HTTPException(status_code=422, detail="Введите сообщение или приложите файл")
+        message = messages_service.add_message(
+            db, ticket, MessageCreate(direction=MessageDirection.INBOUND, body=body.strip() or "Файлы во вложении",
+                                      channel=Channel.PORTAL, request_id=request_id),
+            author_contact=contact, attachments=uploads,
+        )
+    except messages_service.RequestConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except attachments_service.AttachmentTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
+    return PortalMessageRead(id=message.id, body=message.body, is_from_support=False, created_at=message.created_at,
+                             attachments=[PortalAttachmentRead(id=a.id, filename=a.filename, size_bytes=a.size_bytes) for a in message.attachments])
 
 
 @router.post(

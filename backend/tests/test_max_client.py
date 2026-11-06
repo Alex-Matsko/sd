@@ -127,3 +127,34 @@ def test_get_updates_sends_marker_and_parses_response(monkeypatch):
     updates, marker = max_client.get_updates("https://platform-api2.max.ru", "test-token", marker=5)
     assert len(updates) == 1
     assert marker == 6
+
+
+def test_file_upload_uses_signed_url_without_forwarding_bot_token(monkeypatch):
+    captured = []
+    real_client = httpx.Client
+    def handler(request):
+        captured.append(request)
+        if request.url.path == "/uploads":
+            assert request.url.params["type"] == "file"
+            assert request.headers["Authorization"] == "private-bot-token"
+            return httpx.Response(200, json={"url": "https://upload.example.org/file?sig=signed"})
+        assert request.url.host == "upload.example.org"
+        assert "Authorization" not in request.headers
+        assert b"attachment bytes" in request.content
+        return httpx.Response(200, json={"fileId": "file-1", "token": "file-token"})
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
+    assert max_client.upload_file("https://platform-api2.max.ru", "private-bot-token", "test.txt", b"attachment bytes", "text/plain") == "file-token"
+    assert len(captured) == 2
+
+
+def test_send_file_and_buttons_preserves_both_attachments(monkeypatch):
+    real_client = httpx.Client
+    def handler(request):
+        data = json.loads(request.content)
+        assert data["attachments"][0] == {"type": "file", "payload": {"token": "file-token"}}
+        assert data["attachments"][1]["type"] == "inline_keyboard"
+        return httpx.Response(200, json={"message": {"body": {"mid": "sent-file"}}})
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
+    max_client.send_message("https://platform-api2.max.ru", "test", "42", "file",
+                           buttons=[[{"type": "callback", "text": "ok", "payload": "ok"}]],
+                           attachments=[{"type": "file", "payload": {"token": "file-token"}}])

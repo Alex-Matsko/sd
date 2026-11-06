@@ -17,6 +17,8 @@ from app.api.routers import (
     monitoring,
     perimetr,
     notifications,
+    operations,
+    work,
     organizations,
     portal,
     priority_matrix,
@@ -61,6 +63,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count", "Content-Disposition", "Retry-After"],
 )
 
 
@@ -83,6 +86,8 @@ async def security_headers(request, call_next):
     response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
     return response
 
+app.include_router(operations.router)
+app.include_router(work.router)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(organizations.router)

@@ -1,3 +1,5 @@
+import { useAuth } from "../../auth/AuthContext";
+import { localDate } from "../../lib/dates";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContract, listContracts, listOrganizations, listTariffs } from "../../api/endpoints";
@@ -5,6 +7,9 @@ import { EmptyState, ErrorBanner, Loading } from "../../components/ui";
 import { CONTRACT_STATUS_LABELS } from "../../lib/labels";
 
 export function ContractsPage() {
+  const { user } = useAuth();
+  const canManage = user?.role === "manager" || user?.role === "admin";
+  const canEdit = canManage;
   const qc = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const orgsQuery = useQuery({ queryKey: ["organizations"], queryFn: listOrganizations });
@@ -25,9 +30,9 @@ export function ContractsPage() {
           Договоры
         </h1>
         <div className="spacer" />
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+        {canEdit && <button className="btn btn-primary" onClick={() => setShowModal(true)}>
           Добавить договор
-        </button>
+        </button>}
       </div>
 
       {contracts.length === 0 && <EmptyState text="Договоров пока нет" />}
@@ -105,7 +110,7 @@ export function NewContractModal({
         organization_id: organizationId,
         tariff_id: tariffId,
         number,
-        start_date: new Date().toISOString().slice(0, 10),
+        start_date: localDate(),
         included_hours_per_month: hours,
         overage_rate_per_hour: rate,
       });

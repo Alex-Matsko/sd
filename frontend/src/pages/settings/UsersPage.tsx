@@ -4,7 +4,7 @@ import { createUser, listUsers, updateUser } from "../../api/endpoints";
 import { useAuth } from "../../auth/AuthContext";
 import { EmptyState, ErrorBanner, Loading } from "../../components/ui";
 import { USER_ROLE_LABELS } from "../../lib/labels";
-import type { User, UserRole } from "../../api/types";
+import type { UserRole } from "../../api/types";
 
 const ROLES: UserRole[] = ["engineer", "dispatcher", "manager", "admin"];
 

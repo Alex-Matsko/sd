@@ -1,3 +1,8 @@
+import { ticketProjects } from "../api/work";
+import { PROJECT_LABELS } from "../lib/work";
+import { useDraftRequestId } from "../lib/useDraftRequestId";
+import { DeliveryStatus } from "../components/DeliveryStatus";
+import { localDate } from "../lib/dates";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,7 +26,6 @@ import {
   listTimeEntries,
   listUsers,
   updateTicket,
-  uploadAttachment,
 } from "../api/endpoints";
 import { formatCallDuration } from "./CallsPage";
 import { TicketTimer } from "../components/TicketTimer";
@@ -31,12 +35,10 @@ import { ErrorBanner, Loading, PriorityTag, SlaTimerBadge, StatusTag, ChannelTag
 import {
   CHANNEL_LABELS,
   MESSAGE_DIRECTION_LABELS,
-  STATUS_LABELS,
-  STATUS_TRANSITIONS,
   formatDateTime,
   formatMinutes,
 } from "../lib/labels";
-import type { Message, MessageDirection, TicketStatus } from "../api/types";
+import type { Attachment, Message, MessageDirection } from "../api/types";
 
 function truncate(text: string, max: number): string {
   const collapsed = text.replace(/\s+/g, " ").trim();
@@ -58,6 +60,7 @@ export function TicketDetailPage() {
   const [replyDirection, setReplyDirection] = useState<MessageDirection>("outbound");
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+
   const [timeMinutes, setTimeMinutes] = useState(30);
   const [timeComment, setTimeComment] = useState("");
 
@@ -81,6 +84,7 @@ export function TicketDetailPage() {
     queryFn: () => listRelatedTickets(id),
     enabled: Number.isFinite(id),
   });
+  const projectsQuery = useQuery({queryKey: ["ticket", id, "projects"], queryFn: () => ticketProjects(id), enabled: Number.isFinite(id)});
   const callsQuery = useQuery({
     queryKey: ["ticket", id, "calls"],
     queryFn: () => listTicketCalls(id),
@@ -114,20 +118,16 @@ export function TicketDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ticket", id] }),
   });
 
+  const downloadMutation = useMutation({
+    mutationFn: (attachment: Attachment) => downloadAttachment(id, attachment),
+  });
+
+  const requestId = useDraftRequestId(JSON.stringify([replyBody, replyDirection, replyTo?.id,
+    pendingFiles.map((file) => [file.name, file.size, file.lastModified])]));
   const messageMutation = useMutation({
-    mutationFn: async () => {
-      const message = await createMessage(id, {
-        direction: replyDirection,
-        body: replyBody.trim(),
-        reply_to_message_id: replyTo?.id ?? null,
-      });
-      // Attachments hang off a message, so the file can only go up once the
-      // message exists - hence upload-after-create rather than one request.
-      for (const file of pendingFiles) {
-        await uploadAttachment(id, message.id, file);
-      }
-      return message;
-    },
+    mutationFn: () => createMessage(id, {
+      direction: replyDirection, body: replyBody.trim(), reply_to_message_id: replyTo?.id ?? null, request_id: requestId,
+    }, pendingFiles),
     onSuccess: () => {
       setReplyBody("");
       setReplyTo(null);
@@ -149,7 +149,7 @@ export function TicketDetailPage() {
   const timeMutation = useMutation({
     mutationFn: () =>
       createTimeEntry(id, {
-        entry_date: new Date().toISOString().slice(0, 10),
+        entry_date: localDate(),
         duration_minutes: timeMinutes,
         comment: timeComment.trim() || null,
       }),
@@ -166,7 +166,6 @@ export function TicketDetailPage() {
   const org = (orgsQuery.data ?? []).find((o) => o.id === ticket.organization_id);
   const canChangeClient = user?.role === "dispatcher" || user?.role === "manager" || user?.role === "admin";
   const assignee = (usersQuery.data ?? []).find((u) => u.id === ticket.assigned_engineer_id);
-  const availableTransitions = STATUS_TRANSITIONS[ticket.status] ?? [];
 
   return (
     <div className="view ticket-detail">
@@ -254,10 +253,11 @@ export function TicketDetailPage() {
                       </div>
                     )}
                     <div className="message-body">{m.body}</div>
+                    {m.delivery && <DeliveryStatus ticketId={id} messageId={m.id} delivery={m.delivery} />}
                     {m.attachments.length > 0 && (
                       <div className="message-attachments">
                         {m.attachments.map((a) => (
-                          <button key={a.id} className="attachment-chip" onClick={() => downloadAttachment(id, a)}>
+                          <button key={a.id} className="attachment-chip" onClick={() => downloadMutation.mutate(a)}>
                             <span className="attachment-name">{a.filename}</span>
                             <span className="muted">{formatFileSize(a.size_bytes)}</span>
                           </button>
@@ -308,7 +308,7 @@ export function TicketDetailPage() {
                   ))}
                 </select>
               )}
-              <textarea rows={3} value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Введите текст сообщения…" />
+              <textarea aria-label="Текст сообщения" disabled={messageMutation.isPending} rows={3} value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Введите текст сообщения…" />
               {pendingFiles.length > 0 && (
                 <div className="message-attachments">
                   {pendingFiles.map((file, index) => (
@@ -325,6 +325,7 @@ export function TicketDetailPage() {
                   ))}
                 </div>
               )}
+              {downloadMutation.isError && <ErrorBanner message={downloadMutation.error.message} />}
               {messageMutation.isError && <ErrorBanner message={(messageMutation.error as Error).message} />}
               <div className="modal-foot" style={{ padding: 0, borderTop: "none" }}>
                 <label className="btn btn-ghost" style={{ cursor: "pointer" }}>
@@ -347,7 +348,7 @@ export function TicketDetailPage() {
                 <div className="spacer" />
                 <button
                   className="btn btn-primary"
-                  disabled={!replyBody.trim() || messageMutation.isPending}
+                  disabled={(!replyBody.trim() && pendingFiles.length === 0) || messageMutation.isPending}
                   onClick={() => messageMutation.mutate()}
                 >
                   Отправить
@@ -502,6 +503,8 @@ export function TicketDetailPage() {
               </dl>
             </div>
           )}
+
+          {(projectsQuery.data ?? []).length > 0 && <div className="panel"><div className="panel-head"><h2>Проекты</h2></div><div className="list">{projectsQuery.data?.map(p => <Link key={p.id} className="related-ticket" to={`/projects/${p.id}`}><span className="mono">ПР-{p.id}</span><span className="subject">{p.title}</span><span className="muted">{PROJECT_LABELS[p.status]}</span></Link>)}</div></div>}
 
           {(relatedQuery.data ?? []).length > 0 && (
             <div className="panel">

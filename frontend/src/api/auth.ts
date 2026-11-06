@@ -1,7 +1,7 @@
 import { apiRequest, getRefreshToken, setTokens } from "./client";
 import type { TelegramLinkCode, TokenResponse, User } from "./types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/+$/, "");
 
 export async function login(email: string, password: string) {
   const body = new URLSearchParams();
@@ -32,6 +32,7 @@ export async function login(email: string, password: string) {
 
 export async function logout() {
   const refreshToken = getRefreshToken();
+  setTokens(null, null);
   if (refreshToken) {
     try {
       await fetch(`${API_BASE_URL}/auth/logout`, {
@@ -43,7 +44,6 @@ export async function logout() {
       // best-effort revoke; ignore network failures on logout
     }
   }
-  setTokens(null, null);
 }
 
 export async function fetchCurrentUser() {

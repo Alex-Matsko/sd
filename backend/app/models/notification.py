@@ -21,6 +21,7 @@ class Notification(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id", ondelete="CASCADE"))
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("work_projects.id", ondelete="CASCADE"), index=True)
     type: Mapped[NotificationType] = mapped_column(
         SAEnum(NotificationType, native_enum=False, length=40, validate_strings=True)
     )

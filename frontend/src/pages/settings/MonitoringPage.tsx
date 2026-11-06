@@ -14,7 +14,7 @@ import { formatDateTime } from "../../lib/labels";
 
 // Полный адрес: при относительном адресе API (/api) вебхук для внешней
 // системы иначе показался бы без домена.
-const API_BASE = new URL(import.meta.env.VITE_API_BASE_URL ?? "", window.location.origin).href.replace(/\/$/, "");
+const API_BASE = new URL(import.meta.env.VITE_API_BASE_URL ?? "/api", window.location.origin).href.replace(/\/$/, "");
 
 /** Подписи к полям входящего JSON. Ключ — то, что нужно SD; значение —
  *  как поле называется в присланном событии. */

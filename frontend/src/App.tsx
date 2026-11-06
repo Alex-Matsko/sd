@@ -1,8 +1,11 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { Layout } from "./layout/Layout";
 import { Loading } from "./components/ui";
 import { LoginPage } from "./pages/LoginPage";
+const ProjectsPage = lazy(() => import("./pages/projects/ProjectsPage").then(m => ({default: m.ProjectsPage})));
+const ProjectDetailPage = lazy(() => import("./pages/projects/ProjectDetailPage").then(m => ({default: m.ProjectDetailPage})));
 import { DashboardPage } from "./pages/DashboardPage";
 import { TicketsPage } from "./pages/TicketsPage";
 import { NewTicketPage } from "./pages/NewTicketPage";
@@ -26,18 +29,28 @@ import { AutomationRulesPage } from "./pages/settings/AutomationRulesPage";
 import { UsersPage } from "./pages/settings/UsersPage";
 import { ResponseTemplatesPage } from "./pages/settings/ResponseTemplatesPage";
 import { TicketSchedulesPage } from "./pages/settings/TicketSchedulesPage";
+import { OperationsPage } from "./pages/settings/OperationsPage";
 import { MonitoringPage } from "./pages/settings/MonitoringPage";
+
+function RequireManager({ children }: { children: JSX.Element }) {
+  const { user } = useAuth();
+  if (user?.role !== "manager" && user?.role !== "admin") {
+    return <div className="view"><h1 className="view-title">Недостаточно прав</h1><p className="muted">Этот раздел доступен руководителю и администратору.</p></div>;
+  }
+  return children;
+}
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { user, isLoading } = useAuth();
+  const location = useLocation();
   if (isLoading) return <Loading />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" state={{ from: location.pathname + location.search }} replace />;
   return children;
 }
 
 export default function App() {
   return (
-    <Routes>
+    <Suspense fallback={<Loading />}><Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route
         path="/"
@@ -49,11 +62,13 @@ export default function App() {
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="projects" element={<ProjectsPage />} />
+        <Route path="projects/:projectId" element={<ProjectDetailPage />} />
         <Route path="tickets" element={<TicketsPage />} />
         <Route path="tickets/new" element={<NewTicketPage />} />
         <Route path="tickets/:ticketId" element={<TicketDetailPage />} />
-        <Route path="reports" element={<ReportsPage />} />
-        <Route path="client-reports" element={<ClientReportsPage />} />
+        <Route path="reports" element={<RequireManager><ReportsPage /></RequireManager>} />
+        <Route path="client-reports" element={<RequireManager><ClientReportsPage /></RequireManager>} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="calls" element={<CallsPage />} />
         <Route path="directory/organizations" element={<OrganizationsPage />} />
@@ -61,19 +76,20 @@ export default function App() {
         <Route path="directory/contacts" element={<ContactsPage />} />
         <Route path="directory/contracts" element={<ContractsPage />} />
         <Route path="directory/assets" element={<AssetsPage />} />
-        <Route path="settings/priority" element={<PriorityMatrixPage />} />
-        <Route path="settings/tariffs" element={<TariffsPage />} />
-        <Route path="settings/calendars" element={<CalendarsPage />} />
-        <Route path="settings/categories" element={<CategoriesPage />} />
-        <Route path="settings/routing" element={<RoutingRulesPage />} />
-        <Route path="settings/channels" element={<ChannelsSettingsPage />} />
-        <Route path="settings/automation" element={<AutomationRulesPage />} />
-        <Route path="settings/users" element={<UsersPage />} />
-        <Route path="settings/templates" element={<ResponseTemplatesPage />} />
-        <Route path="settings/schedules" element={<TicketSchedulesPage />} />
-        <Route path="settings/monitoring" element={<MonitoringPage />} />
+        <Route path="settings/priority" element={<RequireManager><PriorityMatrixPage /></RequireManager>} />
+        <Route path="settings/tariffs" element={<RequireManager><TariffsPage /></RequireManager>} />
+        <Route path="settings/calendars" element={<RequireManager><CalendarsPage /></RequireManager>} />
+        <Route path="settings/categories" element={<RequireManager><CategoriesPage /></RequireManager>} />
+        <Route path="settings/routing" element={<RequireManager><RoutingRulesPage /></RequireManager>} />
+        <Route path="settings/channels" element={<RequireManager><ChannelsSettingsPage /></RequireManager>} />
+        <Route path="settings/automation" element={<RequireManager><AutomationRulesPage /></RequireManager>} />
+        <Route path="settings/users" element={<RequireManager><UsersPage /></RequireManager>} />
+        <Route path="settings/templates" element={<RequireManager><ResponseTemplatesPage /></RequireManager>} />
+        <Route path="settings/schedules" element={<RequireManager><TicketSchedulesPage /></RequireManager>} />
+        <Route path="settings/operations" element={<RequireManager><OperationsPage /></RequireManager>} />
+        <Route path="settings/monitoring" element={<RequireManager><MonitoringPage /></RequireManager>} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+    </Routes></Suspense>
   );
 }

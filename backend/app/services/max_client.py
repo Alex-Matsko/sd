@@ -61,6 +61,7 @@ def send_message(
     text: str,
     buttons: list[list[dict]] | None = None,
     reply_to_mid: str | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict:
     """POST /messages?chat_id=... - the recipient is a query parameter, not a
     body field (verified against a live bot: putting chat_id in the JSON body
@@ -73,8 +74,10 @@ def send_message(
     "object NewMessageLink" with no field list - docs/decisions.md records
     what was verified live; correcting it is a one-line change here."""
     payload: dict = {"text": text}
+    if attachments:
+        payload["attachments"] = list(attachments)
     if buttons:
-        payload["attachments"] = [{"type": "inline_keyboard", "payload": {"buttons": buttons}}]
+        payload.setdefault("attachments", []).append({"type": "inline_keyboard", "payload": {"buttons": buttons}})
     if reply_to_mid:
         payload["link"] = {"type": "reply", "mid": reply_to_mid}
     with httpx.Client(base_url=base_url, timeout=15, verify=VERIFY) as client:
@@ -95,3 +98,23 @@ def set_commands(base_url: str, token: str, commands: list[dict]) -> dict:
     if response.status_code not in (200, 201):
         raise MaxApiError(f"PATCH /me/commands -> {response.status_code}: {response.text[:500]}")
     return response.json()
+
+
+def upload_file(base_url: str, token: str, filename: str, content: bytes, mime_type: str) -> str:
+    with httpx.Client(base_url=base_url, timeout=60, verify=VERIFY) as client:
+        response = client.post("/uploads", params={"type": "file"}, headers=_headers(token))
+        if response.status_code not in (200, 201):
+            raise MaxApiError(f"POST /uploads -> {response.status_code}")
+        url = response.json().get("url")
+        if not url or not url.startswith(("https://", "http://")):
+            raise MaxApiError("Upload URL is missing")
+        # The signed upload URL is supplied by MAX. Do not forward the bot
+        # credential to a different host; multipart upload uses the signed URL.
+        uploaded = client.post(url, files={"data": (filename, content, mime_type)})
+        if uploaded.status_code not in (200, 201):
+            raise MaxApiError(f"Upload -> {uploaded.status_code}")
+        data = uploaded.json()
+        result = data.get("token")
+        if not result:
+            raise MaxApiError("Upload response has no file token")
+        return result

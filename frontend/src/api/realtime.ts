@@ -1,6 +1,6 @@
 import { getAccessToken } from "./client";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/+$/, "");
 
 export interface RealtimeNotification {
   user_id: number;

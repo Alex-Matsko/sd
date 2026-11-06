@@ -31,8 +31,12 @@ export type OrganizationStatus = "active" | "suspended" | "archived";
 export type SlaTimerState = "no_rule" | "ok" | "warning" | "breached" | "met" | "paused";
 
 export type NotificationType =
+  | "work_assigned"
+  | "work_approval"
+  | "work_updated"
   | "ticket_assigned"
   | "ticket_unassigned"
+  | "channel_error"
   | "customer_replied"
   | "sla_reaction_warning"
   | "sla_reaction_breach"
@@ -292,6 +296,7 @@ export interface AutomationRule {
 }
 
 export interface Notification {
+  project_id: number | null;
   id: number;
   ticket_id: number | null;
   type: NotificationType;
@@ -376,7 +381,17 @@ export interface Attachment {
   created_at: string;
 }
 
+export interface Delivery {
+  id: number;
+  state: string;
+  attempts: number;
+  last_error: string | null;
+  available_at: string;
+  completed_at: string | null;
+}
+
 export interface Message {
+  delivery: Delivery | null;
   id: number;
   ticket_id: number;
   direction: MessageDirection;

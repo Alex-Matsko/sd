@@ -34,7 +34,7 @@ const PRIORITY_CLASS: Record<Priority, string> = {
 };
 
 export function PriorityTag({ priority }: { priority: Priority }) {
-  return <span className={`priority-tag ${PRIORITY_CLASS[priority]}`}>{PRIORITY_LABELS[priority]}</span>;
+  return <span className={`priority-tag ${PRIORITY_CLASS[priority]}`} title={PRIORITY_LABELS[priority]} aria-label={PRIORITY_LABELS[priority]}>{priority}</span>;
 }
 
 const STATUS_CLASS: Record<TicketStatus, string> = {
@@ -114,7 +114,7 @@ export function EmptyState({ text }: { text: string }) {
 
 export function ErrorBanner({ message }: { message: string }) {
   return (
-    <div className="error-banner">
+    <div className="error-banner" role="alert">
       <IconAlertTriangle size={16} />
       <span>{message}</span>
     </div>
@@ -122,5 +122,5 @@ export function ErrorBanner({ message }: { message: string }) {
 }
 
 export function Loading() {
-  return <div className="loading">Загрузка…</div>;
+  return <div className="loading" role="status"><span className="loading-spinner" aria-hidden="true" />Загрузка…</div>;
 }

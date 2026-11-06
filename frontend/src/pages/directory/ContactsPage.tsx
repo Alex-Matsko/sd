@@ -1,3 +1,4 @@
+import { useAuth } from "../../auth/AuthContext";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,6 +14,9 @@ import { EmptyState, ErrorBanner, Loading } from "../../components/ui";
 import type { Contact } from "../../api/types";
 
 export function ContactsPage() {
+  const { user } = useAuth();
+  const canManage = user?.role === "manager" || user?.role === "admin";
+  const canEdit = canManage || user?.role === "dispatcher";
   const qc = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [portalContact, setPortalContact] = useState<Contact | null>(null);
@@ -33,9 +37,9 @@ export function ContactsPage() {
           Контакты
         </h1>
         <div className="spacer" />
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+        {canEdit && <button className="btn btn-primary" onClick={() => setShowModal(true)}>
           Добавить контакт
-        </button>
+        </button>}
       </div>
 
       {contacts.length === 0 && <EmptyState text="Контактов пока нет" />}
@@ -63,12 +67,12 @@ export function ContactsPage() {
                 {c.has_portal_access ? "доступ есть" : "нет доступа"}
               </span>
               <span style={{ display: "flex", gap: 10 }}>
-                <button className="btn-link" onClick={() => setPortalContact(c)}>
+                {canEdit && <button className="btn-link" onClick={() => setPortalContact(c)}>
                   Кабинет
-                </button>
-                <button className="btn-link" onClick={() => setMergingContact(c)}>
+                </button>}
+                {canEdit && <button className="btn-link" onClick={() => setMergingContact(c)}>
                   Объединить
-                </button>
+                </button>}
               </span>
             </div>
           ))}

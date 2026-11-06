@@ -1,3 +1,4 @@
+from app.services import channel_queue
 """Telegram channel tests, mirroring test_max_channel.py's coverage for the
 shared feature set (dialog gluing, ticket menu incl. revive/close, reply
 quoting, notifications) - see telegram_channel.py's module docstring for what
@@ -251,8 +252,11 @@ def test_try_send_outbound_with_reply_passes_parent_mid_and_stores_own_mid(db: S
     db.add(reply)
     db.commit()
 
+    channel_queue.run_batch(db, "outbound")
     _fake_send.clear()
     telegram_channel.try_send_outbound(db, ticket, reply)
+    channel_queue.run_batch(db, "outbound")
+    channel_queue.run_batch(db, "outbound")
     assert len(_fake_send) == 1
     assert _fake_send[0]["reply_to_message_id"] == 200
     db.refresh(reply)
@@ -302,9 +306,11 @@ def test_transition_status_notifies_client(db: Session, telegram_enabled, contac
     telegram_channel.handle_update(db, _text_update(user_id=20, chat_id=20, text="Проблема"))
     ticket = db.query(Ticket).filter(Ticket.contact_id == contact.id).first()
 
+    channel_queue.run_batch(db, "outbound")
     _fake_send.clear()
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
 
+    channel_queue.run_batch(db, "outbound")
     assert any("изменён: в работе" in s["text"] for s in _fake_send)
 
 
@@ -314,11 +320,13 @@ def test_notify_assignment_change_sends_engineer_name(db: Session, telegram_enab
     telegram_channel.handle_update(db, _text_update(user_id=21, chat_id=21, text="Проблема"))
     ticket = db.query(Ticket).filter(Ticket.contact_id == contact.id).first()
 
+    channel_queue.run_batch(db, "outbound")
     _fake_send.clear()
     from app.schemas.ticket import TicketUpdate
 
     tickets_service.update_ticket(db, ticket, TicketUpdate(assigned_engineer_id=engineer_user.id), actor=None)
 
+    channel_queue.run_batch(db, "outbound")
     assert any(engineer_user.full_name in s["text"] for s in _fake_send)
 
 
@@ -331,8 +339,9 @@ def test_request_csat_sends_rating_buttons(db: Session, telegram_enabled, contac
 
     telegram_channel.request_csat(db, ticket)
     db.refresh(ticket)
+    channel_queue.run_batch(db, "outbound")
     assert ticket.csat_requested_at is not None
-    assert any(s["buttons"] for s in _fake_send)
+    assert any(s["buttons"] and any(button.get("payload", "").startswith("csat:") for row in s["buttons"] for button in row) for s in _fake_send)
 
 
 def test_csat_callback_records_rating_once(db: Session, telegram_enabled, contact: Contact, _fake_send):
@@ -392,6 +401,7 @@ def test_try_send_outbound_without_known_chat_does_not_raise(db: Session, telegr
     db.add(msg)
     db.commit()
     telegram_channel.try_send_outbound(db, ticket, msg)  # no ChannelConversationState exists - must not raise
+    channel_queue.run_batch(db, "outbound")
 
 
 # --- cross-channel identity matching ("связать телефон") -------------------------------------------------------

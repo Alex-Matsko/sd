@@ -95,6 +95,10 @@ class OrganizationStatus(str, Enum):
 
 
 class NotificationType(str, Enum):
+    WORK_ASSIGNED = "work_assigned"
+    WORK_APPROVAL = "work_approval"
+    WORK_UPDATED = "work_updated"
+    CHANNEL_ERROR = "channel_error"
     # ТЗ 4.2 требует уведомлять исполнителя об ответе клиента, ТЗ р. 8 — о
     # работе, попавшей к инженеру. Раньше существовали только SLA-события,
     # то есть инженер узнавал о заявке лишь когда по ней уже горел срок.

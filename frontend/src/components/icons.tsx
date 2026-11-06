@@ -8,6 +8,7 @@ interface IconProps {
 function base(paths: ReactNode, { size = 18, className }: IconProps = {}) {
   return (
     <svg
+      aria-hidden="true"
       width={size}
       height={size}
       viewBox="0 0 24 24"
@@ -171,3 +172,9 @@ export const IconBell = (p: IconProps) =>
     </>,
     p
   );
+
+export const IconProjects = (p: IconProps) => base(<><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16M15 4v16M5.5 8h1M11.5 8h1M17.5 8h1M5.5 12h1M11.5 12h1"/></>, p);
+export const IconMenu = (p: IconProps) => base(<path d="M4 6h16M4 12h16M4 18h16"/>, p);
+export const IconEye = (p: IconProps) => base(<><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></>, p);
+export const IconEyeOff = (p: IconProps) => base(<><path d="m3 3 18 18M10.6 5.1C11 5 11.5 5 12 5c6.5 0 10 7 10 7a20 20 0 0 1-3 3.8M6.2 6.2A22 22 0 0 0 2 12s3.5 7 10 7a12 12 0 0 0 5.8-1.7M9.9 9.9a3 3 0 0 0 4.2 4.2"/></>, p);
+export const IconArrowRight = (p: IconProps) => base(<path d="M4 12h16m-6-6 6 6-6 6"/>, p);

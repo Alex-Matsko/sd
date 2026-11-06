@@ -17,7 +17,9 @@ from email.message import EmailMessage as StdEmailMessage
 from email.parser import BytesParser
 from email.utils import make_msgid, parseaddr
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from app.config import settings
 
 from app.core.enums import (
     Channel,
@@ -38,6 +40,8 @@ from app.services import integration_settings
 from app.services import messages as messages_service
 from app.services import tickets as tickets_service
 from app.services.unknown_queue import UNKNOWN_ORGANIZATION_NAME, get_or_create_unknown_organization
+
+MAX_RAW_EMAIL_BYTES = settings.inbound_email_limit_mb * 1024 * 1024
 
 logger = logging.getLogger("app.email_channel")
 
@@ -239,6 +243,13 @@ def find_or_create_ticket(db: Session, contact: Contact, parsed: ParsedEmail) ->
 def ingest_email(db: Session, raw: bytes) -> IngestResult:
     parsed = parse_message(raw)
     contact, contact_created = resolve_sender(db, parsed)
+    if parsed.message_id:
+        db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"email:{contact.id}:{parsed.message_id}"))))
+        previous = db.query(Message).filter(Message.email_message_id == parsed.message_id,
+                                             Message.author_contact_id == contact.id,
+                                             Message.direction == MessageDirection.INBOUND).first()
+        if previous is not None:
+            return IngestResult(previous.ticket, previous, False, False, False)
     ticket, ticket_created, ambiguous = find_or_create_ticket(db, contact, parsed)
 
     message = messages_service.add_message(
@@ -296,19 +307,23 @@ def send_plain_email(config: EmailConfig, to_address: str, subject: str, body: s
         smtp.send_message(msg)
 
 
-def send_outbound_email(config: EmailConfig, to_address: str, ticket: Ticket, body: str, in_reply_to: str | None) -> str:
+def send_outbound_email(config: EmailConfig, to_address: str, ticket: Ticket, body: str, in_reply_to: str | None,
+                        *, attachments=(), message_id: str | None = None) -> str:
     msg = StdEmailMessage()
     msg["From"] = f"{config.from_display_name} <{config.from_address}>"
     msg["To"] = to_address
     tag = f"[#{ticket.display_number}]"
     subject = ticket.subject if tag in ticket.subject else f"{ticket.subject} {tag}"
     msg["Subject"] = f"Re: {subject}" if in_reply_to else subject
-    message_id = make_msgid(domain=config.from_address.rsplit("@", 1)[-1])
+    message_id = message_id or make_msgid(domain=config.from_address.rsplit("@", 1)[-1])
     msg["Message-ID"] = message_id
     if in_reply_to:
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = in_reply_to
     msg.set_content(body)
+    for filename, content, mime_type in attachments:
+        maintype, _, subtype = (mime_type or "application/octet-stream").partition("/")
+        msg.add_attachment(content, maintype=maintype or "application", subtype=subtype or "octet-stream", filename=filename)
 
     with smtplib.SMTP(config.smtp_host, config.smtp_port, timeout=30) as smtp:
         if config.smtp_use_tls:
@@ -321,31 +336,58 @@ def send_outbound_email(config: EmailConfig, to_address: str, ticket: Ticket, bo
 
 
 def poll_inbox(db: Session, config: EmailConfig) -> int:
-    """One IMAP poll: fetches unseen mail and ingests each. A message is
-    considered processed once fetched (RFC822 fetch marks \\Seen), even if
-    ingestion then fails - see docs/decisions.md for why v1 accepts "lose a
-    malformed message" over "retry it forever and risk partial duplicates"."""
+    """Capture by mailbox UID before setting Seen; processing happens from the journal."""
+    import hashlib
+    from app.services.channel_queue import capture
     imap_cls = imaplib.IMAP4_SSL if config.imap_use_ssl else imaplib.IMAP4
-    imap = imap_cls(config.imap_host, config.imap_port)
+    imap = imap_cls(config.imap_host, config.imap_port, timeout=30)
     try:
         imap.login(config.imap_username, config.imap_password)
-        imap.select(config.imap_folder)
-        status, data = imap.search(None, "UNSEEN")
+        status, _ = imap.select(config.imap_folder)
         if status != "OK":
-            return 0
-        ids = data[0].split()
-        processed = 0
-        for msg_num in ids:
+            raise RuntimeError("IMAP folder could not be selected")
+        _, validity = imap.response("UIDVALIDITY")
+        if not validity or not validity[0]:
+            raise RuntimeError("IMAP UIDVALIDITY is unavailable")
+        validity = validity[0].decode() if isinstance(validity[0], bytes) else str(validity[0])
+        account = hashlib.sha256(f"{config.imap_host}:{config.imap_port}:{config.imap_username}:{config.imap_folder}".encode()).hexdigest()[:24]
+        status, data = imap.uid("search", None, "UNSEEN")
+        if status != "OK":
+            raise RuntimeError("IMAP search failed")
+        captured = 0
+        errors = 0
+        for uid in (data[0] or b"").split()[:20]:
             try:
-                fetch_status, msg_data = imap.fetch(msg_num, "(RFC822)")
-                if fetch_status != "OK" or not msg_data or msg_data[0] is None:
+                from app.models.channel_job import ChannelJob
+                event_key = f"email:{account}:{validity}:{uid.decode()}"
+                existing = db.query(ChannelJob).filter_by(event_key=event_key).first()
+                if existing and existing.payload.get("_source_oversized") and existing.raw_body is None:
+                    if existing.state == "discarded":
+                        imap.uid("store", uid, "+FLAGS", "(\\Seen)")
                     continue
-                raw = msg_data[0][1]
-                ingest_email(db, raw)
-                processed += 1
+                fetched, parts = imap.uid("fetch", uid, f"(BODY.PEEK[]<0.{MAX_RAW_EMAIL_BYTES + 1}>)")
+                raw = next((item[1] for item in parts if isinstance(item, tuple)), None) if parts else None
+                if fetched != "OK" or raw is None:
+                    raise RuntimeError("IMAP fetch failed")
+                sender = parseaddr(str(BytesParser(policy=policy.default).parsebytes(raw, headersonly=True).get("From", "")))[1].lower()
+                stream = hashlib.sha256(sender.encode()).hexdigest()[:32]
+                oversized = len(raw) > MAX_RAW_EMAIL_BYTES
+                capture(db, "email", event_key, f"email:{account}:{stream}",
+                        {"uid": uid.decode(), "uidvalidity": validity, "_account": account, "_source_oversized": oversized, "_sd_summary": f"От {sender}: {str(BytesParser(policy=policy.default).parsebytes(raw, headersonly=True).get('Subject', 'Без темы'))[:180]}"}, None if oversized else raw)
+                if oversized:
+                    captured += 1
+                    continue
+                status, _ = imap.uid("store", uid, "+FLAGS", "(\\Seen)")
+                if status != "OK":
+                    raise RuntimeError("IMAP acknowledgement failed")
+                captured += 1
             except Exception:
-                logger.exception("Не удалось обработать входящее письмо (IMAP id=%s)", msg_num)
-        return processed
+                db.rollback()
+                errors += 1
+                logger.exception("Не удалось сохранить входящее письмо (UID=%s)", uid)
+        if errors:
+            raise RuntimeError(f"IMAP capture failed for {errors} message(s)")
+        return captured
     finally:
         try:
             imap.close()
@@ -355,30 +397,12 @@ def poll_inbox(db: Session, config: EmailConfig) -> int:
 
 
 def try_send_outbound(db: Session, ticket: Ticket, message: Message, to_address: str | None) -> None:
-    """Best-effort SMTP send for an engineer's reply on an email-channel ticket.
-    Failures are logged, not raised - the reply still exists in the system and
-    is visible to the engineer even if delivery to the client failed."""
-    if not to_address:
-        logger.warning("Заявка %s: у контакта нет email, письмо не отправлено", ticket.display_number)
-        return
-    config = load_email_config(db)
-    if config is None:
-        logger.warning("Заявка %s: канал email не настроен, письмо не отправлено", ticket.display_number)
-        return
-    try:
-        last_inbound = (
-            db.query(Message)
-            .filter(Message.ticket_id == ticket.id, Message.email_message_id.isnot(None))
-            .order_by(Message.id.desc())
-            .first()
-        )
-        in_reply_to = last_inbound.email_message_id if last_inbound else None
-        sent_message_id = send_outbound_email(config, to_address, ticket, message.body, in_reply_to)
-        message.email_message_id = sent_message_id
-        db.add(message)
-        db.commit()
-    except Exception:
-        logger.exception("Заявка %s: ошибка отправки письма клиенту", ticket.display_number)
+    """Compatibility entrypoint: queue delivery instead of doing network I/O."""
+    from app.services.channel_queue import enqueue_message
+    job = enqueue_message(db, message)
+    if to_address is not None and job.state in (None, "pending") and not job.attempts:
+        job.payload = {**job.payload, "recipient": to_address}
+    db.commit()
 
 
 def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None) -> None:
@@ -411,8 +435,47 @@ def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None)
         "Отвечайте на это письмо, если нужно что-то добавить — сообщение попадёт в заявку."
     )
     try:
-        send_outbound_email(config, to_address, ticket, body, None)
+        from app.services.channel_queue import enqueue_notification
+        enqueue_notification(db, "email", to_address, body, ticket=ticket)
     except Exception:
         # Недоставленное уведомление не должно ронять назначение: заявка уже
         # назначена, а клиент увидит исполнителя в кабинете и в ответе.
         logger.exception("Заявка %s: не удалось сообщить клиенту об исполнителе", ticket.display_number)
+
+
+def retrieve_captured_email(db: Session, job) -> bytes:
+    """Replay an oversized event after an operator raises its source limit.
+
+    The original remains unread in IMAP. Match mailbox and UIDVALIDITY before
+    fetching: the same UID in a replaced mailbox must never be ingested.
+    """
+    import hashlib
+    from app.services.channel_queue import ChannelFailure, PermanentChannelFailure
+    config = load_email_config(db)
+    if config is None:
+        raise ChannelFailure("Почтовый канал отключён или не настроен")
+    account = hashlib.sha256(f"{config.imap_host}:{config.imap_port}:{config.imap_username}:{config.imap_folder}".encode()).hexdigest()[:24]
+    if account != job.payload.get("_account"):
+        raise PermanentChannelFailure("Изменился почтовый ящик. Исходное письмо нужно обработать вручную.")
+    cls = imaplib.IMAP4_SSL if config.imap_use_ssl else imaplib.IMAP4
+    imap = cls(config.imap_host, config.imap_port, timeout=30)
+    try:
+        imap.login(config.imap_username, config.imap_password)
+        selected, _ = imap.select(config.imap_folder)
+        _, validity = imap.response("UIDVALIDITY")
+        actual = validity[0].decode() if validity and isinstance(validity[0], bytes) else str(validity[0]) if validity else ""
+        if selected != "OK" or actual != job.payload.get("uidvalidity"):
+            raise PermanentChannelFailure("Изменился UIDVALIDITY ящика. Проверьте исходное письмо вручную.")
+        status, parts = imap.uid("fetch", job.payload["uid"], f"(BODY.PEEK[]<0.{MAX_RAW_EMAIL_BYTES + 1}>)")
+        raw = next((item[1] for item in parts if isinstance(item, tuple)), None) if parts else None
+        if status != "OK" or raw is None:
+            raise PermanentChannelFailure("Исходное письмо больше не найдено в почтовом ящике")
+        if len(raw) > MAX_RAW_EMAIL_BYTES:
+            raise PermanentChannelFailure(f"Письмо превышает лимит {MAX_RAW_EMAIL_BYTES // 1024 // 1024} МБ. Оригинал оставлен непрочитанным в ящике.")
+        return raw
+    finally:
+        try:
+            imap.close()
+        except Exception:
+            pass
+        imap.logout()

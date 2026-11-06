@@ -1,23 +1,27 @@
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from pydantic import ValidationError
 from fastapi.responses import FileResponse
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.api.deps import get_current_user, require_dispatcher_or_above
 from app.core.enums import OPEN_TICKET_STATUSES, Channel, Priority, TicketStatus, UserRole
 from app.db import get_db
 from app.models.audit import AuditLog
+from app.models.channel_job import ChannelJob
 from app.models.message import Attachment, Message
 from app.models.ticket import Ticket
 from app.models.time_entry import TimeEntry
 from app.models.user import User
 from app.schemas.audit import AuditLogRead
 from app.schemas.message import AttachmentRead, MessageCreate, MessageRead
-from app.schemas.ticket import TicketClientChange, TicketCreate, TicketRead, TicketUpdate
+from app.schemas.ticket import TicketClientChange, TicketCreate, TicketRead, TicketSlaView, TicketUpdate
 from app.schemas.time_entry import TimeEntryCreate, TimeEntryRead, TimeEntryUpdate
 from app.services import attachments as attachments_service
 from app.services import audit as audit_service
@@ -45,7 +49,7 @@ def _get_ticket_or_404(db: Session, ticket_id: int, actor: User) -> Ticket:
 
 def _read_with_sla(db: Session, ticket: Ticket, cache: sla_service.SlaCache | None = None) -> TicketRead:
     view = TicketRead.model_validate(ticket)
-    view.sla = sla_service.compute_view(db, ticket, cache)
+    view.sla = TicketSlaView.model_validate(sla_service.compute_view(db, ticket, cache))
     return view
 
 
@@ -90,6 +94,9 @@ def list_tickets(
     channel: Channel | None = None,
     sla_risk: Literal["warning", "breached"] | None = None,
     q: str | None = None,
+    open_only: bool = False,
+    exclude_archived: bool = False,
+    overdue: bool = False,
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -104,6 +111,16 @@ def list_tickets(
     диспетчера и выше это вся очередь, инженеру — свои, командные и ещё не
     распределённые заявки."""
     query = ticket_access.visible_tickets_query(db, actor)
+    if exclude_archived:
+        query = query.filter(Ticket.status.notin_([TicketStatus.CLOSED, TicketStatus.CANCELLED]))
+    if open_only or overdue:
+        query = query.filter(Ticket.status.in_(OPEN_TICKET_STATUSES))
+    if overdue:
+        query = query.filter(
+            Ticket.sla_resolution_due_at < datetime.now(timezone.utc),
+            Ticket.sla_paused_at.is_(None),
+            Ticket.sla_resolution_met.isnot(True),
+        )
     if status_filter is not None:
         query = query.filter(Ticket.status == status_filter)
     if organization_id is not None:
@@ -140,7 +157,7 @@ def list_tickets(
 
 
 @router.get("/stats")
-def get_ticket_stats(db: Session = Depends(get_db), actor: User = Depends(get_current_user)) -> dict:
+def get_ticket_stats(db: Session = Depends(get_db), actor: User = Depends(get_current_user), tz: str = "UTC") -> dict:
     """Whole-queue counters for the dashboard. Computed in SQL rather than by
     counting a fetched list: once the queue is paged, counting client-side
     would silently report only the current page's worth (section 8 - the
@@ -149,6 +166,10 @@ def get_ticket_stats(db: Session = Depends(get_db), actor: User = Depends(get_cu
     Считается по той же видимой области, что и очередь (ТЗ р. 6): иначе
     инженер видел бы на дашборде цифры по всей компании, а в списке под ними
     — только свои заявки, и счётчики читались бы как ошибка."""
+    try:
+        user_timezone = ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Неизвестный часовой пояс") from exc
     visible = ticket_access.visible_tickets_query(db, actor).subquery()
     scoped = db.query(Ticket).join(visible, visible.c.id == Ticket.id)
 
@@ -163,6 +184,8 @@ def get_ticket_stats(db: Session = Depends(get_db), actor: User = Depends(get_cu
         .filter(
             Ticket.status.in_(OPEN_TICKET_STATUSES),
             Ticket.sla_resolution_due_at.isnot(None),
+            Ticket.sla_paused_at.is_(None),
+            Ticket.sla_resolution_met.isnot(True),
             Ticket.sla_resolution_due_at < datetime.now(timezone.utc),
         )
         .scalar()
@@ -171,12 +194,15 @@ def get_ticket_stats(db: Session = Depends(get_db), actor: User = Depends(get_cu
     # deadline falls before the end of today, i.e. what has to be dealt with
     # now, as distinct from what is already overdue.
     now = datetime.now(timezone.utc)
-    end_of_day = datetime.combine(now.date(), time.max, tzinfo=timezone.utc)
+    local_today = now.astimezone(user_timezone).date()
+    end_of_day = datetime.combine(local_today, time.max, tzinfo=user_timezone)
     at_risk_today = (
         scoped.with_entities(func.count(Ticket.id))
         .filter(
             Ticket.status.in_(OPEN_TICKET_STATUSES),
             Ticket.sla_resolution_due_at.isnot(None),
+            Ticket.sla_paused_at.is_(None),
+            Ticket.sla_resolution_met.isnot(True),
             Ticket.sla_resolution_due_at >= now,
             Ticket.sla_resolution_due_at <= end_of_day,
         )
@@ -186,18 +212,20 @@ def get_ticket_stats(db: Session = Depends(get_db), actor: User = Depends(get_cu
     # Поток за неделю: создано и закрыто по дням. Одно «создано» ничего не
     # говорит - вопрос в том, разгребается очередь или копится, а это видно
     # только в паре с «закрыто» (р. 8.3).
-    week_start = now.date() - timedelta(days=6)
-    week_start_at = datetime.combine(week_start, time.min, tzinfo=timezone.utc)
+    week_start = local_today - timedelta(days=6)
+    week_start_at = datetime.combine(week_start, time.min, tzinfo=user_timezone)
+    created_day = func.date(func.timezone(tz, Ticket.created_at))
+    closed_day = func.date(func.timezone(tz, Ticket.closed_at))
     created_rows = (
-        scoped.with_entities(func.date(Ticket.created_at), func.count(Ticket.id))
+        scoped.with_entities(created_day, func.count(Ticket.id))
         .filter(Ticket.created_at >= week_start_at)
-        .group_by(func.date(Ticket.created_at))
+        .group_by(created_day)
         .all()
     )
     closed_rows = (
-        scoped.with_entities(func.date(Ticket.closed_at), func.count(Ticket.id))
+        scoped.with_entities(closed_day, func.count(Ticket.id))
         .filter(Ticket.closed_at.isnot(None), Ticket.closed_at >= week_start_at)
-        .group_by(func.date(Ticket.closed_at))
+        .group_by(closed_day)
         .all()
     )
     created_by_day = {str(day): count for day, count in created_rows}
@@ -307,7 +335,7 @@ def list_related_tickets(
 @router.get("/{ticket_id}/messages", response_model=list[MessageRead])
 def list_messages(ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)) -> list[Message]:
     _get_ticket_or_404(db, ticket_id, actor)
-    return db.query(Message).filter(Message.ticket_id == ticket_id).order_by(Message.created_at).all()
+    return db.query(Message).filter(Message.ticket_id == ticket_id).order_by(Message.created_at, Message.id).all()
 
 
 @router.post("/{ticket_id}/messages", response_model=MessageRead, status_code=status.HTTP_201_CREATED)
@@ -318,7 +346,47 @@ def create_message(
     actor: User = Depends(get_current_user),
 ) -> Message:
     ticket = _get_ticket_or_404(db, ticket_id, actor)
-    return messages_service.add_message(db, ticket, payload, author_user=actor)
+    try:
+        return messages_service.add_message(db, ticket, payload, author_user=actor)
+    except messages_service.RequestConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post("/{ticket_id}/messages/send", response_model=MessageRead, status_code=201)
+async def send_message(
+    ticket_id: int, payload: str = Form(...), files: list[UploadFile] = File(default=[]),
+    db: Session = Depends(get_db), actor: User = Depends(get_current_user),
+):
+    ticket = _get_ticket_or_404(db, ticket_id, actor)
+    try:
+        message_payload = MessageCreate.model_validate_json(payload)
+        uploads = await attachments_service.read_uploads(files)
+        if not message_payload.body.strip() and not uploads:
+            raise HTTPException(status_code=422, detail="Введите сообщение или приложите файл")
+        return messages_service.add_message(db, ticket, message_payload, author_user=actor, attachments=uploads)
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="Некорректные поля сообщения")
+    except messages_service.RequestConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except attachments_service.AttachmentTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
+
+
+@router.post("/{ticket_id}/messages/{message_id}/delivery/retry")
+def retry_message_delivery(ticket_id: int, message_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)):
+    from app.services import channel_queue
+    _get_ticket_or_404(db, ticket_id, actor)
+    job = db.query(ChannelJob).filter_by(message_id=message_id, ticket_id=ticket_id, kind="outbound").with_for_update(skip_locked=True).first()
+    if job is None:
+        if db.query(ChannelJob.id).filter_by(message_id=message_id, ticket_id=ticket_id, kind="outbound").first():
+            raise HTTPException(status_code=409, detail="Сообщение сейчас отправляется")
+        raise HTTPException(status_code=404, detail="Отправка не найдена")
+    if job.state not in ("failed", "retry"):
+        raise HTTPException(status_code=409, detail="Сообщение уже отправляется или завершено")
+    audit_service.record(db, entity_type="channel_job", entity_id=job.id, action="retry", user_id=actor.id,
+                         changes={"state": job.state})
+    channel_queue.retry(db, job)
+    return {"state": job.state}
 
 
 @router.post(
@@ -338,13 +406,19 @@ async def upload_attachment(
     if message is None or message.ticket_id != ticket.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Сообщение не найдено")
 
-    content = await file.read()
+    job = db.query(ChannelJob).filter_by(message_id=message.id, kind="outbound").with_for_update().first()
+    if job is not None and job.state != "pending":
+        raise HTTPException(status_code=409, detail="Сообщение уже отправляется. Отправьте файл новым сообщением.")
+    content = await file.read(settings.default_ticket_attachment_limit_mb * 1024 * 1024 + 1)
     try:
         attachment = attachments_service.store_attachment(message.id, file.filename or "", content, file.content_type)
     except attachments_service.AttachmentTooLarge as exc:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc))
 
     db.add(attachment)
+    db.flush()
+    if job is not None:
+        job.payload = {**job.payload, "attachment_ids": [*job.payload.get("attachment_ids", []), attachment.id]}
     db.commit()
     db.refresh(attachment)
     return attachment

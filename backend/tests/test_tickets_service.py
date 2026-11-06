@@ -138,7 +138,7 @@ def test_reopen_via_client_reply_keeps_original_resolution_fixed(db, contact):
     assert ticket.resolved_at == first_resolved_at
 
 
-def test_first_outbound_message_sets_first_response_at(db, contact, engineer_user):
+def test_external_reply_waits_for_channel_acceptance_before_first_response(db, contact, engineer_user):
     ticket = _minimal_ticket(db, contact)
     assert ticket.first_response_at is None
 
@@ -146,7 +146,9 @@ def test_first_outbound_message_sets_first_response_at(db, contact, engineer_use
         db, ticket, MessageCreate(direction=MessageDirection.OUTBOUND, body="Принято в работу"), author_user=engineer_user
     )
     db.refresh(ticket)
-    assert ticket.first_response_at is not None
+    assert ticket.first_response_at is None
+    from app.models.channel_job import ChannelJob
+    assert db.query(ChannelJob).filter_by(ticket_id=ticket.id, kind="outbound").one().state == "pending"
 
 
 def test_manual_priority_override_requires_reason(db, contact):

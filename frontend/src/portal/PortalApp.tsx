@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { ProjectApprovals } from "./ProjectApprovals";
+import { BrandMark } from "../components/BrandMark";
+import { useDraftRequestId } from "../lib/useDraftRequestId";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  PortalTicket,
   consumeMagicLink,
   createPortalTicket,
   fetchPortalMe,
@@ -18,7 +20,6 @@ import {
   markPortalUpdatesSeen,
   downloadMyReport,
   downloadPortalFile,
-  uploadPortalAttachment,
   changePortalPassword,
 } from "./api";
 
@@ -39,9 +40,22 @@ function formatDate(value: string | null): string {
 }
 
 export function PortalApp() {
+  const qc = useQueryClient();
   const [authed, setAuthed] = useState(!!getPortalToken());
   const [openTicketId, setOpenTicketId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
+  const magicRequest = useRef<Promise<unknown> | null>(null);
+
+  useEffect(() => {
+    function endSession() {
+      setAuthed(false);
+      setOpenTicketId(null);
+      setCreating(false);
+      qc.clear();
+    }
+    window.addEventListener("sd:portal-session-ended", endSession);
+    return () => window.removeEventListener("sd:portal-session-ended", endSession);
+  }, [qc]);
 
   // A magic link lands on /portal?token=… - consume it once, then strip the
   // token from the address bar so it isn't left in history or copied out.
@@ -49,7 +63,8 @@ export function PortalApp() {
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token");
     if (!token) return;
-    consumeMagicLink(token)
+    magicRequest.current ??= consumeMagicLink(token);
+    magicRequest.current
       .then(() => setAuthed(true))
       .catch(() => setAuthed(false))
       .finally(() => window.history.replaceState({}, "", window.location.pathname));
@@ -76,7 +91,7 @@ function PortalShell({ title, children, action }: { title: string; children: Rea
     <div className="portal">
       <header className="portal-header">
         <div className="portal-brand">
-          <span className="brand-mark">ОГ</span>
+          <BrandMark />
           <span>Поддержка «Открытые Горизонты»</span>
         </div>
       </header>
@@ -116,7 +131,7 @@ function PortalLogin({ onAuthed }: { onAuthed: () => void }) {
     <div className="portal portal-centered">
       <div className="portal-card">
         <div className="portal-brand" style={{ marginBottom: 18 }}>
-          <span className="brand-mark">ОГ</span>
+          <BrandMark />
           <span>Личный кабинет</span>
         </div>
 
@@ -269,6 +284,7 @@ function PortalTicketList({
         )}
       </div>
 
+      <ProjectApprovals />
       {meQuery.data?.can_view_org_tickets && <PortalReportLink />}
 
       {ticketsQuery.isLoading && <p className="portal-muted">Загрузка…</p>}
@@ -344,22 +360,17 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
   const qc = useQueryClient();
   const [reply, setReply] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const ticketQuery = useQuery({
     queryKey: ["portal-ticket", id],
     queryFn: () => getPortalTicket(id),
     refetchInterval: 15_000,
   });
 
+  const requestId = useDraftRequestId(JSON.stringify([reply, files.map((file) => [file.name, file.size, file.lastModified])]));
   const replyMutation = useMutation({
-    mutationFn: async () => {
-      const message = await replyToPortalTicket(id, reply.trim());
-      // Вложение привязывается к сообщению, поэтому файл уходит после его
-      // создания, а не вместе с ним.
-      for (const file of files) {
-        await uploadPortalAttachment(id, message.id, file);
-      }
-      return message;
-    },
+    mutationFn: () => replyToPortalTicket(id, reply.trim(), files, requestId),
     onSuccess: () => {
       setReply("");
       setFiles([]);
@@ -416,7 +427,7 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
                         key={a.id}
                         className="portal-link portal-small"
                         onClick={() =>
-                          downloadPortalFile(`/tickets/${id}/attachments/${a.id}`, a.filename).catch(() => {})
+                          downloadPortalFile(`/tickets/${id}/attachments/${a.id}`, a.filename).catch((error: Error) => setDownloadError(error.message))
                         }
                       >
                         {a.filename} ({Math.max(1, Math.round(a.size_bytes / 1024))} КБ)
@@ -449,6 +460,8 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
           <div className="portal-reply">
             <textarea
               rows={3}
+              disabled={replyMutation.isPending}
+              aria-label="Текст сообщения"
               value={reply}
               onChange={(e) => setReply(e.target.value)}
               placeholder="Написать в поддержку…"
@@ -481,6 +494,7 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
                 </span>
               ))}
             </div>
+            {downloadError && <div className="portal-error" role="alert">{downloadError}</div>}
             {replyMutation.isError && <div className="portal-error">{(replyMutation.error as Error).message}</div>}
             <button
               className="portal-btn portal-btn-primary"

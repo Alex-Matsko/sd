@@ -1,3 +1,4 @@
+import { localDate } from "../lib/dates";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -18,21 +19,21 @@ const MONTHS = [
   "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
 ];
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+const iso = localDate;
 
 /** Последние 12 месяцев, начиная с прошлого: отчёт за текущий месяц
  *  формируют редко — он ещё не закончился. */
 function recentMonths(count = 12) {
   const now = new Date();
   return Array.from({ length: count }, (_, i) => {
-    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1 - i, 1));
-    const year = date.getUTCFullYear();
-    const month = date.getUTCMonth();
+    const date = new Date(now.getFullYear(), now.getMonth() - 1 - i, 1);
+    const year = date.getFullYear();
+    const month = date.getMonth();
     return {
       key: `${year}-${String(month + 1).padStart(2, "0")}`,
       label: `${MONTHS[month]} ${year}`,
-      start: iso(new Date(Date.UTC(year, month, 1))),
-      end: iso(new Date(Date.UTC(year, month + 1, 0))),
+      start: iso(new Date(year, month, 1)),
+      end: iso(new Date(year, month + 1, 0)),
     };
   });
 }
@@ -73,7 +74,7 @@ export function ClientReportsPage() {
     onError: (e) => setError(e instanceof Error ? e.message : "Не удалось сформировать отчёт"),
   });
 
-  const canGenerate = organizationId !== "" && periodStart <= periodEnd;
+  const canGenerate = organizationId !== "" && Boolean(periodStart && periodEnd) && periodStart <= periodEnd;
 
   return (
     <div className="view" style={{ maxWidth: 1180 }}>

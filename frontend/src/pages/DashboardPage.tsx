@@ -1,3 +1,5 @@
+import { useAuth } from "../auth/AuthContext";
+import { IconAlertTriangle, IconClock, IconInbox, IconTicket, IconUsers } from "../components/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { getTicketStats, listTickets } from "../api/endpoints";
@@ -41,13 +43,15 @@ function WeekFlow({ days }: { days: { date: string; created: number; closed: num
 }
 
 export function DashboardPage() {
+  const { user } = useAuth();
+  const showWorkload = user?.role !== "engineer";
   // Counters come from the server rather than from counting a fetched list:
   // the queue is paged, so a client-side tally would silently only cover the
   // first page once the system has more than a page's worth of tickets.
   const statsQuery = useQuery({ queryKey: ["ticket-stats"], queryFn: getTicketStats, refetchInterval: 60_000 });
   const recentQuery = useQuery({
     queryKey: ["tickets", "dashboard-recent"],
-    queryFn: () => listTickets({ limit: 8 }),
+    queryFn: () => listTickets({ limit: 8, open_only: true }),
     refetchInterval: 60_000,
   });
 
@@ -61,34 +65,39 @@ export function DashboardPage() {
 
   return (
     <div className="view">
-      <h1 className="view-title">Дашборд</h1>
+      <div className="page-heading"><div><p className="eyebrow">Служба поддержки</p><h1 className="view-title">Обзор работы</h1><p className="view-description">Очередь, сроки и загрузка команды — в одном месте.</p></div><Link to="/tickets/new" className="btn btn-primary">+ Новая заявка</Link></div>
 
       <div className="stat-grid">
-        <div className="stat-card">
-          <span className="stat-value">{stats.open_total}</span>
+        <Link to="/tickets?open_only=1" className="stat-card">
+          <div className="stat-card-top"><span className="stat-icon"><IconInbox size={18}/></span><span className="stat-link-arrow" aria-hidden="true">↗</span></div>
           <span className="stat-label">Открытых заявок</span>
-        </div>
+          <span className="stat-value">{stats.open_total}</span>
+        </Link>
         {/* Тревожный цвет — только когда есть о чём тревожиться. Ноль,
             подсвеченный красным, приучает не смотреть на цвет вообще. */}
         <Link className={`stat-card${stats.overdue > 0 ? " stat-card-danger" : ""}`} to="/tickets?overdue=1">
+          <div className="stat-card-top"><span className="stat-icon"><IconAlertTriangle size={18}/></span><span className="stat-link-arrow" aria-hidden="true">↗</span></div>
+          <span className="stat-label">Просрочено решение</span>
           <span className="stat-value">{stats.overdue}</span>
-          <span className="stat-label">Нарушение SLA</span>
         </Link>
         <div className={`stat-card${stats.at_risk_today > 0 ? " stat-card-warn" : ""}`}>
-          <span className="stat-value">{stats.at_risk_today}</span>
+          <div className="stat-card-top"><span className="stat-icon"><IconClock size={18}/></span></div>
           <span className="stat-label">Срок решения истекает сегодня</span>
+          <span className="stat-value">{stats.at_risk_today}</span>
         </div>
-        <div className="stat-card">
-          <span className="stat-value">{stats.by_status.new ?? 0}</span>
+        <Link to="/tickets?status_filter=new" className="stat-card">
+          <div className="stat-card-top"><span className="stat-icon"><IconTicket size={18}/></span><span className="stat-link-arrow" aria-hidden="true">↗</span></div>
           <span className="stat-label">Новых</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-value">{stats.by_status.waiting_customer ?? 0}</span>
+          <span className="stat-value">{stats.by_status.new ?? 0}</span>
+        </Link>
+        <Link to="/tickets?status_filter=waiting_customer" className="stat-card">
+          <div className="stat-card-top"><span className="stat-icon"><IconUsers size={18}/></span><span className="stat-link-arrow" aria-hidden="true">↗</span></div>
           <span className="stat-label">Ждут клиента</span>
-        </div>
+          <span className="stat-value">{stats.by_status.waiting_customer ?? 0}</span>
+        </Link>
       </div>
 
-      <div className="dashboard-columns">
+      <div className="dashboard-columns" style={!showWorkload ? { gridTemplateColumns: "minmax(0, 1fr)" } : undefined}>
         <div className="panel">
           <div className="panel-head">
             <h2>Поток за неделю</h2>
@@ -104,7 +113,7 @@ export function DashboardPage() {
           )}
         </div>
 
-        <div className="panel">
+        {showWorkload && <div className="panel">
           <div className="panel-head">
             <h2>Загрузка инженеров</h2>
           </div>
@@ -118,7 +127,7 @@ export function DashboardPage() {
               <span className="mono">{row.open_tickets}</span>
             </div>
           ))}
-        </div>
+        </div>}
       </div>
 
       <div className="panel">
@@ -128,9 +137,10 @@ export function DashboardPage() {
             Вся очередь →
           </Link>
         </div>
-        {recentOpen.length === 0 && <p className="muted">Открытых заявок нет</p>}
+        {recentQuery.isError && <ErrorBanner message={recentQuery.error.message} />}
+        {recentQuery.isSuccess && recentOpen.length === 0 && <p className="muted">Открытых заявок нет</p>}
         {recentOpen.length > 0 && (
-          <div className="list">
+          <div className="list recent-ticket-list">
             <div className="list-head" style={{ gridTemplateColumns: "100px 2fr 1fr 1fr 1fr" }}>
               <span>№</span>
               <span>Тема</span>

@@ -1,4 +1,7 @@
 from datetime import datetime, timezone
+import hashlib
+import json
+from sqlalchemy import func, select
 
 from sqlalchemy.orm import Session
 
@@ -19,14 +22,38 @@ def _resolve_recipient_email(ticket: Ticket) -> str | None:
     return primary or contact.emails[0].email
 
 
+class RequestConflict(ValueError):
+    pass
+
+
 def add_message(
     db: Session,
     ticket: Ticket,
     payload: MessageCreate,
     author_user: User | None = None,
     author_contact: Contact | None = None,
+    attachments: list[tuple[str, bytes, str | None]] | None = None,
 ) -> Message:
     from app.services.tickets import transition_status
+
+    attachments = attachments or []
+    request_key = None
+    request_digest = None
+    if payload.request_id is not None:
+        identity = f"u:{author_user.id}" if author_user else f"c:{author_contact.id}" if author_contact else None
+        if identity is None:
+            raise ValueError("Не определён автор запроса")
+        request_key = f"{identity}:{payload.request_id}"
+        request_digest = hashlib.sha256(json.dumps({
+            "ticket_id": ticket.id, "payload": payload.model_dump(mode="json", exclude={"request_id"}),
+            "files": [(name, hashlib.sha256(content).hexdigest(), mime) for name, content, mime in attachments],
+        }, sort_keys=True).encode()).hexdigest()
+        db.execute(select(func.pg_advisory_xact_lock(func.hashtext(request_key))))
+        previous = db.query(Message).filter(Message.request_key == request_key).first()
+        if previous is not None:
+            if previous.request_digest != request_digest:
+                raise RequestConflict("Этот идентификатор запроса уже использован для другого сообщения")
+            return previous
 
     reply_to_message_id = None
     if payload.reply_to_message_id is not None:
@@ -42,13 +69,25 @@ def add_message(
         author_user_id=author_user.id if author_user else None,
         author_contact_id=author_contact.id if author_contact else None,
         body=payload.body,
+        request_key=request_key,
+        request_digest=request_digest,
         reply_to_message_id=reply_to_message_id,
     )
     db.add(message)
     db.flush()
 
+    from app.services import attachments as attachment_service
+    from app.services.channel_queue import enqueue_message
+    for filename, content, mime in attachments:
+        message.attachments.append(attachment_service.store_attachment(message.id, filename, content, mime))
+    db.flush()
+    external_delivery = payload.direction == MessageDirection.OUTBOUND and channel in (Channel.EMAIL, Channel.MAX, Channel.TELEGRAM)
+    if external_delivery:
+        job = enqueue_message(db, message)
+        job.payload = {**job.payload, "attachment_ids": [item.id for item in message.attachments]}
+
     # First outbound reply fixes the reaction SLA outcome permanently.
-    if payload.direction == MessageDirection.OUTBOUND and ticket.first_response_at is None:
+    if payload.direction == MessageDirection.OUTBOUND and not external_delivery and ticket.first_response_at is None:
         sla.register_first_response(ticket, datetime.now(timezone.utc))
         db.add(ticket)
 
@@ -86,22 +125,5 @@ def add_message(
     )
     db.commit()
     db.refresh(message)
-
-    # Engineer replies go out over the ticket's own channel (section 2.3:
-    # "Ответ уходит в канал обращения"). Deferred imports - both channel
-    # modules import this one to post the inbound side of the conversation.
-    if payload.direction == MessageDirection.OUTBOUND:
-        if channel == Channel.EMAIL:
-            from app.services import email_channel
-
-            email_channel.try_send_outbound(db, ticket, message, _resolve_recipient_email(ticket))
-        elif channel == Channel.MAX:
-            from app.services import max_channel
-
-            max_channel.try_send_outbound(db, ticket, message)
-        elif channel == Channel.TELEGRAM:
-            from app.services import telegram_channel
-
-            telegram_channel.try_send_outbound(db, ticket, message)
 
     return message

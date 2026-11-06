@@ -1,3 +1,4 @@
+import { localDate } from "../lib/dates";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -12,10 +13,10 @@ import type { Channel } from "../api/types";
 
 function firstOfMonth(): string {
   const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  return localDate(new Date(d.getFullYear(), d.getMonth(), 1));
 }
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDate();
 }
 
 function BarChart({ items, max }: { items: { label: string; value: number }[]; max?: number }) {
@@ -53,8 +54,13 @@ export function ReportsPage() {
   const [dateTo, setDateTo] = useState(today());
   const [organizationId, setOrganizationId] = useState<number | "">("");
 
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const validPeriod = Boolean(dateFrom && dateTo && dateFrom <= dateTo);
+
   const orgsQuery = useQuery({ queryKey: ["organizations"], queryFn: listOrganizations });
   const reportQuery = useQuery({
+    enabled: validPeriod,
     queryKey: ["reports-overview", dateFrom, dateTo, organizationId],
     queryFn: () => getReportsOverview({ date_from: dateFrom, date_to: dateTo, organization_id: organizationId || undefined }),
   });
@@ -63,8 +69,8 @@ export function ReportsPage() {
     <div className="view" style={{ maxWidth: 1180 }}>
       <h1 className="view-title">Сводный отчёт</h1>
       <div className="filter-bar">
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        <input type="date" aria-label="Начало периода" max={dateTo} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+        <input type="date" aria-label="Конец периода" min={dateFrom} value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
         <select value={organizationId} onChange={(e) => setOrganizationId(e.target.value ? Number(e.target.value) : "")}>
           <option value="">Все организации</option>
           {(orgsQuery.data ?? []).map((o) => (
@@ -74,11 +80,19 @@ export function ReportsPage() {
           ))}
         </select>
         <div className="spacer" />
-        <button className="btn btn-ghost" onClick={() => downloadOverviewXlsx(dateFrom, dateTo, organizationId || undefined)}>
+        <button className="btn btn-ghost" disabled={!validPeriod || exporting} onClick={async () => {
+          setExporting(true);
+          setExportError(null);
+          try { await downloadOverviewXlsx(dateFrom, dateTo, organizationId || undefined); }
+          catch (error) { setExportError(error instanceof Error ? error.message : "Не удалось скачать отчёт"); }
+          finally { setExporting(false); }
+        }}>
           Выгрузить в XLSX
         </button>
       </div>
 
+      {!validPeriod && <ErrorBanner message="Укажите корректный период: начало не позже конца." />}
+      {exportError && <ErrorBanner message={exportError} />}
       {reportQuery.isLoading && <Loading />}
       {reportQuery.isError && <ErrorBanner message={(reportQuery.error as Error).message} />}
       {reportQuery.data && (
@@ -90,11 +104,11 @@ export function ReportsPage() {
                 <span className="l">Заявок за период</span>
               </div>
               <div className="kpi">
-                <span className="v">{reportQuery.data.sla.reaction_met_pct ?? "—"}%</span>
+                <span className="v">{reportQuery.data.sla.reaction_met_pct === null ? "—" : `${reportQuery.data.sla.reaction_met_pct}%`}</span>
                 <span className="l">Реакция в срок</span>
               </div>
               <div className="kpi">
-                <span className="v">{reportQuery.data.sla.resolution_met_pct ?? "—"}%</span>
+                <span className="v">{reportQuery.data.sla.resolution_met_pct === null ? "—" : `${reportQuery.data.sla.resolution_met_pct}%`}</span>
                 <span className="l">Решение в срок</span>
               </div>
               <div className="kpi">

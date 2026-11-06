@@ -74,7 +74,6 @@ export function TicketSchedulesPage() {
 
   const schedules = schedulesQuery.data ?? [];
   const orgsById = new Map((orgsQuery.data ?? []).map((o) => [o.id, o]));
-  const usersById = new Map((usersQuery.data ?? []).map((u) => [u.id, u]));
 
   return (
     <div className="view">

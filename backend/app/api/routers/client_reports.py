@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_manager_or_above
+from app.api.deps import require_manager_or_above
 from app.db import get_db
 from app.models.client_report import ClientReport
 from app.models.organization import Organization
@@ -85,7 +85,7 @@ def list_client_reports(
     limit: int = 25,
     offset: int = 0,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_manager_or_above),
 ) -> list[ClientReportRead]:
     query = db.query(ClientReport)
     if organization_id is not None:
@@ -121,7 +121,7 @@ def generate_client_report(
 
 @router.get("/{report_id}")
 def get_client_report(
-    report_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+    report_id: int, db: Session = Depends(get_db), _: User = Depends(require_manager_or_above)
 ) -> dict:
     """Содержимое снимка — то, что увидит клиент."""
     report = _get_or_404(db, report_id)
@@ -151,7 +151,7 @@ def _filename(report: ClientReport, extension: str) -> str:
 
 @router.get("/{report_id}/pdf")
 def download_client_report_pdf(
-    report_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+    report_id: int, db: Session = Depends(get_db), _: User = Depends(require_manager_or_above)
 ) -> Response:
     report = _get_or_404(db, report_id)
     try:
@@ -167,7 +167,7 @@ def download_client_report_pdf(
 
 @router.get("/{report_id}/xlsx")
 def download_client_report_xlsx(
-    report_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+    report_id: int, db: Session = Depends(get_db), _: User = Depends(require_manager_or_above)
 ) -> Response:
     report = _get_or_404(db, report_id)
     return Response(

@@ -287,6 +287,9 @@ def _list_open_tickets(db: Session, contact: Contact) -> list[Ticket]:
 def _send(
     config: TelegramConfig, chat_id: str, text: str, buttons: list[list[dict]] | None = None, reply_to_mid: int | None = None
 ) -> dict | None:
+    from app.services.channel_queue import defer_bot_reply
+    if defer_bot_reply("telegram", chat_id, text, buttons, reply_to_mid):
+        return {"queued": True}
     try:
         return telegram_client.send_message(
             config.base_url, config.token, chat_id, text, buttons=buttons, reply_to_message_id=reply_to_mid
@@ -300,11 +303,11 @@ def _store_telegram_attachment(db: Session, message: Message, config: TelegramCo
     try:
         file_path = telegram_client.get_file_path(config.base_url, config.token, attachment["file_id"])
         if not file_path:
-            return
+            raise RuntimeError("Telegram file path is unavailable")
         content = telegram_client.download_file(config.base_url, config.token, file_path)
     except Exception:
         logger.exception("Telegram: не удалось скачать вложение")
-        return
+        raise
     db.add(attachments_service.store_attachment(message.id, attachment["filename"], content, attachment.get("mime_type")))
 
 
@@ -687,11 +690,9 @@ def poll_updates(db: Session, config: TelegramConfig) -> int:
     offset = get_offset(db)
     updates = telegram_client.get_updates(config.base_url, config.token, offset, timeout=config.poll_timeout_seconds)
     next_offset = offset
+    from app.services.channel_queue import capture_update
     for update in updates:
-        try:
-            handle_update(db, update)
-        except Exception:
-            logger.exception("Telegram: ошибка обработки update")
+        capture_update(db, Channel.TELEGRAM, update, config)
         update_id = update.get("update_id")
         if update_id is not None:
             next_offset = update_id + 1
@@ -719,7 +720,8 @@ def notify_status_change(db: Session, ticket: Ticket, new_status: TicketStatus) 
     if state is None:
         return
     label = STATUS_LABELS_RU.get(new_status, new_status.value)
-    _send(config, state.chat_id, f"Статус заявки {ticket.display_number} изменён: {label}.")
+    from app.services.channel_queue import enqueue_notification
+    enqueue_notification(db, "telegram", state.chat_id, f"Статус заявки {ticket.display_number} изменён: {label}.", ticket=ticket)
 
 
 def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None) -> None:
@@ -731,7 +733,8 @@ def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None)
     state = _find_chat_state(db, ticket.contact_id)
     if state is None:
         return
-    _send(config, state.chat_id, f"Заявку {ticket.display_number} теперь ведёт: {engineer.full_name}.")
+    from app.services.channel_queue import enqueue_notification
+    enqueue_notification(db, "telegram", state.chat_id, f"Заявку {ticket.display_number} теперь ведёт: {engineer.full_name}.", ticket=ticket)
 
 
 def request_csat(db: Session, ticket: Ticket) -> None:
@@ -745,13 +748,10 @@ def request_csat(db: Session, ticket: Ticket) -> None:
         return
     buttons = [[{"type": "callback", "text": str(n), "payload": f"csat:{ticket.id}:{n}"} for n in range(1, 6)]]
     try:
-        telegram_client.send_message(
-            config.base_url,
-            config.token,
-            state.chat_id,
+        from app.services.channel_queue import enqueue_notification
+        enqueue_notification(db, "telegram", state.chat_id,
             f"Заявка {ticket.display_number} закрыта. Оцените, пожалуйста, качество решения от 1 до 5.",
-            buttons=buttons,
-        )
+            buttons=buttons, ticket=ticket)
         ticket.csat_requested_at = datetime.now(timezone.utc)
         db.add(ticket)
         db.commit()
@@ -760,35 +760,7 @@ def request_csat(db: Session, ticket: Ticket) -> None:
 
 
 def try_send_outbound(db: Session, ticket: Ticket, message: Message) -> None:
-    config = load_telegram_config(db)
-    if config is None:
-        logger.warning("Заявка %s: канал Telegram не настроен, сообщение не отправлено", ticket.display_number)
-        return
-    state = _find_chat_state(db, ticket.contact_id)
-    if state is None:
-        logger.warning("Заявка %s: нет сохранённого Telegram-чата для контакта, сообщение не отправлено", ticket.display_number)
-        return
-    reply_to_mid = None
-    if message.reply_to_message_id is not None:
-        parent = db.get(Message, message.reply_to_message_id)
-        reply_to_mid = parent.telegram_message_id if parent else None
-    try:
-        # Unlike MAX (whose /me/commands menu doesn't render on every client
-        # - docs/decisions.md), Telegram's persistent command menu already
-        # covers "Мои заявки"/"Создать новую" reliably, so engineer replies
-        # only need the ticket-specific close button, not the whole menu.
-        response = telegram_client.send_message(
-            config.base_url,
-            config.token,
-            state.chat_id,
-            message.body,
-            buttons=_close_button_for(ticket),
-            reply_to_message_id=reply_to_mid,
-        )
-        sent_mid = response.get("message_id")
-        if sent_mid:
-            message.telegram_message_id = sent_mid
-            db.add(message)
-            db.commit()
-    except Exception:
-        logger.exception("Заявка %s: ошибка отправки сообщения в Telegram", ticket.display_number)
+    """Compatibility entrypoint: queue delivery instead of doing network I/O."""
+    from app.services.channel_queue import enqueue_message
+    job = enqueue_message(db, message)
+    db.commit()

@@ -49,7 +49,8 @@ def notify_telegram(db: Session, user_ids: set[int], title: str) -> None:
     recipients = db.query(User).filter(User.id.in_(user_ids), User.telegram_id.isnot(None)).all()
     for user in recipients:
         try:
-            telegram_client.send_message(config.base_url, config.token, user.telegram_id, title)
+            from app.services.channel_queue import enqueue_notification
+            enqueue_notification(db, "telegram", user.telegram_id, title)
         except Exception:
             # Недоступный Telegram не должен ронять операцию, ради которой
             # уведомление отправлялось: запись в колокольчике уже создана.

@@ -1,3 +1,4 @@
+from app.services import channel_queue
 """Stage 5 MAX channel tests: update parsing, sender/thread resolution rules
 mirroring the email channel's, "Мои заявки" ticket switching, explicit
 new-ticket creation, and CSAT capture. The MAX HTTP client is always faked -
@@ -444,8 +445,9 @@ def test_request_csat_sends_rating_buttons(db: Session, max_enabled, contact: Co
 
     max_channel.request_csat(db, ticket)
     db.refresh(ticket)
+    channel_queue.run_batch(db, "outbound")
     assert ticket.csat_requested_at is not None
-    assert any(s["buttons"] for s in _fake_send)
+    assert any(s["buttons"] and any(button.get("payload", "").startswith("csat:") for row in s["buttons"] for button in row) for s in _fake_send)
 
 
 def test_csat_callback_records_rating_once(db: Session, max_enabled, contact: Contact, _fake_send):
@@ -471,9 +473,11 @@ def test_transition_status_notifies_client_of_new_status(db: Session, max_enable
     max_channel.handle_update(db, _text_update(user_id="u-notify1", chat_id="c-notify1", text="Проблема"))
     ticket = db.query(Ticket).filter(Ticket.contact_id == contact.id).first()
 
+    channel_queue.run_batch(db, "outbound")
     _fake_send.clear()
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
 
+    channel_queue.run_batch(db, "outbound")
     assert any("изменён: в работе" in s["text"] for s in _fake_send)
 
 
@@ -485,10 +489,12 @@ def test_transition_to_closed_does_not_duplicate_with_csat_message(db: Session, 
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
     tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
 
+    channel_queue.run_batch(db, "outbound")
     _fake_send.clear()
     tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
 
     # Only the CSAT request goes out, not a second "status changed" message.
+    channel_queue.run_batch(db, "outbound")
     assert len(_fake_send) == 1
     assert "закрыта" in _fake_send[0]["text"]
 
@@ -499,11 +505,13 @@ def test_notify_assignment_change_sends_engineer_name(db: Session, max_enabled, 
     max_channel.handle_update(db, _text_update(user_id="u-notify3", chat_id="c-notify3", text="Проблема"))
     ticket = db.query(Ticket).filter(Ticket.contact_id == contact.id).first()
 
+    channel_queue.run_batch(db, "outbound")
     _fake_send.clear()
     from app.schemas.ticket import TicketUpdate
 
     tickets_service.update_ticket(db, ticket, TicketUpdate(assigned_engineer_id=engineer_user.id), actor=None)
 
+    channel_queue.run_batch(db, "outbound")
     assert any(engineer_user.full_name in s["text"] for s in _fake_send)
 
 
@@ -534,8 +542,11 @@ def test_try_send_outbound_uses_known_chat(db: Session, max_enabled, contact: Co
     db.add(msg)
     db.commit()
 
+    channel_queue.run_batch(db, "outbound")
     _fake_send.clear()
     max_channel.try_send_outbound(db, ticket, msg)
+    channel_queue.run_batch(db, "outbound")
+    channel_queue.run_batch(db, "outbound")
     assert len(_fake_send) == 1
     assert _fake_send[0]["chat_id"] == "c20"
     assert _fake_send[0]["text"] == "Ответ инженера"
@@ -578,8 +589,11 @@ def test_try_send_outbound_with_reply_passes_parent_mid_and_stores_own_mid(db: S
     db.add(reply)
     db.commit()
 
+    channel_queue.run_batch(db, "outbound")
     _fake_send.clear()
     max_channel.try_send_outbound(db, ticket, reply)
+    channel_queue.run_batch(db, "outbound")
+    channel_queue.run_batch(db, "outbound")
     assert len(_fake_send) == 1
     assert _fake_send[0]["reply_to_mid"] == "mid.client1"
     db.refresh(reply)
@@ -593,6 +607,7 @@ def test_try_send_outbound_without_known_chat_does_not_raise(db: Session, max_en
     db.add(msg)
     db.commit()
     max_channel.try_send_outbound(db, ticket, msg)  # no ChannelConversationState exists - must not raise
+    channel_queue.run_batch(db, "outbound")
 
 
 # --- client-initiated close ("Закрыть заявку") -------------------------------------------------------

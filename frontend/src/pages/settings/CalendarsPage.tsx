@@ -263,7 +263,7 @@ function Holidays() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["holidays"] }),
   });
 
-  const holidays = holidaysQuery.data ?? [];
+  const holidays = useMemo(() => holidaysQuery.data ?? [], [holidaysQuery.data]);
 
   // Праздники группируются по годам: список за несколько лет иначе
   // читается сплошной лентой, а следить надо именно за годами — чтобы

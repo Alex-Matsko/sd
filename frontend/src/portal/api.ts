@@ -5,7 +5,7 @@
  * one browser without either overwriting the other - and a bug in one can't
  * hand its token to the other. */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/+$/, "");
 const TOKEN_KEY = "sd_portal_token";
 
 export function getPortalToken(): string | null {
@@ -14,7 +14,10 @@ export function getPortalToken(): string | null {
 
 export function setPortalToken(token: string | null) {
   if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
+  else {
+    localStorage.removeItem(TOKEN_KEY);
+    window.dispatchEvent(new Event("sd:portal-session-ended"));
+  }
 }
 
 export class PortalError extends Error {
@@ -26,14 +29,15 @@ export class PortalError extends Error {
 }
 
 async function request<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const form = options.body instanceof FormData;
+  const headers: Record<string, string> = form ? {} : { "Content-Type": "application/json" };
   const token = getPortalToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE_URL}/portal${path}`, {
     method: options.method ?? "GET",
     headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: form ? options.body as FormData : options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
 
   if (res.status === 401) {
@@ -169,6 +173,10 @@ export async function uploadPortalAttachment(ticketId: number, messageId: number
     headers: { Authorization: `Bearer ${getPortalToken()}` },
     body: form,
   });
+  if (res.status === 401) {
+    setPortalToken(null);
+    throw new PortalError(401, "Сессия истекла, войдите снова");
+  }
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "Не удалось приложить файл");
   return (await res.json()) as PortalAttachment;
 }
@@ -178,6 +186,10 @@ export async function downloadPortalFile(path: string, filename: string) {
   const res = await fetch(`${API_BASE_URL}/portal${path}`, {
     headers: { Authorization: `Bearer ${getPortalToken()}` },
   });
+  if (res.status === 401) {
+    setPortalToken(null);
+    throw new PortalError(401, "Сессия истекла, войдите снова");
+  }
   if (!res.ok) throw new Error("Не удалось скачать файл");
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -193,11 +205,25 @@ export const fetchPortalUsage = () => request<PortalUsage>("/usage");
 export const createPortalTicket = (payload: { subject: string; body: string }) =>
   request<PortalTicket>("/tickets", { method: "POST", body: payload });
 
-export const replyToPortalTicket = (id: number, body: string) =>
-  request<PortalMessage>(`/tickets/${id}/messages`, { method: "POST", body: { body } });
+export function replyToPortalTicket(id: number, body: string, files: File[] = [], requestId?: string) {
+  const form = new FormData();
+  form.append("body", body);
+  if (requestId) form.append("request_id", requestId);
+  files.forEach((file) => form.append("files", file));
+  return request<PortalMessage>(`/tickets/${id}/messages/send`, { method: "POST", body: form });
+}
 
 export const downloadMyReport = (year: number, month: number) =>
   downloadPortalFile(`/reports/${year}/${month}.pdf`, `Отчёт ${month.toString().padStart(2, "0")}.${year}.pdf`);
 
 export const ratePortalTicket = (id: number, rating: number) =>
   request<PortalTicket>(`/tickets/${id}/rating`, { method: "POST", body: { rating } });
+
+export interface PortalProjectApproval {
+  id: number; project_id: number; round: number; state: 'pending' | 'approved' | 'rejected' | 'superseded';
+  snapshot: import('../api/work').PlanSnapshot; comment: string; requested_at: string; decided_at: string | null;
+  project_version: number; project_status: import('../api/work').ProjectStatus; can_decide: boolean;
+}
+export const listPortalProjectApprovals = () => request<PortalProjectApproval[]>('/project-approvals');
+export const decidePortalProjectApproval = (approval: PortalProjectApproval, decision: 'approved' | 'rejected', comment: string) =>
+  request<PortalProjectApproval>(`/project-approvals/${approval.id}/decision`, {method: 'POST', body: {version: approval.project_version, decision, comment}});

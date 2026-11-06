@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { BrandMark } from "../components/BrandMark";
+import { CommandMenu } from "../components/CommandMenu";
 import type { ReactNode } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/AuthContext";
 import { Avatar } from "../components/ui";
@@ -15,6 +17,8 @@ import {
 } from "../lib/notificationAlerts";
 import {
   IconBell,
+  IconProjects,
+  IconMenu,
   IconBuilding,
   IconChevronDown,
   IconChevronRight,
@@ -73,6 +77,7 @@ const GROUPS: NavGroup[] = [
       { to: "/settings/categories", label: "Категории", icon: <IconGrid size={15} /> },
       { to: "/settings/routing", label: "Маршрутизация", icon: <IconRoute size={15} /> },
       { to: "/settings/channels", label: "Каналы", icon: <IconInbox size={15} /> },
+      { to: "/settings/operations", label: "Состояние системы", icon: <IconServer size={15} /> },
       { to: "/settings/monitoring", label: "Мониторинг", icon: <IconServer size={15} /> },
       { to: "/settings/automation", label: "Автоматизация", icon: <IconClock size={15} /> },
       { to: "/settings/templates", label: "Шаблоны ответов", icon: <IconFileText size={15} /> },
@@ -181,7 +186,7 @@ function NotificationBell() {
 
   return (
     <div className="notification-bell" ref={ref}>
-      <button className="icon-btn" title="Уведомления" onClick={() => setOpen((v) => !v)}>
+      <button className="icon-btn" title="Уведомления" aria-label="Уведомления" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <IconBell size={18} />
         {unreadCount > 0 && <span className="notification-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>}
       </button>
@@ -219,7 +224,9 @@ function NotificationBell() {
                 className={`notification-row ${n.read_at ? "" : "unread"}`}
                 onClick={() => {
                   if (!n.read_at) readMutation.mutate(n.id);
-                  if (n.ticket_id) navigate(`/tickets/${n.ticket_id}`);
+                  if (n.type === "channel_error") navigate("/settings/operations");
+                  else if (n.project_id) navigate(`/projects/${n.project_id}`);
+                  else if (n.ticket_id) navigate(`/tickets/${n.ticket_id}`);
                   setOpen(false);
                 }}
               >
@@ -238,29 +245,63 @@ function NotificationBell() {
 export function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ reports: true, directory: true, settings: false });
+  const location = useLocation();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [theme, setTheme] = useState(() => localStorage.getItem("sd_theme") ?? "system");
+  const canManage = user?.role === "admin" || user?.role === "manager";
+  const currentGroup = GROUPS.find((group) => group.items.some((item) => location.pathname.startsWith(item.to)));
+  const pageTitle = currentGroup?.items.find((item) => location.pathname.startsWith(item.to))?.label
+    ?? (location.pathname.startsWith("/projects") ? "Проекты" : location.pathname === "/dashboard" ? "Обзор работы" : location.pathname === "/profile" ? "Мой профиль" : location.pathname === "/calls" ? "Звонки" : location.pathname === "/tickets/new" ? "Новая заявка" : "Заявки");
+
+  useEffect(() => {
+    setMobileOpen(false);
+    if (currentGroup) setOpenGroups((prev) => ({ ...prev, [currentGroup.key]: true }));
+    document.title = `${pageTitle} · Служба поддержки`;
+  }, [location.pathname, currentGroup, pageTitle]);
+
+  useEffect(() => {
+    if (theme === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.dataset.theme = theme;
+    localStorage.setItem("sd_theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMobileOpen(false);
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [mobileOpen]);
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ reports: false, directory: false, settings: false });
 
   function toggleGroup(key: string) {
     setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
   async function handleLogout() {
-    await logout();
-    navigate("/login");
+    const ending = logout();
+    navigate("/login", { replace: true });
+    await ending;
   }
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <a className="skip-link" href="#main-content">Перейти к содержимому</a>
+      {mobileOpen && <button className="sidebar-overlay" aria-label="Закрыть меню" onClick={() => setMobileOpen(false)} />}
+      <aside id="main-navigation" className={`sidebar${mobileOpen ? " sidebar-open" : ""}`}>
+
         <div className="sidebar-brand">
-          <span className="brand-mark">ОГ</span>
-          <span className="brand-name">Открытые Горизонты</span>
+          <BrandMark />
+          <div><span className="brand-name">Открытые Горизонты</span><span className="brand-caption">SERVICE DESK</span></div>
         </div>
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label="Главное меню">
+          <span className="nav-section-label">Рабочее пространство</span>
           <NavLink to="/dashboard" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
             <IconGrid size={16} />
-            <span>Дашборд</span>
+            <span>Обзор работы</span>
           </NavLink>
           <NavLink to="/tickets" end className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
             <IconInbox size={16} />
@@ -270,14 +311,15 @@ export function Layout() {
             <IconPlus size={16} />
             <span>Новая заявка</span>
           </NavLink>
+          <NavLink to="/projects" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}><IconProjects size={17} /><span>Проекты</span></NavLink>
           <NavLink to="/calls" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
             <IconPhone size={16} />
             <span>Звонки</span>
           </NavLink>
 
-          {GROUPS.map((group) => (
+          {GROUPS.filter((group) => canManage || group.key === "directory").map((group) => (
             <div className="nav-group" key={group.key}>
-              <button className="nav-group-head" onClick={() => toggleGroup(group.key)}>
+              <button className="nav-group-head" aria-expanded={!!openGroups[group.key]} onClick={() => toggleGroup(group.key)}>
                 {openGroups[group.key] ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
                 {group.icon}
                 <span>{group.label}</span>
@@ -295,15 +337,19 @@ export function Layout() {
             </div>
           ))}
         </nav>
+        <div className="sidebar-footer"><span className="sidebar-footer-dot" /> Служба поддержки<span className="muted">Открытые Горизонты</span></div>
       </aside>
 
       <div className="app-main">
         <header className="topbar">
+          <button className="icon-btn mobile-menu-button" aria-label="Открыть меню" aria-expanded={mobileOpen} aria-controls="main-navigation" onClick={() => setMobileOpen((open) => !open)}><IconMenu size={20} /></button>
           <div className="topbar-title">
-            <IconTicket size={18} />
-            <span>Служба поддержки</span>
+            {location.pathname.startsWith("/projects") ? <IconProjects size={18} /> : location.pathname === "/dashboard" ? <IconGrid size={18} /> : <IconTicket size={18} />}
+            <span>{pageTitle}</span>
           </div>
           <div className="spacer" />
+          <CommandMenu />
+          <select className="theme-select" aria-label="Цветовая тема" value={theme} onChange={(e) => setTheme(e.target.value)}><option value="system">Тема: системная</option><option value="light">Тема: светлая</option><option value="dark">Тема: тёмная</option></select>
           <NotificationBell />
           {user && (
             <div className="topbar-user">
@@ -325,7 +371,7 @@ export function Layout() {
             </div>
           )}
         </header>
-        <main className="app-content">
+        <main id="main-content" className="app-content" tabIndex={-1}>
           <Outlet />
         </main>
       </div>

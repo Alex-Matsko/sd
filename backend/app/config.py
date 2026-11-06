@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +35,9 @@ class Settings(BaseSettings):
     settings_encryption_key: str = "jP7WgoQPzPJpZgjNEQ7irtTLLEYhHQfpKxKZSQhcvlk="
 
     attachments_dir: str = "/data/attachments"
+    min_free_attachment_mb: int = Field(default=100, ge=0)
+    inbound_email_limit_mb: int = Field(default=48, ge=1, le=128)
+    channel_event_retention_days: int = Field(default=14, ge=1)
 
     cors_origins: list[str] = ["*"]
 

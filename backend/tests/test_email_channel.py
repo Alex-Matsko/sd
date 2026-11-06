@@ -1,3 +1,4 @@
+from app.services import channel_queue
 """Stage 4 email channel tests: MIME parsing, sender/thread resolution rules
 from section 2 (склейка диалога), end-to-end ingestion, and the integration
 settings store (secrets never round-trip in plaintext through the API)."""
@@ -359,6 +360,7 @@ def test_try_send_outbound_without_recipient_does_not_raise(db: Session, contact
     db.add(msg)
     db.commit()
     email_channel.try_send_outbound(db, ticket, msg, to_address=None)  # must not raise
+    channel_queue.run_batch(db, "outbound")
     assert msg.email_message_id is None
 
 
@@ -368,6 +370,7 @@ def test_try_send_outbound_without_config_does_not_raise(db: Session, contact: C
     db.add(msg)
     db.commit()
     email_channel.try_send_outbound(db, ticket, msg, to_address="client@example-corp.ru")  # no channel configured
+    channel_queue.run_batch(db, "outbound")
     assert msg.email_message_id is None
 
 
@@ -385,6 +388,7 @@ def test_try_send_outbound_sets_message_id_on_success(monkeypatch, db: Session, 
             secrets={"imap_password": "secret", "smtp_password": "secret"},
         ),
     )
+    channel_queue.run_batch(db, "outbound")
     assert channel_setting.is_enabled is True
 
     ticket = _open_ticket(db, contact)
@@ -393,6 +397,7 @@ def test_try_send_outbound_sets_message_id_on_success(monkeypatch, db: Session, 
     db.commit()
 
     email_channel.try_send_outbound(db, ticket, msg, to_address="client@example-corp.ru")
+    channel_queue.run_batch(db, "outbound")
     db.refresh(msg)
     assert msg.email_message_id is not None
     assert len(_FakeSMTP.sent) == 1
