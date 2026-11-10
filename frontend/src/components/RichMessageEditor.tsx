@@ -1,3 +1,5 @@
+import { ImagePreview } from "./ImagePreview";
+import { isImageAttachment, rasterImageBlob } from "../lib/imagePreview";
 import { useEffect, useRef, useState } from "react";
 import type { MessageUploadBlock } from "../api/types";
 
@@ -21,8 +23,18 @@ export function draftIdentity(draft: MessageDraft) {
 }
 function DraftImage({ file }: { file: File }) {
   const [url, setUrl] = useState("");
-  useEffect(() => { const next = URL.createObjectURL(file); setUrl(next); return () => URL.revokeObjectURL(next); }, [file]);
-  return <a href={url} target="_blank" rel="noreferrer" title="Открыть оригинал"><img src={url} alt={file.name} /></a>;
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    let next = "";
+    rasterImageBlob(file).then((blob) => {
+      if (!active) return;
+      if (!blob) { setError("Не удалось показать превью этого файла"); return; }
+      next = URL.createObjectURL(blob); setUrl(next);
+    }).catch(() => { if (active) setError("Не удалось прочитать изображение"); });
+    return () => { active = false; if (next) URL.revokeObjectURL(next); };
+  }, [file]);
+  return <ImagePreview url={url} filename={file.name} error={error} />;
 }
 export function RichMessageEditor({ value, onChange, label, disabled = false }: {
   value: MessageDraft; onChange: (draft: MessageDraft) => void; label: string; disabled?: boolean;
@@ -38,7 +50,7 @@ export function RichMessageEditor({ value, onChange, label, disabled = false }: 
       setError("Лимит: 25 МБ на файл и 48 МБ на сообщение"); return;
     }
     setError("");
-    const images = files.filter((f) => /^image\/(png|jpeg|gif|webp)$/.test(f.type));
+    const images = files.filter((f) => /^image\/(png|jpeg|gif|webp)$/.test(f.type) || (!f.type || f.type === "application/octet-stream") && /\.(png|jpe?g|gif|webp)$/i.test(f.name));
     const others = files.filter((f) => !images.includes(f));
     if (!images.length) { onChange({ ...value, files: [...value.files, ...others] }); return; }
     const saved = position;
@@ -67,15 +79,15 @@ export function RichMessageEditor({ value, onChange, label, disabled = false }: 
         onBlur={(e) => { cursor.current = { id: block.id, start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd }; }}
         onChange={(e) => onChange({ ...value, blocks: value.blocks.map((b) => b.id === block.id ? { ...block, text: e.target.value } : b) })}
         onPaste={(e) => { const files = Array.from(e.clipboardData.files); if (files.length) { e.preventDefault(); insert(files, { id: block.id, start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd }); } }}
-      /> : <figure key={block.id} className="rich-draft-image"><DraftImage file={block.file} />
-        <figcaption><span>{block.file.name} · оригинал</span><button type="button" disabled={disabled} aria-label={`Удалить скриншот ${block.file.name}`}
-          onClick={() => onChange({ ...value, blocks: value.blocks.filter((b) => b.id !== block.id) })}>Удалить</button></figcaption></figure>)}
+      /> : <div key={block.id} className="rich-draft-image"><DraftImage file={block.file} />
+        <div className="rich-draft-image-actions"><button type="button" disabled={disabled} aria-label={`Удалить скриншот ${block.file.name}`}
+          onClick={() => onChange({ ...value, blocks: value.blocks.filter((b) => b.id !== block.id) })}>Удалить скриншот</button></div></div>)}
     </div>
     <div className="rich-editor-tools"><label className="rich-file-button">Добавить скриншот или файл<input aria-label={`${label}: добавить файлы`} type="file" multiple disabled={disabled}
       onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ""; insert(files); }} /></label>
       <span>Скриншот можно вставить из буфера. Enter — новая строка.</span></div>
-    {value.files.map((file, i) => <span className="attachment-chip" key={`${file.name}-${i}`}>{file.name}
-      <button type="button" disabled={disabled} aria-label={`Удалить файл ${file.name}`} onClick={() => onChange({ ...value, files: value.files.filter((_, n) => n !== i) })}>×</button></span>)}
+    {value.files.map((file, i) => <div key={`${file.name}-${i}`} className="draft-file-attachment">{isImageAttachment({filename: file.name, mime_type: file.type}) ? <DraftImage file={file} /> : <span className="attachment-chip">{file.name}</span>}
+      <button type="button" disabled={disabled} aria-label={`Удалить файл ${file.name}`} onClick={() => onChange({ ...value, files: value.files.filter((_, n) => n !== i) })}>Удалить файл</button></div>)}
     {error && <p role="alert" className="rich-editor-error">{error}</p>}
   </div>;
 }

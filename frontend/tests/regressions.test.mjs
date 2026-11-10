@@ -148,3 +148,21 @@ test('replanning allows the owner to return reviewed or accepted tasks to the pl
   assert.deepEqual(taskTargets('done', 'planning', true, false), ['backlog', 'ready', 'cancelled']);
   assert.deepEqual(taskTargets('review', 'planning', false, false), []);
 });
+
+test("image attachment previews recognize legacy files and retain original bytes", async () => {
+  const { isImageAttachment, rasterImageBlob } = await loadSource("lib/imagePreview.ts");
+  assert.equal(isImageAttachment({ filename: "SCREEN.PNG", mime_type: "application/octet-stream" }), true);
+  assert.equal(isImageAttachment({ filename: "screenshot", mime_type: "image/jpeg" }), true);
+  assert.equal(isImageAttachment({ filename: "manual.pdf", mime_type: "application/pdf" }), false);
+  const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]);
+  const image = await rasterImageBlob(new Blob([bytes], { type: "application/octet-stream" }));
+  assert.equal(image.type, "image/png");
+  assert.deepEqual(new Uint8Array(await image.arrayBuffer()), bytes);
+});
+
+test("untrusted HTML and SVG cannot become a navigable image preview by changing their name or MIME", async () => {
+  const { isImageAttachment, rasterImageBlob } = await loadSource("lib/imagePreview.ts");
+  assert.equal(isImageAttachment({ filename: "image.png", mime_type: "image/svg+xml" }), false);
+  assert.equal(await rasterImageBlob(new Blob(["<svg onload='alert(1)'></svg>"], { type: "image/png" })), null);
+  assert.equal(await rasterImageBlob(new Blob(["<html><script>alert(1)</script></html>"], { type: "image/jpeg" })), null);
+});
