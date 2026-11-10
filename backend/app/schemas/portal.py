@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.message import TextBlock, ImageBlock
 from app.core.enums import Priority, TicketStatus
 
 
@@ -48,6 +49,7 @@ class PortalRatingRequest(BaseModel):
 class PortalMessageRead(BaseModel):
     id: int
     body: str
+    content_blocks: list[TextBlock | ImageBlock] | None = None
     # The portal never exposes which engineer wrote a reply - the client deals
     # with "поддержка", and staff names are internal.
     is_from_support: bool
@@ -56,6 +58,7 @@ class PortalMessageRead(BaseModel):
 
 
 class PortalAttachmentRead(BaseModel):
+    mime_type: str | None = None
     id: int
     filename: str
     size_bytes: int

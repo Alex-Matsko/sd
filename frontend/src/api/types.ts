@@ -390,6 +390,9 @@ export interface Delivery {
   completed_at: string | null;
 }
 
+export type MessageBlock = { type: "text"; text: string } | { type: "image"; attachment_id: number };
+export type MessageUploadBlock = { type: "text"; text: string } | { type: "image"; file_index: number };
+
 export interface Message {
   delivery: Delivery | null;
   id: number;
@@ -399,6 +402,7 @@ export interface Message {
   author_user_id: number | null;
   author_contact_id: number | null;
   body: string;
+  content_blocks: MessageBlock[] | null;
   reply_to_message_id: number | null;
   created_at: string;
   attachments: Attachment[];

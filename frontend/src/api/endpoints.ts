@@ -13,6 +13,7 @@ import type {
   ImpactUrgencyRule,
   IntegrationSetting,
   Message,
+  MessageUploadBlock,
   Notification,
   Organization,
   OrganizationEmailDomain,
@@ -259,6 +260,7 @@ export function updateUser(id: number, payload: Partial<User> & { password?: str
 
 // --- Tickets ---
 export interface TicketFilters {
+  sort?: "created_desc" | "number_asc" | "number_desc";
   status_filter?: TicketStatus;
   organization_id?: number;
   assigned_engineer_id?: number;
@@ -323,13 +325,14 @@ export function listMessages(ticketId: number) {
 }
 export function createMessage(
   ticketId: number,
-  payload: { direction: string; body: string; request_id?: string; channel?: string | null; reply_to_message_id?: number | null },
+  payload: { direction: string; body: string; content_blocks?: MessageUploadBlock[]; request_id?: string; channel?: string | null; reply_to_message_id?: number | null },
   files: File[] = []
 ) {
   const form = new FormData();
   form.append("payload", JSON.stringify(payload));
   files.forEach((file) => form.append("files", file));
-  return apiForm<Message>(`/tickets/${ticketId}/messages/send`, form);
+  const action = payload.direction === "internal_note" ? "notes" : payload.direction === "outbound" ? "replies" : "messages";
+  return apiForm<Message>(`/tickets/${ticketId}/${action}/send`, form);
 }
 export function uploadAttachment(ticketId: number, messageId: number, file: File) {
   return apiUpload<Attachment>(`/tickets/${ticketId}/messages/${messageId}/attachments`, file);

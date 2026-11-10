@@ -46,7 +46,7 @@ def test_create_ticket_resolves_contract_tariff_and_matrix_priority(db, contact,
     assert ticket.contract_id == active_contract.id
     assert ticket.has_no_active_contract is False
     assert ticket.priority == Priority.P1
-    assert ticket.display_number == f"OH-{ticket.number}"
+    assert ticket.display_number == f"OH-{ticket.number:06d}"
 
 
 def test_create_ticket_without_contract_falls_back_and_flags(db, contact, default_tariff):

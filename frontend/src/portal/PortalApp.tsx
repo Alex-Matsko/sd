@@ -1,3 +1,5 @@
+import { MessageContent } from "../components/MessageContent";
+import { RichMessageEditor, emptyMessageDraft, messageDraftPayload, draftIdentity } from "../components/RichMessageEditor";
 import { ProjectApprovals } from "./ProjectApprovals";
 import { BrandMark } from "../components/BrandMark";
 import { useDraftRequestId } from "../lib/useDraftRequestId";
@@ -19,7 +21,6 @@ import {
   fetchPortalUpdates,
   markPortalUpdatesSeen,
   downloadMyReport,
-  downloadPortalFile,
   changePortalPassword,
 } from "./api";
 
@@ -358,22 +359,20 @@ function PortalNewTicket({ onDone }: { onDone: () => void }) {
 
 function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
   const qc = useQueryClient();
-  const [reply, setReply] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
+  const [draft, setDraft] = useState(emptyMessageDraft);
 
-  const [downloadError, setDownloadError] = useState<string | null>(null);
   const ticketQuery = useQuery({
     queryKey: ["portal-ticket", id],
     queryFn: () => getPortalTicket(id),
     refetchInterval: 15_000,
   });
 
-  const requestId = useDraftRequestId(JSON.stringify([reply, files.map((file) => [file.name, file.size, file.lastModified])]));
+  const draftPayload = messageDraftPayload(draft);
+  const requestId = useDraftRequestId(JSON.stringify([id, draftIdentity(draft)]));
   const replyMutation = useMutation({
-    mutationFn: () => replyToPortalTicket(id, reply.trim(), files, requestId),
+    mutationFn: () => replyToPortalTicket(id, draftPayload.body, draftPayload.files, requestId, draftPayload.content_blocks),
     onSuccess: () => {
-      setReply("");
-      setFiles([]);
+      setDraft(emptyMessageDraft());
       qc.invalidateQueries({ queryKey: ["portal-ticket", id] });
     },
   });
@@ -419,22 +418,7 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
             {ticket.messages.map((m) => (
               <div key={m.id} className={`portal-message ${m.is_from_support ? "from-support" : "from-me"}`}>
                 <div className="portal-message-author">{m.is_from_support ? "Поддержка" : "Вы"}</div>
-                <div className="portal-message-body">{m.body}</div>
-                {m.attachments?.length > 0 && (
-                  <div className="portal-attachments">
-                    {m.attachments.map((a) => (
-                      <button
-                        key={a.id}
-                        className="portal-link portal-small"
-                        onClick={() =>
-                          downloadPortalFile(`/tickets/${id}/attachments/${a.id}`, a.filename).catch((error: Error) => setDownloadError(error.message))
-                        }
-                      >
-                        {a.filename} ({Math.max(1, Math.round(a.size_bytes / 1024))} КБ)
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <MessageContent ticketId={id} body={m.body} blocks={m.content_blocks} attachments={m.attachments ?? []} portal />
                 <div className="portal-message-time">{formatDate(m.created_at)}</div>
               </div>
             ))}
@@ -458,47 +442,11 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
           )}
 
           <div className="portal-reply">
-            <textarea
-              rows={3}
-              disabled={replyMutation.isPending}
-              aria-label="Текст сообщения"
-              value={reply}
-              onChange={(e) => setReply(e.target.value)}
-              placeholder="Написать в поддержку…"
-            />
-            <div className="portal-reply-files">
-              <label className="portal-link portal-small">
-                Приложить файл
-                <input
-                  type="file"
-                  multiple
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    // Список читается до сброса значения: после очистки
-                    // input.files уже пуст.
-                    const picked = Array.from(e.target.files ?? []);
-                    e.target.value = "";
-                    setFiles((current) => [...current, ...picked]);
-                  }}
-                />
-              </label>
-              {files.map((file, index) => (
-                <span className="portal-file-chip" key={`${file.name}${index}`}>
-                  {file.name}
-                  <button
-                    className="portal-link"
-                    onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-            {downloadError && <div className="portal-error" role="alert">{downloadError}</div>}
+            <RichMessageEditor value={draft} onChange={setDraft} label="Сообщение в поддержку" disabled={replyMutation.isPending} />
             {replyMutation.isError && <div className="portal-error">{(replyMutation.error as Error).message}</div>}
             <button
               className="portal-btn portal-btn-primary"
-              disabled={(!reply.trim() && files.length === 0) || replyMutation.isPending}
+              disabled={(!draftPayload.body.trim() && draftPayload.files.length === 0) || replyMutation.isPending}
               onClick={() => replyMutation.mutate()}
             >
               Отправить

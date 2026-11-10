@@ -3,7 +3,7 @@ from datetime import timedelta
 from pathlib import Path
 import uuid
 
-from app.core.enums import Channel
+from app.core.enums import Channel, MessageDirection
 from app.models.message import Message
 from app.models.ticket import Ticket
 from app.services import email_channel, max_channel, max_client, sla, telegram_channel, telegram_client
@@ -36,6 +36,8 @@ def send_job(db, job):
     message = db.get(Message, job.message_id) if job.message_id else None
     if job.message_id and message is None:
         raise PermanentChannelFailure("Сообщение удалено")
+    if message is not None and message.direction != MessageDirection.OUTBOUND:
+        raise PermanentChannelFailure("Внутренняя заметка не может быть отправлена клиенту")
     payload = job.payload
     ticket = message.ticket if message else db.get(Ticket, job.ticket_id) if job.ticket_id else None
     if ticket and payload.get("contact_id") is not None and (ticket.contact_id != payload.get("contact_id")
@@ -80,9 +82,10 @@ def send_job(db, job):
         if not parent or not parent.email_message_id:
             parent = db.query(Message).filter(Message.ticket_id == ticket.id, Message.id != (message.id if message else -1),
                                              Message.email_message_id.isnot(None)).order_by(Message.id.desc()).first()
+        rich_options = {"content_blocks": message.content_blocks, "attachment_ids": [a.id for a in attachments]} if message and message.content_blocks is not None else {}
         email_channel.send_outbound_email(config, recipient, ticket, text,
                                           parent.email_message_id if parent else None,
-                                          attachments=[_file(item) for item in attachments], message_id=stable_id)
+                                          attachments=[_file(item) for item in attachments], message_id=stable_id, **rich_options)
         if message:
             message.email_message_id = stable_id
         _first_response(db, message)
@@ -91,6 +94,9 @@ def send_job(db, job):
     reply = (parent.max_message_id if job.channel == "max" else parent.telegram_message_id) if parent else payload.get("reply_to")
     buttons = payload.get("buttons") if message is None else (
         max_channel._menu_buttons_for(message.ticket) if job.channel == "max" else telegram_channel._close_button_for(message.ticket))
+    if message is not None and message.content_blocks is not None:
+        _send_rich_parts(db, job, message, config, recipient, attachments, reply, buttons)
+        return
     chunks = [text[index:index + 3000] for index in range(0, len(text), 3000)]
     done = job.payload.get("text_chunks_sent", 0)
     for index in range(done, len(chunks)):
@@ -138,3 +144,46 @@ def send_job(db, job):
         _checkpoint(db, job, sent_attachment_ids=sent)
     if not chunks and not attachments:
         raise PermanentChannelFailure("Сообщение пустое")
+
+
+def _send_rich_parts(db, job, message, config, recipient, attachments, reply, buttons):
+    from app.services.message_content import delivery_parts, MessageContentError
+    try:
+        parts = delivery_parts(message, attachments)
+    except MessageContentError as exc:
+        raise PermanentChannelFailure(str(exc))
+    if not parts:
+        raise PermanentChannelFailure("Сообщение пустое")
+    for index in range(job.payload.get("content_parts_sent", 0), len(parts)):
+        kind, value = parts[index]
+        if kind == "text":
+            if job.channel == "telegram":
+                result = telegram_client.send_message(config.base_url, config.token, recipient, value,
+                    buttons=buttons if index == 0 else None, reply_to_message_id=reply if index == 0 else None)
+            else:
+                result = max_client.send_message(config.base_url, config.token, recipient, value,
+                    buttons=buttons if index == 0 else None, reply_to_mid=reply if index == 0 else None)
+        else:
+            filename, content, mime = _file(value)
+            if job.channel == "telegram":
+                # Documents preserve original bytes and resolution; sendPhoto recompresses images.
+                result = telegram_client.send_document(config.base_url, config.token, recipient, filename, content, mime)
+            else:
+                tokens = dict(job.payload.get("max_file_tokens", {}))
+                token = tokens.get(str(value.id))
+                if not token:
+                    token = max_client.upload_file(config.base_url, config.token, filename, content, mime)
+                    tokens[str(value.id)] = token
+                    _checkpoint(db, job, max_file_tokens=tokens)
+                result = max_client.send_message(config.base_url, config.token, recipient, filename,
+                    attachments=[{"type": "file", "payload": {"token": token}}])
+        remote_id = result.get("message_id") if job.channel == "telegram" else ((result.get("message") or {}).get("body") or {}).get("mid")
+        if remote_id is None:
+            raise ChannelFailure("Канал не подтвердил отправку части сообщения")
+        if index == 0:
+            if job.channel == "telegram":
+                message.telegram_message_id = remote_id
+            else:
+                message.max_message_id = remote_id
+        _first_response(db, message)
+        _checkpoint(db, job, content_parts_sent=index + 1)

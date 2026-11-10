@@ -1,6 +1,7 @@
+import { MessageComposer } from "../components/MessageComposer";
+import { MessageContent } from "../components/MessageContent";
 import { ticketProjects } from "../api/work";
 import { PROJECT_LABELS } from "../lib/work";
-import { useDraftRequestId } from "../lib/useDraftRequestId";
 import { DeliveryStatus } from "../components/DeliveryStatus";
 import { localDate } from "../lib/dates";
 import { useState } from "react";
@@ -8,10 +9,8 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   changeTicketClient,
-  createMessage,
   createTimeEntry,
   deleteTimeEntry,
-  downloadAttachment,
   getContact,
   getOrganizationUsage,
   getTicket,
@@ -38,17 +37,11 @@ import {
   formatDateTime,
   formatMinutes,
 } from "../lib/labels";
-import type { Attachment, Message, MessageDirection } from "../api/types";
+import type { Message } from "../api/types";
 
 function truncate(text: string, max: number): string {
   const collapsed = text.replace(/\s+/g, " ").trim();
   return collapsed.length > max ? `${collapsed.slice(0, max)}…` : collapsed;
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} Б`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
 export function TicketDetailPage() {
@@ -56,10 +49,8 @@ export function TicketDetailPage() {
   const id = Number(ticketId);
   const qc = useQueryClient();
   const { user } = useAuth();
-  const [replyBody, setReplyBody] = useState("");
-  const [replyDirection, setReplyDirection] = useState<MessageDirection>("outbound");
   const [replyTo, setReplyTo] = useState<Message | null>(null);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [noteReplyTo, setNoteReplyTo] = useState<Message | null>(null);
 
   const [timeMinutes, setTimeMinutes] = useState(30);
   const [timeComment, setTimeComment] = useState("");
@@ -116,25 +107,6 @@ export function TicketDetailPage() {
   const updateMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => updateTicket(id, payload),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ticket", id] }),
-  });
-
-  const downloadMutation = useMutation({
-    mutationFn: (attachment: Attachment) => downloadAttachment(id, attachment),
-  });
-
-  const requestId = useDraftRequestId(JSON.stringify([replyBody, replyDirection, replyTo?.id,
-    pendingFiles.map((file) => [file.name, file.size, file.lastModified])]));
-  const messageMutation = useMutation({
-    mutationFn: () => createMessage(id, {
-      direction: replyDirection, body: replyBody.trim(), reply_to_message_id: replyTo?.id ?? null, request_id: requestId,
-    }, pendingFiles),
-    onSuccess: () => {
-      setReplyBody("");
-      setReplyTo(null);
-      setPendingFiles([]);
-      qc.invalidateQueries({ queryKey: ["ticket", id, "messages"] });
-      qc.invalidateQueries({ queryKey: ["ticket", id] });
-    },
   });
 
   const deleteTimeMutation = useMutation({
@@ -242,7 +214,11 @@ export function TicketDetailPage() {
                       <span className="muted">{CHANNEL_LABELS[m.channel]}</span>
                       <span className="spacer" />
                       <span className="muted">{formatDateTime(m.created_at)}</span>
-                      <button className="btn-link" onClick={() => setReplyTo(m)}>
+                      <button className="btn-link" onClick={() => {
+                        const internal = m.direction === "internal_note";
+                        if (internal) setNoteReplyTo(m); else setReplyTo(m);
+                        document.getElementById(`compose-${internal ? "internal_note" : "outbound"}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      }}>
                         Ответить
                       </button>
                     </div>
@@ -252,108 +228,20 @@ export function TicketDetailPage() {
                         {truncate(quoted.body, 140)}
                       </div>
                     )}
-                    <div className="message-body">{m.body}</div>
+                    <MessageContent ticketId={id} body={m.body} blocks={m.content_blocks} attachments={m.attachments} />
                     {m.delivery && <DeliveryStatus ticketId={id} messageId={m.id} delivery={m.delivery} />}
-                    {m.attachments.length > 0 && (
-                      <div className="message-attachments">
-                        {m.attachments.map((a) => (
-                          <button key={a.id} className="attachment-chip" onClick={() => downloadMutation.mutate(a)}>
-                            <span className="attachment-name">{a.filename}</span>
-                            <span className="muted">{formatFileSize(a.size_bytes)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 );
               })}
               {messagesQuery.isSuccess && (messagesQuery.data ?? []).length === 0 && <p className="muted">Сообщений пока нет</p>}
             </div>
 
-            <div className="reply-box">
-              {replyTo && (
-                <div className="message-quote message-quote-active">
-                  <span className="message-quote-label">Ответ на «{MESSAGE_DIRECTION_LABELS[replyTo.direction]}»:</span>{" "}
-                  {truncate(replyTo.body, 140)}
-                  <button className="btn-link" onClick={() => setReplyTo(null)}>
-                    ✕
-                  </button>
-                </div>
-              )}
-              <div className="form-row-inline">
-                <label>
-                  <input type="radio" checked={replyDirection === "outbound"} onChange={() => setReplyDirection("outbound")} /> Ответ клиенту
-                </label>
-                <label>
-                  <input type="radio" checked={replyDirection === "internal_note"} onChange={() => setReplyDirection("internal_note")} /> Внутренняя заметка
-                </label>
-              </div>
-              {(templatesQuery.data ?? []).length > 0 && (
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const template = (templatesQuery.data ?? []).find((t) => t.id === Number(e.target.value));
-                    if (!template) return;
-                    // Append rather than replace: an engineer often types a
-                    // sentence of context first, then drops in the boilerplate.
-                    setReplyBody((body) => (body.trim() ? `${body.trimEnd()}\n\n${template.body}` : template.body));
-                    e.target.value = "";
-                  }}
-                >
-                  <option value="">Вставить шаблон ответа…</option>
-                  {(templatesQuery.data ?? []).map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <textarea aria-label="Текст сообщения" disabled={messageMutation.isPending} rows={3} value={replyBody} onChange={(e) => setReplyBody(e.target.value)} placeholder="Введите текст сообщения…" />
-              {pendingFiles.length > 0 && (
-                <div className="message-attachments">
-                  {pendingFiles.map((file, index) => (
-                    <span className="attachment-chip" key={`${file.name}-${index}`}>
-                      <span className="attachment-name">{file.name}</span>
-                      <span className="muted">{formatFileSize(file.size)}</span>
-                      <button
-                        className="btn-link"
-                        onClick={() => setPendingFiles((files) => files.filter((_, i) => i !== index))}
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              {downloadMutation.isError && <ErrorBanner message={downloadMutation.error.message} />}
-              {messageMutation.isError && <ErrorBanner message={(messageMutation.error as Error).message} />}
-              <div className="modal-foot" style={{ padding: 0, borderTop: "none" }}>
-                <label className="btn btn-ghost" style={{ cursor: "pointer" }}>
-                  Прикрепить файл
-                  <input
-                    type="file"
-                    multiple
-                    style={{ display: "none" }}
-                    onChange={(e) => {
-                      // Read the FileList before resetting the input: the
-                      // state updater below runs later, by which point
-                      // clearing `value` has already emptied `e.target.files`.
-                      // (Resetting is what lets the same file be picked twice.)
-                      const chosen = Array.from(e.target.files ?? []);
-                      e.target.value = "";
-                      setPendingFiles((files) => [...files, ...chosen]);
-                    }}
-                  />
-                </label>
-                <div className="spacer" />
-                <button
-                  className="btn btn-primary"
-                  disabled={(!replyBody.trim() && pendingFiles.length === 0) || messageMutation.isPending}
-                  onClick={() => messageMutation.mutate()}
-                >
-                  Отправить
-                </button>
-              </div>
+            <div className="message-composers">
+              <MessageComposer key={`note-${id}`} ticketId={id} direction="internal_note" replyTo={noteReplyTo?.ticket_id === id ? noteReplyTo : null}
+                clearReply={() => setNoteReplyTo(null)} templates={[]} recipient="" channel="" />
+              <MessageComposer key={`reply-${id}`} ticketId={id} direction="outbound" replyTo={replyTo?.ticket_id === id ? replyTo : null}
+                clearReply={() => setReplyTo(null)} templates={templatesQuery.data ?? []}
+                recipient={contactQuery.data?.full_name ?? "Клиент заявки"} channel={CHANNEL_LABELS[ticket.channel]} />
             </div>
           </div>
 

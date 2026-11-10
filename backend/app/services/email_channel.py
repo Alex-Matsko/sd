@@ -308,7 +308,7 @@ def send_plain_email(config: EmailConfig, to_address: str, subject: str, body: s
 
 
 def send_outbound_email(config: EmailConfig, to_address: str, ticket: Ticket, body: str, in_reply_to: str | None,
-                        *, attachments=(), message_id: str | None = None) -> str:
+                        *, attachments=(), message_id: str | None = None, content_blocks=None, attachment_ids=None) -> str:
     msg = StdEmailMessage()
     msg["From"] = f"{config.from_display_name} <{config.from_address}>"
     msg["To"] = to_address
@@ -320,8 +320,21 @@ def send_outbound_email(config: EmailConfig, to_address: str, ticket: Ticket, bo
     if in_reply_to:
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = in_reply_to
-    msg.set_content(body)
-    for filename, content, mime_type in attachments:
+    msg.set_content(body or "Скриншоты во вложении")
+    inline = set()
+    html_part = None
+    ids = attachment_ids or []
+    if content_blocks is not None:
+        from app.services.message_content import email_html
+        inline = {b["attachment_id"] for b in content_blocks if b["type"] == "image"}
+        msg.add_alternative(email_html(content_blocks, {i: f"sd-image-{i}" for i in inline}), subtype="html")
+        html_part = msg.get_payload()[-1]
+    for index, (filename, content, mime_type) in enumerate(attachments):
+        if index < len(ids) and ids[index] in inline:
+            _, _, subtype = mime_type.partition("/")
+            html_part.add_related(content, maintype="image", subtype=subtype,
+                                             cid=f"<sd-image-{ids[index]}>", filename=filename, disposition="inline")
+            continue
         maintype, _, subtype = (mime_type or "application/octet-stream").partition("/")
         msg.add_attachment(content, maintype=maintype or "application", subtype=subtype or "octet-stream", filename=filename)
 

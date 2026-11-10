@@ -121,4 +121,4 @@ class Ticket(Base, TimestampMixin):
 
     @property
     def display_number(self) -> str:
-        return f"OH-{self.number}"
+        return f"OH-{self.number:06d}"

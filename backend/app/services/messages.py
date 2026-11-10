@@ -37,6 +37,8 @@ def add_message(
     from app.services.tickets import transition_status
 
     attachments = attachments or []
+    from app.services.message_content import prepare, image_mime
+    payload = prepare(payload, attachments)
     request_key = None
     request_digest = None
     if payload.request_id is not None:
@@ -81,6 +83,15 @@ def add_message(
     for filename, content, mime in attachments:
         message.attachments.append(attachment_service.store_attachment(message.id, filename, content, mime))
     db.flush()
+    if payload.content_blocks is not None:
+        message.content_blocks = [
+            {"type": "text", "text": block.text} if block.type == "text" else
+            {"type": "image", "attachment_id": message.attachments[block.file_index].id}
+            for block in payload.content_blocks
+        ]
+        for block in payload.content_blocks:
+            if block.type == "image":
+                message.attachments[block.file_index].mime_type = image_mime(attachments[block.file_index][1])
     external_delivery = payload.direction == MessageDirection.OUTBOUND and channel in (Channel.EMAIL, Channel.MAX, Channel.TELEGRAM)
     if external_delivery:
         job = enqueue_message(db, message)

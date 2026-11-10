@@ -1,3 +1,4 @@
+import type { MessageBlock, MessageUploadBlock } from "../api/types";
 /** Client-portal HTTP layer.
  *
  * Deliberately separate from `api/client.ts`: the portal stores its own token
@@ -79,6 +80,7 @@ export interface PortalTicket {
 }
 
 export interface PortalMessage {
+  content_blocks: MessageBlock[] | null;
   id: number;
   body: string;
   is_from_support: boolean;
@@ -121,6 +123,7 @@ export async function consumeMagicLink(token: string) {
 }
 
 export interface PortalAttachment {
+  mime_type: string | null;
   id: number;
   filename: string;
   size_bytes: number;
@@ -205,9 +208,10 @@ export const fetchPortalUsage = () => request<PortalUsage>("/usage");
 export const createPortalTicket = (payload: { subject: string; body: string }) =>
   request<PortalTicket>("/tickets", { method: "POST", body: payload });
 
-export function replyToPortalTicket(id: number, body: string, files: File[] = [], requestId?: string) {
+export function replyToPortalTicket(id: number, body: string, files: File[] = [], requestId?: string, blocks?: MessageUploadBlock[]) {
   const form = new FormData();
   form.append("body", body);
+  if (blocks) form.append("content_blocks", JSON.stringify(blocks));
   if (requestId) form.append("request_id", requestId);
   files.forEach((file) => form.append("files", file));
   return request<PortalMessage>(`/tickets/${id}/messages/send`, { method: "POST", body: form });
@@ -227,3 +231,10 @@ export interface PortalProjectApproval {
 export const listPortalProjectApprovals = () => request<PortalProjectApproval[]>('/project-approvals');
 export const decidePortalProjectApproval = (approval: PortalProjectApproval, decision: 'approved' | 'rejected', comment: string) =>
   request<PortalProjectApproval>(`/project-approvals/${approval.id}/decision`, {method: 'POST', body: {version: approval.project_version, decision, comment}});
+
+export async function portalFileBlob(path: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE_URL}/portal${path}`, { headers: { Authorization: `Bearer ${getPortalToken()}` } });
+  if (res.status === 401) { setPortalToken(null); throw new PortalError(401, "Сессия истекла, войдите снова"); }
+  if (!res.ok) throw new Error("Не удалось открыть скриншот");
+  return res.blob();
+}

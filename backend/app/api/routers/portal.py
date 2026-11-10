@@ -1,3 +1,6 @@
+import json
+from pydantic import ValidationError
+from app.services.message_content import MessageContentError
 """Client portal API (section 7). Everything under /portal is authenticated
 as a Contact, never as a staff User - see services/portal.py."""
 
@@ -290,10 +293,11 @@ def get_my_ticket(
             PortalMessageRead(
                 id=m.id,
                 body=m.body,
+                content_blocks=m.content_blocks,
                 is_from_support=MessageDirection(m.direction) == MessageDirection.OUTBOUND,
                 created_at=m.created_at,
                 attachments=[
-                    PortalAttachmentRead(id=a.id, filename=a.filename, size_bytes=a.size_bytes)
+                    PortalAttachmentRead(id=a.id, filename=a.filename, size_bytes=a.size_bytes, mime_type=a.mime_type)
                     for a in m.attachments
                 ],
             )
@@ -344,7 +348,7 @@ def reply_to_my_ticket(
 
 @router.post("/tickets/{ticket_id}/messages/send", response_model=PortalMessageRead, status_code=201)
 async def send_message_with_files(
-    ticket_id: int, body: str = Form(""), request_id: UUID | None = Form(None),
+    ticket_id: int, body: str = Form(""), content_blocks: str | None = Form(None), request_id: UUID | None = Form(None),
     files: list[UploadFile] = File(default=[]), contact: Contact = Depends(get_current_contact),
     db: Session = Depends(get_db),
 ):
@@ -357,15 +361,18 @@ async def send_message_with_files(
             raise HTTPException(status_code=422, detail="Введите сообщение или приложите файл")
         message = messages_service.add_message(
             db, ticket, MessageCreate(direction=MessageDirection.INBOUND, body=body.strip() or "Файлы во вложении",
-                                      channel=Channel.PORTAL, request_id=request_id),
+                                      channel=Channel.PORTAL, request_id=request_id,
+                                      content_blocks=json.loads(content_blocks) if content_blocks is not None else None),
             author_contact=contact, attachments=uploads,
         )
+    except (ValidationError, json.JSONDecodeError, MessageContentError):
+        raise HTTPException(status_code=422, detail="Некорректное содержимое сообщения")
     except messages_service.RequestConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except attachments_service.AttachmentTooLarge as exc:
         raise HTTPException(status_code=413, detail=str(exc))
-    return PortalMessageRead(id=message.id, body=message.body, is_from_support=False, created_at=message.created_at,
-                             attachments=[PortalAttachmentRead(id=a.id, filename=a.filename, size_bytes=a.size_bytes) for a in message.attachments])
+    return PortalMessageRead(id=message.id, body=message.body, content_blocks=message.content_blocks, is_from_support=False, created_at=message.created_at,
+                             attachments=[PortalAttachmentRead(id=a.id, filename=a.filename, size_bytes=a.size_bytes, mime_type=a.mime_type) for a in message.attachments])
 
 
 @router.post(

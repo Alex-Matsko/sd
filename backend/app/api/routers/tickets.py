@@ -25,6 +25,7 @@ from app.schemas.ticket import TicketClientChange, TicketCreate, TicketRead, Tic
 from app.schemas.time_entry import TimeEntryCreate, TimeEntryRead, TimeEntryUpdate
 from app.services import attachments as attachments_service
 from app.services import audit as audit_service
+from app.services.message_content import MessageContentError
 from app.services import ticket_access
 from app.services import messages as messages_service
 from app.services import sla as sla_service
@@ -97,6 +98,7 @@ def list_tickets(
     open_only: bool = False,
     exclude_archived: bool = False,
     overdue: bool = False,
+    sort: Literal["created_desc", "number_asc", "number_desc"] = "created_desc",
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -146,8 +148,11 @@ def list_tickets(
             )
         )
     response.headers["X-Total-Count"] = str(query.count())
+    ordering = {"created_desc": (Ticket.created_at.desc(), Ticket.id.desc()),
+                "number_asc": (Ticket.number.asc(), Ticket.id.asc()),
+                "number_desc": (Ticket.number.desc(), Ticket.id.desc())}[sort]
     tickets = (
-        query.order_by(Ticket.created_at.desc(), Ticket.id.desc())
+        query.order_by(*ordering)
         .limit(max(1, min(limit, MAX_PAGE_SIZE)))
         .offset(max(0, offset))
         .all()
@@ -350,6 +355,8 @@ def create_message(
         return messages_service.add_message(db, ticket, payload, author_user=actor)
     except messages_service.RequestConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    except MessageContentError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.post("/{ticket_id}/messages/send", response_model=MessageRead, status_code=201)
@@ -368,8 +375,32 @@ async def send_message(
         raise HTTPException(status_code=422, detail="Некорректные поля сообщения")
     except messages_service.RequestConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    except MessageContentError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     except attachments_service.AttachmentTooLarge as exc:
         raise HTTPException(status_code=413, detail=str(exc))
+
+
+async def _send_typed_message(ticket_id, payload, files, db, actor, direction):
+    try:
+        parsed = MessageCreate.model_validate_json(payload)
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="Некорректные поля сообщения")
+    if parsed.direction.value != direction:
+        raise HTTPException(status_code=422, detail="Тип сообщения не соответствует выбранному действию")
+    return await send_message(ticket_id, payload, files, db, actor)
+
+
+@router.post("/{ticket_id}/notes/send", response_model=MessageRead, status_code=201)
+async def send_internal_note(ticket_id: int, payload: str = Form(...), files: list[UploadFile] = File(default=[]),
+                             db: Session = Depends(get_db), actor: User = Depends(get_current_user)):
+    return await _send_typed_message(ticket_id, payload, files, db, actor, "internal_note")
+
+
+@router.post("/{ticket_id}/replies/send", response_model=MessageRead, status_code=201)
+async def send_customer_reply(ticket_id: int, payload: str = Form(...), files: list[UploadFile] = File(default=[]),
+                              db: Session = Depends(get_db), actor: User = Depends(get_current_user)):
+    return await _send_typed_message(ticket_id, payload, files, db, actor, "outbound")
 
 
 @router.post("/{ticket_id}/messages/{message_id}/delivery/retry")

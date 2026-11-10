@@ -47,6 +47,7 @@ export function TicketsPage() {
     status: statusFilter, priority: priorityFilter, organization: organizationFilter,
     assignee: assigneeFilter, risk: slaRiskFilter, search, openOnly, overdue: overdueOnly,
   } = readTicketFilters(searchParams);
+  const sort = searchParams.get("sort") === "number_asc" ? "number_asc" : searchParams.get("sort") === "number_desc" ? "number_desc" : "created_desc";
   const [view, setView] = useState<"list" | "kanban">("list");
   const [page, setPage] = useState(0);
 
@@ -59,10 +60,10 @@ export function TicketsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const filters = [statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter, debouncedSearch, openOnly, overdueOnly];
+  const filters = [statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter, debouncedSearch, openOnly, overdueOnly, sort];
   // Any filter change invalidates the current page number - staying on page 5
   // of a result set that now has two pages would show an empty screen.
-  useEffect(() => setPage(0), [statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter, debouncedSearch, openOnly, overdueOnly]);
+  useEffect(() => setPage(0), [statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter, debouncedSearch, openOnly, overdueOnly, sort]);
 
   // The Kanban board is a board of work in flight, so it needs the whole
   // (filtered) set at once rather than the list view's page.
@@ -84,6 +85,7 @@ export function TicketsPage() {
         q: debouncedSearch || undefined,
         open_only: openOnly ? 1 : undefined,
         overdue: overdueOnly ? 1 : undefined,
+        sort,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["saved-filters"] }),
   });
@@ -113,6 +115,7 @@ export function TicketsPage() {
     queryKey: ["tickets", ...filters, view, page],
     queryFn: () =>
       listTickets({
+        sort,
         status_filter: statusFilter || undefined,
         priority: priorityFilter || undefined,
         organization_id: organizationFilter || undefined,
@@ -215,6 +218,9 @@ export function TicketsPage() {
       <div className="queue-scope">
         <label><input type="checkbox" checked={openOnly || view === "kanban"} disabled={view === "kanban"} onChange={(e) => updateUrl("open_only", e.target.checked)} /> {view === "kanban" ? "Активные и решённые" : "Только открытые"}</label>
         {overdueOnly && <span className="status-tag status-waiting">Просрочен срок решения</span>}
+        <select aria-label="Сортировка заявок" value={sort} onChange={(e) => updateUrl("sort", e.target.value)}>
+          <option value="created_desc">Сначала новые</option><option value="number_asc">Номер: по возрастанию</option><option value="number_desc">Номер: по убыванию</option>
+        </select>
         <button className="btn-link" onClick={() => setSearchParams({}, { replace: true })}>Сбросить фильтры</button>
         <span className="muted">{ticketsQuery.isSuccess ? `Найдено: ${total}` : ""}</span>
       </div>
@@ -252,7 +258,7 @@ export function TicketsPage() {
       )}
       {ticketsQuery.isSuccess && filtered.length > 0 && view === "list" && (
         <div className="list ticket-list">
-          <div className="list-head" style={{ gridTemplateColumns: "76px minmax(190px, 2.4fr) minmax(95px, 1fr) 60px 83px 120px 86px 104px 106px" }}>
+          <div className="list-head" style={{ gridTemplateColumns: "104px minmax(190px, 2.4fr) minmax(95px, 1fr) 60px 83px 120px 86px 104px 106px" }}>
             <span>№</span>
             <span>Тема</span>
             <span>Организация</span>
@@ -266,7 +272,7 @@ export function TicketsPage() {
           {filtered.map((t) => (
             <Link
               className="list-row"
-              style={{ gridTemplateColumns: "76px minmax(190px, 2.4fr) minmax(95px, 1fr) 60px 83px 120px 86px 104px 106px" }}
+              style={{ gridTemplateColumns: "104px minmax(190px, 2.4fr) minmax(95px, 1fr) 60px 83px 120px 86px 104px 106px" }}
               key={t.id}
               to={`/tickets/${t.id}`}
             >

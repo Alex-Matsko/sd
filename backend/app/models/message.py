@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import JSON, BigInteger, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import Channel, MessageDirection
@@ -23,6 +23,7 @@ class Message(Base):
     author_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     author_contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
     body: Mapped[str] = mapped_column(Text)
+    content_blocks: Mapped[list[dict] | None] = mapped_column(JSON)
     request_key: Mapped[str | None] = mapped_column(String(96))
     request_digest: Mapped[str | None] = mapped_column(String(64))
     # Email threading (section 2.3): the RFC 5322 Message-ID this message was

@@ -198,3 +198,9 @@ export async function apiForm<T>(path: string, form: FormData): Promise<T> {
   const res = await authorizedFetch(path, { method: "POST", body: form });
   return res.json();
 }
+
+/** Authenticated original file bytes for inline previews; credentials stay out of URLs. */
+export async function apiFileBlob(path: string): Promise<Blob> {
+  const res = await authorizedFetch(path, { method: "GET" });
+  return res.blob();
+}
