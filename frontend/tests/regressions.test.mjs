@@ -166,3 +166,29 @@ test("untrusted HTML and SVG cannot become a navigable image preview by changing
   assert.equal(await rasterImageBlob(new Blob(["<svg onload='alert(1)'></svg>"], { type: "image/png" })), null);
   assert.equal(await rasterImageBlob(new Blob(["<html><script>alert(1)</script></html>"], { type: "image/jpeg" })), null);
 });
+
+test("one editor document round-trips paragraphs and screenshots without adding labels or uploading blob URLs", async () => {
+  const { draftToDocument, documentToDraft, messageDraftPayload } = await loadSource("lib/messageDraft.ts");
+  const image = new File([new Uint8Array([137, 80, 78, 71])], "screen.png", { type: "image/png" });
+  const extra = new File(["log"], "log.txt", { type: "text/plain" });
+  const pool = new Map([["image-1", { file: image, url: "blob:local-only" }]]);
+  const draft = { blocks: [{ id: "t1", type: "text", text: "Проверьте настройку\nв этом окне:" },
+    { id: "image-1", type: "image", file: image }, { id: "t2", type: "text", text: "Затем сохраните изменения." }], files: [extra] };
+  const doc = draftToDocument(draft, pool);
+  const result = messageDraftPayload(documentToDraft(doc, pool, [extra]));
+  assert.equal(result.body, "Проверьте настройку\nв этом окне:\nЗатем сохраните изменения.");
+  assert.deepEqual(result.content_blocks, [{ type: "text", text: "Проверьте настройку\nв этом окне:" },
+    { type: "image", file_index: 0 }, { type: "text", text: "Затем сохраните изменения." }]);
+  assert.equal(result.files[0], image);
+  assert.equal(result.files[1], extra);
+  assert.equal(JSON.stringify(result.content_blocks).includes("blob:"), false);
+});
+
+test("editor keeps intentional blank lines and soft line breaks", async () => {
+  const { documentToDraft, messageDraftPayload } = await loadSource("lib/messageDraft.ts");
+  const draft = documentToDraft({ type: "doc", content: [
+    { type: "paragraph", content: [{ type: "text", text: "Строка" }, { type: "hardBreak" }, { type: "text", text: "Продолжение" }] },
+    { type: "paragraph" }, { type: "paragraph", content: [{ type: "text", text: "Абзац" }] },
+  ] }, new Map(), []);
+  assert.equal(messageDraftPayload(draft).body, "Строка\nПродолжение\n\nАбзац");
+});

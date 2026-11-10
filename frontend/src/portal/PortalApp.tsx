@@ -1,5 +1,6 @@
 import { MessageContent } from "../components/MessageContent";
-import { RichMessageEditor, emptyMessageDraft, messageDraftPayload, draftIdentity } from "../components/RichMessageEditor";
+import { MessageEditor as RichMessageEditor } from "../components/MessageEditor";
+import { emptyMessageDraft, messageDraftPayload, draftIdentity } from "../lib/messageDraft";
 import { ProjectApprovals } from "./ProjectApprovals";
 import { BrandMark } from "../components/BrandMark";
 import { useDraftRequestId } from "../lib/useDraftRequestId";
@@ -446,7 +447,7 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
             {replyMutation.isError && <div className="portal-error">{(replyMutation.error as Error).message}</div>}
             <button
               className="portal-btn portal-btn-primary"
-              disabled={(!draftPayload.body.trim() && draftPayload.files.length === 0) || replyMutation.isPending}
+              disabled={(!draftPayload.body.trim() && draftPayload.files.length === 0) || replyMutation.isPending || draft.pending}
               onClick={() => replyMutation.mutate()}
             >
               Отправить

@@ -1,93 +1,174 @@
-import { ImagePreview } from "./ImagePreview";
-import { isImageAttachment, rasterImageBlob } from "../lib/imagePreview";
 import { useEffect, useRef, useState } from "react";
-import type { MessageUploadBlock } from "../api/types";
+import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor } from "@tiptap/react";
+import type { JSONContent, NodeViewProps } from "@tiptap/core";
+import Document from "@tiptap/extension-document";
+import Paragraph from "@tiptap/extension-paragraph";
+import Text from "@tiptap/extension-text";
+import HardBreak from "@tiptap/extension-hard-break";
+import Image from "@tiptap/extension-image";
+import { UndoRedo, Gapcursor, Dropcursor } from "@tiptap/extensions";
+import { EditorState } from "@tiptap/pm/state";
+import { Slice } from "@tiptap/pm/model";
+import { ImagePreview } from "./ImagePreview";
+import { rasterImageBlob } from "../lib/imagePreview";
+import { documentToDraft, draftToDocument, draftIdentity, draftKey, messageDraftPayload } from "../lib/messageDraft";
+import type { DraftImageFile, MessageDraft } from "../lib/messageDraft";
+export { emptyMessageDraft, messageDraftPayload, draftIdentity } from "../lib/messageDraft";
+export type { MessageDraft } from "../lib/messageDraft";
 
-const key = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-type DraftBlock = { id: string; type: "text"; text: string } | { id: string; type: "image"; file: File };
-export interface MessageDraft { blocks: DraftBlock[]; files: File[] }
-export const emptyMessageDraft = (): MessageDraft => ({ blocks: [{ id: key(), type: "text", text: "" }], files: [] });
-export function messageDraftPayload(draft: MessageDraft) {
-  const files: File[] = [];
-  const content_blocks: MessageUploadBlock[] = draft.blocks.map((block) => {
-    if (block.type === "text") return { type: "text", text: block.text };
-    files.push(block.file);
-    return { type: "image", file_index: files.length - 1 };
-  });
-  files.push(...draft.files);
-  return { body: draft.blocks.filter((b) => b.type === "text").map((b) => b.text).join("\n"), content_blocks, files };
+function ImageNodeView({ node, deleteNode, editor }: NodeViewProps) {
+  return <NodeViewWrapper className="editor-image-node" contentEditable={false}>
+    <ImagePreview url={node.attrs.src} filename={node.attrs.alt || "Скриншот"} compact minimal />
+    <button type="button" className="editor-image-remove" aria-label={`Удалить скриншот ${node.attrs.alt || ""}`} onClick={() => { if (editor.isEditable) deleteNode(); }}>×</button>
+  </NodeViewWrapper>;
 }
-export function draftIdentity(draft: MessageDraft) {
-  return JSON.stringify([draft.blocks.map((b) => b.type === "text" ? b : [b.id, b.file.name, b.file.size, b.file.lastModified]),
-    draft.files.map((f) => [f.name, f.size, f.lastModified])]);
+const DraftImage = Image.extend({
+  addAttributes() { return { ...this.parent?.(), draftId: { default: null, rendered: false } }; },
+  addNodeView() { return ReactNodeViewRenderer(ImageNodeView); },
+}).configure({ allowBase64: false, inline: false });
+
+function ClipIcon() {
+  return <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/><path d="m6 14 8-8"/></svg>;
 }
-function DraftImage({ file }: { file: File }) {
-  const [url, setUrl] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let active = true;
-    let next = "";
-    rasterImageBlob(file).then((blob) => {
-      if (!active) return;
-      if (!blob) { setError("Не удалось показать превью этого файла"); return; }
-      next = URL.createObjectURL(blob); setUrl(next);
-    }).catch(() => { if (active) setError("Не удалось прочитать изображение"); });
-    return () => { active = false; if (next) URL.revokeObjectURL(next); };
-  }, [file]);
-  return <ImagePreview url={url} filename={file.name} error={error} />;
-}
+
 export function RichMessageEditor({ value, onChange, label, disabled = false }: {
   value: MessageDraft; onChange: (draft: MessageDraft) => void; label: string; disabled?: boolean;
 }) {
-  const inputs = useRef(new Map<string, HTMLTextAreaElement>());
-  const cursor = useRef<{ id: string; start: number; end: number } | null>(null);
+  const images = useRef(new Map<string, DraftImageFile>());
+  const current = useRef(value);
+  const changed = useRef(onChange);
+  const lastEmitted = useRef(draftIdentity(value));
+  const savedSelection = useRef<{ from: number; to: number } | null>(null);
+  const insertionBusy = useRef(false);
+  const insertRef = useRef<(files: File[], selection?: { from: number; to: number }) => void>(() => {});
+  const fileInput = useRef<HTMLInputElement>(null);
+  const generation = useRef({ version: 0, active: true });
   const [error, setError] = useState("");
-  function insert(files: File[], position = cursor.current) {
-    if (disabled || !files.length) return;
-    const current = messageDraftPayload(value).files;
-    if (current.length + files.length > 10) { setError("В одном сообщении может быть не более 10 файлов"); return; }
-    if ([...current, ...files].some((f) => f.size > 25 * 1024 * 1024) || [...current, ...files].reduce((n, f) => n + f.size, 0) > 48 * 1024 * 1024) {
+  const [adding, setAdding] = useState(false);
+  const [, refreshControls] = useState(0);
+  useEffect(() => { current.current = value; changed.current = onChange; }, [value, onChange]);
+
+  function emit(next: MessageDraft) {
+    current.current = next; lastEmitted.current = draftIdentity(next); changed.current(next);
+  }
+  const editor = useEditor({
+    extensions: [Document, Paragraph, Text, HardBreak, DraftImage, UndoRedo, Gapcursor, Dropcursor],
+    content: { type: "doc", content: [{ type: "paragraph" }] },
+    editorProps: {
+      attributes: { role: "textbox", "aria-label": label, "aria-multiline": "true", class: "tiptap-message-input" },
+      handlePaste(view, event) {
+        const files = Array.from(event.clipboardData?.files ?? []);
+        if (files.length) { event.preventDefault(); insertRef.current(files, view.state.selection); return true; }
+        // Paste plain text only. External HTML and remote image URLs never enter the draft.
+        const text = event.clipboardData?.getData("text/plain");
+        if (text !== undefined) {
+          event.preventDefault();
+          const paragraphs = text.replace(/\r\n?/g, "\n").split("\n").map((line) => view.state.schema.nodes.paragraph.create(null, line ? view.state.schema.text(line) : null));
+          const fragment = view.state.schema.nodes.doc.create(null, paragraphs).content;
+          const tr = view.state.tr.replaceSelection(new Slice(fragment, 1, 1));
+          view.dispatch(tr.scrollIntoView());
+          return true;
+        }
+        return true;
+      },
+      handleDrop(view, event, _slice, moved) {
+        const files = Array.from(event.dataTransfer?.files ?? []);
+        if (moved) return false;
+        event.preventDefault();
+        const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? view.state.selection.from;
+        if (!files.length) {
+          const text = event.dataTransfer?.getData("text/plain");
+          if (text) view.dispatch(view.state.tr.insertText(text, pos).scrollIntoView());
+          return true;
+        }
+        insertRef.current(files, { from: pos, to: pos }); return true;
+      },
+    },
+    onUpdate({ editor: active }) { emit(documentToDraft(active.getJSON(), images.current, current.current.files)); },
+  });
+
+  useEffect(() => {
+    if (!editor) return;
+    editor.setEditable(!disabled && !adding, false);
+  }, [editor, disabled, adding]);
+  useEffect(() => {
+    if (!editor || value.pending || draftIdentity(value) === lastEmitted.current) return;
+    lastEmitted.current = draftIdentity(value);
+    const doc = draftToDocument(value, images.current);
+    if (!messageDraftPayload(value).body && !messageDraftPayload(value).files.length) {
+      // Sending a message clears its undo history as well as its visible contents.
+      generation.current.version++;
+      editor.view.updateState(EditorState.create({ schema: editor.schema, doc: editor.schema.nodeFromJSON(doc), plugins: editor.state.plugins }));
+      for (const image of images.current.values()) URL.revokeObjectURL(image.url);
+      images.current.clear();
+      refreshControls((n) => n + 1);
+    } else {
+      editor.commands.setContent(doc, { emitUpdate: false });
+      refreshControls((n) => n + 1);
+    }
+  }, [editor, value]);
+  useEffect(() => {
+    const pool = images.current;
+    const life = generation.current;
+    life.active = true;
+    return () => { life.active = false; life.version++; for (const image of pool.values()) URL.revokeObjectURL(image.url); pool.clear(); };
+  }, []);
+
+  async function insert(files: File[], selection = savedSelection.current ?? editor?.state.selection) {
+    if (!editor || disabled || insertionBusy.current || !files.length) return;
+    const activeFiles = messageDraftPayload(current.current).files;
+    if (activeFiles.length + files.length > 10) { setError("Можно прикрепить не более 10 файлов"); return; }
+    if (files.some((f) => f.size > 25 * 1024 * 1024) || [...activeFiles, ...files].reduce((n, f) => n + f.size, 0) > 48 * 1024 * 1024) {
       setError("Лимит: 25 МБ на файл и 48 МБ на сообщение"); return;
     }
-    setError("");
-    const images = files.filter((f) => /^image\/(png|jpeg|gif|webp)$/.test(f.type) || (!f.type || f.type === "application/octet-stream") && /\.(png|jpe?g|gif|webp)$/i.test(f.name));
-    const others = files.filter((f) => !images.includes(f));
-    if (!images.length) { onChange({ ...value, files: [...value.files, ...others] }); return; }
-    const saved = position;
-    let at = saved ? value.blocks.findIndex((b) => b.id === saved.id && b.type === "text") : -1;
-    if (at < 0) at = value.blocks.length - 1;
-    const block = value.blocks[at];
-    const text = block.type === "text" ? block.text : "";
-    const start = saved?.id === block.id ? saved.start : text.length;
-    const end = saved?.id === block.id ? saved.end : text.length;
-    const tail: DraftBlock = { id: key(), type: "text", text: text.slice(end) };
-    const inserted: DraftBlock[] = [{ id: block.id, type: "text", text: text.slice(0, start) },
-      ...images.map((file): DraftBlock => ({ id: key(), type: "image", file })), tail];
-    onChange({ blocks: [...value.blocks.slice(0, at), ...inserted, ...value.blocks.slice(at + 1)], files: [...value.files, ...others] });
-    cursor.current = { id: tail.id, start: 0, end: 0 };
-    requestAnimationFrame(() => { const input = inputs.current.get(tail.id); input?.focus(); input?.setSelectionRange(0, 0); });
+    insertionBusy.current = true;
+    setError(""); setAdding(true);
+    emit({ ...current.current, pending: true });
+    const epoch = generation.current.version;
+    try {
+      const prepared = await Promise.all(files.map(async (file) => ({ file, blob: await rasterImageBlob(file) })));
+      if (editor.isDestroyed || epoch !== generation.current.version || !generation.current.active) return;
+      const nodes: JSONContent[] = [];
+      const attachments = [...current.current.files];
+      for (const { file, blob } of prepared) {
+        if (blob && ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(blob.type)) {
+          const id = draftKey(), url = URL.createObjectURL(blob);
+          images.current.set(id, { file, url });
+          nodes.push({ type: "image", attrs: { src: url, alt: file.name, draftId: id } });
+        } else attachments.push(file);
+      }
+      current.current = { ...current.current, files: attachments, pending: false };
+      if (nodes.length) {
+        nodes.push({ type: "paragraph" });
+        const max = editor.state.doc.content.size;
+        const from = Math.min(selection?.from ?? max, max), to = Math.min(selection?.to ?? from, max);
+        editor.chain().focus().setTextSelection({ from, to }).insertContent(nodes).run();
+      }
+      emit(documentToDraft(editor.getJSON(), images.current, attachments));
+    } catch { setError("Не удалось добавить файл. Попробуйте ещё раз."); emit({ ...current.current, pending: false }); }
+    finally { insertionBusy.current = false; setAdding(false); }
   }
-  return <div className="rich-editor-shell">
-    <div className="rich-editor" aria-label={label} onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }}
-      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); insert(Array.from(e.dataTransfer.files)); } }}>
-      {value.blocks.map((block, index) => block.type === "text" ? <textarea key={block.id}
-        ref={(el) => { if (el) inputs.current.set(block.id, el); else inputs.current.delete(block.id); }}
-        aria-label={`${label}: текст ${value.blocks.slice(0, index + 1).filter((b) => b.type === "text").length}`}
-        rows={Math.max(2, Math.min(16, block.text.split("\n").length + 1))} value={block.text} disabled={disabled}
-        placeholder={index === 0 ? "Напишите текст или вставьте скриншот…" : "Продолжите текст после скриншота…"}
-        onSelect={(e) => { cursor.current = { id: block.id, start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd }; }}
-        onBlur={(e) => { cursor.current = { id: block.id, start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd }; }}
-        onChange={(e) => onChange({ ...value, blocks: value.blocks.map((b) => b.id === block.id ? { ...block, text: e.target.value } : b) })}
-        onPaste={(e) => { const files = Array.from(e.clipboardData.files); if (files.length) { e.preventDefault(); insert(files, { id: block.id, start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd }); } }}
-      /> : <div key={block.id} className="rich-draft-image"><DraftImage file={block.file} />
-        <div className="rich-draft-image-actions"><button type="button" disabled={disabled} aria-label={`Удалить скриншот ${block.file.name}`}
-          onClick={() => onChange({ ...value, blocks: value.blocks.filter((b) => b.id !== block.id) })}>Удалить скриншот</button></div></div>)}
+  useEffect(() => { insertRef.current = (files, selection) => { void insert(files, selection); }; });
+
+  const empty = !messageDraftPayload(value).body && !value.blocks.some((b) => b.type === "image");
+  return <div className={`rich-editor-shell single-message-editor ${empty ? "is-empty" : ""}`}>
+    <div className="single-editor-canvas" data-placeholder={label === "Внутренний комментарий" ? "Напишите комментарий…" : "Напишите сообщение…"}>
+      <EditorContent editor={editor} />
     </div>
-    <div className="rich-editor-tools"><label className="rich-file-button">Добавить скриншот или файл<input aria-label={`${label}: добавить файлы`} type="file" multiple disabled={disabled}
-      onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ""; insert(files); }} /></label>
-      <span>Скриншот можно вставить из буфера. Enter — новая строка.</span></div>
-    {value.files.map((file, i) => <div key={`${file.name}-${i}`} className="draft-file-attachment">{isImageAttachment({filename: file.name, mime_type: file.type}) ? <DraftImage file={file} /> : <span className="attachment-chip">{file.name}</span>}
-      <button type="button" disabled={disabled} aria-label={`Удалить файл ${file.name}`} onClick={() => onChange({ ...value, files: value.files.filter((_, n) => n !== i) })}>Удалить файл</button></div>)}
+    {value.files.length > 0 && <div className="editor-file-list">{value.files.map((file, index) => <span className="editor-file-chip" key={`${file.name}-${index}`}><ClipIcon /><span>{file.name}</span>
+      <button type="button" disabled={disabled || adding} aria-label={`Удалить файл ${file.name}`} onClick={() => emit({ ...current.current, files: current.current.files.filter((_, i) => i !== index) })}>×</button></span>)}</div>}
+    <div className="single-editor-toolbar"><div>
+      <button type="button" className="editor-attach" disabled={disabled || adding} onClick={() => {
+        if (editor) savedSelection.current = { from: editor.state.selection.from, to: editor.state.selection.to };
+        fileInput.current?.click();
+      }}><ClipIcon />Прикрепить</button>
+      <input ref={fileInput} aria-label={`${label}: добавить файлы`} type="file" multiple hidden disabled={disabled || adding} onChange={(e) => {
+        const files = Array.from(e.target.files ?? []); e.target.value = ""; void insert(files);
+      }} />
+      <span className="editor-toolbar-divider" />
+      <button type="button" className="editor-history" aria-label={`Отменить: ${label}`} title="Отменить" disabled={disabled || adding || !editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}>↶</button>
+      <button type="button" className="editor-history" aria-label={`Повторить: ${label}`} title="Повторить" disabled={disabled || adding || !editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}>↷</button>
+    </div><span className="editor-paste-hint">{adding ? "Добавление файла…" : "Скриншот можно вставить из буфера"}</span></div>
     {error && <p role="alert" className="rich-editor-error">{error}</p>}
   </div>;
 }
