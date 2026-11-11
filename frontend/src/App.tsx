@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { Layout } from "./layout/Layout";
 import { Loading } from "./components/ui";
+import { TicketDrawer } from "./components/TicketDrawer";
 import { LoginPage } from "./pages/LoginPage";
 const ProjectsPage = lazy(() => import("./pages/projects/ProjectsPage").then(m => ({default: m.ProjectsPage})));
 const ProjectDetailPage = lazy(() => import("./pages/projects/ProjectDetailPage").then(m => ({default: m.ProjectDetailPage})));
@@ -49,8 +50,11 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 }
 
 export default function App() {
+  const location = useLocation();
+  const requestedBackground = location.state?.backgroundLocation;
+  const background = requestedBackground?.pathname === "/tickets" && /^\/tickets\/\d+$/.test(location.pathname) ? requestedBackground : null;
   return (
-    <Suspense fallback={<Loading />}><Routes>
+    <Suspense fallback={<Loading />}><Routes location={background ?? location}>
       <Route path="/login" element={<LoginPage />} />
       <Route
         path="/"
@@ -90,6 +94,6 @@ export default function App() {
         <Route path="settings/monitoring" element={<RequireManager><MonitoringPage /></RequireManager>} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes></Suspense>
+    </Routes>{background && <Routes><Route path="/tickets/:ticketId" element={<RequireAuth><TicketDrawer /></RequireAuth>} /></Routes>}</Suspense>
   );
 }

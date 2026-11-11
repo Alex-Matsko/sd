@@ -65,6 +65,8 @@ class PortalAttachmentRead(BaseModel):
 
 
 class PortalTicketRead(BaseModel):
+    planned_due_at: datetime | None = None
+    estimated_minutes: int | None = None
     id: int
     display_number: str
     subject: str

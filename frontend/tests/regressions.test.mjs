@@ -192,3 +192,21 @@ test("editor keeps intentional blank lines and soft line breaks", async () => {
   ] }, new Map(), []);
   assert.equal(messageDraftPayload(draft).body, "Строка\nПродолжение\n\nАбзац");
 });
+
+test("ticket workspace defaults to active kanban and restores explicit views, archive links and page", async () => {
+  const { readTicketFilters, readQueueView, readQueuePage, kanbanColumns } = await loadSource("lib/ticketFilters.ts");
+  assert.equal(readQueueView(new URLSearchParams(), null), "kanban");
+  assert.equal(readQueueView(new URLSearchParams(), "list"), "list");
+  assert.equal(readQueueView(new URLSearchParams("view=kanban"), "list"), "kanban");
+  assert.equal(readTicketFilters(new URLSearchParams()).scope, "active");
+  assert.equal(readTicketFilters(new URLSearchParams("status_filter=closed")).scope, "archived");
+  assert.equal(readTicketFilters(new URLSearchParams("scope=all")).scope, "all");
+  const archive = readTicketFilters(new URLSearchParams("scope=archived&open_only=1&overdue=1"));
+  assert.equal(archive.openOnly, false); assert.equal(archive.overdue, false);
+  assert.deepEqual(kanbanColumns("archived"), ["closed", "cancelled"]);
+  assert.equal(kanbanColumns("all").length, 8);
+  assert.equal(kanbanColumns("active").includes("resolved"), true);
+  assert.equal(kanbanColumns("active").includes("closed"), false);
+  assert.equal(readQueuePage(new URLSearchParams("page=3")), 2);
+  for (const page of ["-1", "NaN", "2.5", "Infinity"]) assert.equal(readQueuePage(new URLSearchParams({page})), 0);
+});

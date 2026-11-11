@@ -1,3 +1,4 @@
+import { TicketPlanning } from "../components/TicketPlanning";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageContent } from "../components/MessageContent";
 import { ticketProjects } from "../api/work";
@@ -5,7 +6,7 @@ import { PROJECT_LABELS } from "../lib/work";
 import { DeliveryStatus } from "../components/DeliveryStatus";
 import { localDate } from "../lib/dates";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   changeTicketClient,
@@ -44,8 +45,11 @@ function truncate(text: string, max: number): string {
   return collapsed.length > max ? `${collapsed.slice(0, max)}…` : collapsed;
 }
 
-export function TicketDetailPage() {
+export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
   const { ticketId } = useParams();
+  const location = useLocation();
+  const from = location.state?.queueReturn;
+  const queueReturn = typeof from === "string" && /^\/tickets(?:\?|$)/.test(from) ? from : "/tickets";
   const id = Number(ticketId);
   const qc = useQueryClient();
   const { user } = useAuth();
@@ -106,7 +110,12 @@ export function TicketDetailPage() {
 
   const updateMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => updateTicket(id, payload),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ticket", id] }),
+    onSuccess: (updated) => {
+      qc.setQueryData(["ticket", id], updated);
+      qc.invalidateQueries({ queryKey: ["ticket", id] });
+      qc.invalidateQueries({ queryKey: ["tickets"] });
+      qc.invalidateQueries({ queryKey: ["ticket-stats"] });
+    },
   });
 
   const deleteTimeMutation = useMutation({
@@ -141,6 +150,7 @@ export function TicketDetailPage() {
 
   return (
     <div className="view ticket-detail">
+      {!embedded && <Link to={queueReturn} className="queue-back-link">← К очереди заявок</Link>}
       <div className="toolbar">
         <h1 className="view-title" style={{ marginBottom: 0 }}>
           {ticket.display_number} — {ticket.subject}
@@ -274,7 +284,7 @@ export function TicketDetailPage() {
               ))}
               {timeEntriesQuery.isSuccess && (timeEntriesQuery.data ?? []).length === 0 && <p className="muted">Записей о времени нет</p>}
             </div>
-            <div className="form-row-inline">
+            <div className="form-row-inline ticket-time-form">
               <input type="number" min={5} step={5} style={{ width: 90 }} value={timeMinutes} onChange={(e) => setTimeMinutes(Number(e.target.value))} />
               <span className="muted">мин</span>
               <input
@@ -307,6 +317,7 @@ export function TicketDetailPage() {
         </div>
 
         <div className="ticket-side">
+          <TicketPlanning key={ticket.id} ticket={ticket} />
           <div className="panel">
             <div className="panel-head">
               <h2>Свойства</h2>
@@ -401,7 +412,7 @@ export function TicketDetailPage() {
               </div>
               <div className="list">
                 {(relatedQuery.data ?? []).map((r) => (
-                  <Link className="related-ticket" key={r.id} to={`/tickets/${r.id}`}>
+                  <Link className="related-ticket" key={r.id} to={`/tickets/${r.id}`} state={{ ...location.state, queueReturn }}>
                     <span className="mono">{r.display_number}</span>
                     <span className="subject">{r.subject}</span>
                     <StatusTag status={r.status} />

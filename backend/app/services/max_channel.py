@@ -600,7 +600,7 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
         _send(
             config,
             parsed.chat_id,
-            f"Переключено на {ticket.display_number} — {ticket.subject}. Пишите сюда.",
+            f"Переключено на {ticket.display_number} — {ticket.subject}. Пишите сюда." + messenger_common.planning_summary(ticket),
             buttons=_menu_buttons_for(ticket),
         )
         return

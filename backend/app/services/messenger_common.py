@@ -9,6 +9,7 @@ cost more than it saves for two channels.
 """
 
 import re
+from datetime import timezone
 
 from sqlalchemy import case
 from sqlalchemy.orm import Session
@@ -222,3 +223,15 @@ def close_ticket_chain(db: Session, ticket: Ticket) -> Ticket:
     if TicketStatus(ticket.status) == TicketStatus.RESOLVED:
         ticket = tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
     return ticket
+
+
+def planning_summary(ticket: Ticket) -> str:
+    lines = []
+    if ticket.planned_due_at is not None:
+        due = ticket.planned_due_at.astimezone(timezone.utc)
+        lines.append("Плановый срок решения: " + due.strftime("%d.%m.%Y %H:%M UTC"))
+    if ticket.estimated_minutes is not None:
+        hours, minutes = divmod(ticket.estimated_minutes, 60)
+        effort = f"{hours} ч" + (f" {minutes} мин" if minutes else "") if hours else f"{minutes} мин"
+        lines.append("Оценка трудозатрат: " + effort)
+    return "\n\n" + "\n".join(lines) if lines else ""

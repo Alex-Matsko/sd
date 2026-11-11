@@ -260,6 +260,7 @@ export function updateUser(id: number, payload: Partial<User> & { password?: str
 
 // --- Tickets ---
 export interface TicketFilters {
+  scope?: "active" | "archived" | "all";
   sort?: "created_desc" | "number_asc" | "number_desc";
   status_filter?: TicketStatus;
   organization_id?: number;

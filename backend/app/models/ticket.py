@@ -65,6 +65,9 @@ class Ticket(Base, TimestampMixin):
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
     parent_ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"))
 
+    planned_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    estimated_minutes: Mapped[int | None] = mapped_column(Integer)
+
     # SLA bookkeeping (computed/maintained by the Stage 3 SLA engine; columns are
     # part of the Stage 1 schema so later stages don't need a migration for them).
     sla_reaction_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -27,10 +27,10 @@ export const STATUS_LABELS: Record<TicketStatus, string> = {
 // Mirrors backend ALLOWED_TRANSITIONS in app/services/tickets.py — keep in sync.
 export const STATUS_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   new: ["assigned", "in_progress", "cancelled"],
-  assigned: ["in_progress", "waiting_customer", "waiting_third_party", "cancelled"],
+  assigned: ["new", "in_progress", "cancelled"],
   in_progress: ["waiting_customer", "waiting_third_party", "resolved", "cancelled"],
-  waiting_customer: ["in_progress", "resolved", "cancelled"],
-  waiting_third_party: ["in_progress", "resolved", "cancelled"],
+  waiting_customer: ["in_progress", "cancelled"],
+  waiting_third_party: ["in_progress", "cancelled"],
   resolved: ["closed", "in_progress"],
   closed: [],
   cancelled: [],

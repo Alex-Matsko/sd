@@ -201,6 +201,8 @@ export interface TicketSlaView {
 }
 
 export interface Ticket {
+  planned_due_at: string | null;
+  estimated_minutes: number | null;
   id: number;
   number: number;
   display_number: string;

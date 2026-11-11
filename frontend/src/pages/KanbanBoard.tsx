@@ -1,38 +1,40 @@
+import { kanbanColumns } from "../lib/ticketFilters";
+import type { QueueScope } from "../lib/ticketFilters";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import type { Location } from "react-router-dom";
 import { updateTicket } from "../api/endpoints";
 import { ErrorBanner, PriorityTag, SlaTag } from "../components/ui";
-import { STATUS_LABELS, STATUS_TRANSITIONS } from "../lib/labels";
+import { STATUS_LABELS, STATUS_TRANSITIONS, formatDateTime, formatMinutes } from "../lib/labels";
 import type { Organization, Ticket, TicketStatus, User } from "../api/types";
-
-// Terminal states (Закрыта/Отменена) are archived off the board on purpose -
-// a Kanban board tracks work in flight, not the full history (section 4.2
-// status model). Closed/cancelled tickets stay reachable via the list view.
-const BOARD_COLUMNS: TicketStatus[] = [
-  "new",
-  "assigned",
-  "in_progress",
-  "waiting_customer",
-  "waiting_third_party",
-  "resolved",
-];
 
 export function KanbanBoard({
   tickets,
   orgsById,
   usersById,
+  scope = "active",
+  queueReturn = "/tickets",
+  backgroundLocation,
 }: {
   tickets: Ticket[];
+  scope?: QueueScope;
+  queueReturn?: string;
+  backgroundLocation?: Location;
   orgsById: Map<number, Organization>;
   usersById: Map<number, User>;
 }) {
   const qc = useQueryClient();
+  const columns = kanbanColumns(scope);
   const [dragTicketId, setDragTicketId] = useState<number | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<TicketStatus | null>(null);
 
   const moveMutation = useMutation({
     mutationFn: ({ id, status }: { id: number; status: TicketStatus }) => updateTicket(id, { status }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ["ticket", variables.id] });
+      qc.invalidateQueries({ queryKey: ["ticket-stats"] });
+    },
     onSettled: () => qc.invalidateQueries({ queryKey: ["tickets"] }),
   });
 
@@ -67,13 +69,13 @@ export function KanbanBoard({
     prevRectsRef.current = nextRects;
   }, [tickets]);
 
-  const byColumn = new Map<TicketStatus, Ticket[]>(BOARD_COLUMNS.map((s) => [s, []]));
+  const byColumn = new Map<TicketStatus, Ticket[]>(columns.map((s) => [s, []]));
   for (const t of tickets) {
     byColumn.get(t.status)?.push(t);
   }
 
   function canDrop(ticket: Ticket, target: TicketStatus): boolean {
-    if (ticket.status === target) return false;
+    if (moveMutation.isPending || ticket.status === target) return false;
     return (STATUS_TRANSITIONS[ticket.status] ?? []).includes(target);
   }
 
@@ -82,15 +84,15 @@ export function KanbanBoard({
   return (
     <>
     {moveMutation.isError && <ErrorBanner message={moveMutation.error.message} />}
-    <div className="kanban-board">
-      {BOARD_COLUMNS.map((column) => {
+    <div className="kanban-board" aria-label="Канбан заявок">
+      {columns.map((column) => {
         const columnTickets = byColumn.get(column) ?? [];
         const isValidTarget = draggedTicket ? canDrop(draggedTicket, column) : false;
         const isOver = dragOverColumn === column;
         return (
           <div
             key={column}
-            className={`kanban-column ${isOver && isValidTarget ? "kanban-column-drop-ok" : ""} ${isOver && draggedTicket && !isValidTarget ? "kanban-column-drop-bad" : ""}`}
+            className={`kanban-column kanban-status-${column} ${isOver && isValidTarget ? "kanban-column-drop-ok" : ""} ${isOver && draggedTicket && !isValidTarget ? "kanban-column-drop-bad" : ""}`}
             onDragOver={(e) => {
               if (!draggedTicket) return;
               e.preventDefault();
@@ -118,20 +120,29 @@ export function KanbanBoard({
                     else cardRefs.current.delete(t.id);
                   }}
                   className="kanban-card"
-                  draggable
-                  onDragStart={() => setDragTicketId(t.id)}
+                  draggable={!moveMutation.isPending && (STATUS_TRANSITIONS[t.status]?.length ?? 0) > 0}
+                  onDragStart={(e) => {
+                    if ((e.target as HTMLElement).closest("select,button")) { e.preventDefault(); return; }
+                    e.dataTransfer.setData("text/plain", String(t.id));
+                    e.dataTransfer.effectAllowed = "move";
+                    setDragTicketId(t.id);
+                  }}
                   onDragEnd={() => {
                     setDragTicketId(null);
                     setDragOverColumn(null);
                   }}
                 >
-                  <Link to={`/tickets/${t.id}`} className="kanban-card-link">
+                  <Link to={`/tickets/${t.id}`} state={{ queueReturn, backgroundLocation }} className="kanban-card-link">
                     <div className="kanban-card-top">
                       <span className="mono muted">{t.display_number}</span>
                       <PriorityTag priority={t.priority} />
                     </div>
                     <div className="kanban-card-subject">{t.subject}</div>
                     <div className="kanban-card-org muted">{orgsById.get(t.organization_id)?.name ?? "—"}</div>
+                    {(t.planned_due_at || t.estimated_minutes !== null) && <div className="kanban-card-plan">
+                      {t.planned_due_at && <span className={new Date(t.planned_due_at).getTime() < Date.now() && !["resolved", "closed", "cancelled"].includes(t.status) ? "plan-overdue" : ""}>До {formatDateTime(t.planned_due_at)}</span>}
+                      {t.estimated_minutes !== null && <span>План: {formatMinutes(t.estimated_minutes)}</span>}
+                    </div>}
                     <div className="kanban-card-bottom">
                       <SlaTag sla={t.sla} />
                       <span className="who-mini muted">
@@ -139,6 +150,13 @@ export function KanbanBoard({
                       </span>
                     </div>
                   </Link>
+                  <div className="kanban-card-actions">
+                    {(STATUS_TRANSITIONS[t.status]?.length ?? 0) > 0 ? <select
+                      aria-label={`Статус заявки ${t.display_number}`} value={t.status} disabled={moveMutation.isPending}
+                      onChange={(e) => moveMutation.mutate({ id: t.id, status: e.target.value as TicketStatus })}>
+                      {[t.status, ...STATUS_TRANSITIONS[t.status]].map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                    </select> : <span className="kanban-archived-label">В архиве</span>}
+                  </div>
                 </div>
               ))}
               {columnTickets.length === 0 && <div className="kanban-empty">Пусто</div>}

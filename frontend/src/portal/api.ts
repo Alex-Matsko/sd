@@ -67,6 +67,8 @@ export interface PortalMe {
 }
 
 export interface PortalTicket {
+  planned_due_at: string | null;
+  estimated_minutes: number | null;
   id: number;
   display_number: string;
   subject: string;

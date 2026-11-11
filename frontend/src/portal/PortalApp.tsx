@@ -1,3 +1,4 @@
+import { formatMinutes } from "../lib/labels";
 import { MessageContent } from "../components/MessageContent";
 import { MessageEditor as RichMessageEditor } from "../components/MessageEditor";
 import { emptyMessageDraft, messageDraftPayload, draftIdentity } from "../lib/messageDraft";
@@ -415,6 +416,10 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
             )}
           </p>
 
+          <section className="portal-ticket-plan" aria-label="План решения заявки">
+            <div><span>Плановый срок решения</span><strong>{ticket.planned_due_at ? formatDate(ticket.planned_due_at) : "Уточняется"}</strong></div>
+            <div><span>Оценка трудозатрат</span><strong>{ticket.estimated_minutes === null ? "Уточняется" : formatMinutes(ticket.estimated_minutes)}</strong></div>
+          </section>
           <div className="portal-thread">
             {ticket.messages.map((m) => (
               <div key={m.id} className={`portal-message ${m.is_from_support ? "from-support" : "from-me"}`}>

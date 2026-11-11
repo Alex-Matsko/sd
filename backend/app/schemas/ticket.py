@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.enums import Channel, ImpactUrgencyLevel, Priority, SlaTimerState, TicketStatus, TicketType
 
@@ -30,6 +30,16 @@ class TicketCreate(BaseModel):
 
 
 class TicketUpdate(BaseModel):
+    planned_due_at: datetime | None = None
+    estimated_minutes: int | None = Field(default=None, ge=0, le=600000)
+
+    @field_validator("planned_due_at")
+    @classmethod
+    def aware_deadline(cls, value):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("Укажите срок с часовым поясом")
+        return value
+
     status: TicketStatus | None = None
     assigned_engineer_id: int | None = None
     team_id: int | None = None
@@ -68,6 +78,8 @@ class TicketSlaView(BaseModel):
 class TicketRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    planned_due_at: datetime | None
+    estimated_minutes: int | None
     id: int
     number: int
     display_number: str

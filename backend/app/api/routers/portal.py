@@ -200,6 +200,8 @@ def _to_read(ticket: Ticket, engineer_name: str | None = None) -> PortalTicketRe
         closed_at=ticket.closed_at,
         csat_rating=ticket.csat_rating,
         assigned_engineer_name=engineer_name,
+        planned_due_at=ticket.planned_due_at,
+        estimated_minutes=ticket.estimated_minutes,
     )
 
 

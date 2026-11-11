@@ -97,6 +97,7 @@ def list_tickets(
     q: str | None = None,
     open_only: bool = False,
     exclude_archived: bool = False,
+    scope: Literal["active", "archived", "all"] | None = None,
     overdue: bool = False,
     sort: Literal["created_desc", "number_asc", "number_desc"] = "created_desc",
     limit: int = 50,
@@ -113,7 +114,9 @@ def list_tickets(
     диспетчера и выше это вся очередь, инженеру — свои, командные и ещё не
     распределённые заявки."""
     query = ticket_access.visible_tickets_query(db, actor)
-    if exclude_archived:
+    if scope == "archived":
+        query = query.filter(Ticket.status.in_([TicketStatus.CLOSED, TicketStatus.CANCELLED]))
+    if scope == "active" or exclude_archived:
         query = query.filter(Ticket.status.notin_([TicketStatus.CLOSED, TicketStatus.CANCELLED]))
     if open_only or overdue:
         query = query.filter(Ticket.status.in_(OPEN_TICKET_STATUSES))

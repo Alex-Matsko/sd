@@ -267,6 +267,13 @@ def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: Use
         }
         ticket.is_recurring_problem = bool(payload.is_recurring_problem)
 
+    for field in ("planned_due_at", "estimated_minutes"):
+        if field in provided and getattr(payload, field) != getattr(ticket, field):
+            before, after = getattr(ticket, field), getattr(payload, field)
+            changed[field] = {"from": before.isoformat() if isinstance(before, datetime) else before,
+                              "to": after.isoformat() if isinstance(after, datetime) else after}
+            setattr(ticket, field, after)
+
     if "category_id" in provided:
         ticket.category_id = payload.category_id
     if "asset_id" in provided:
