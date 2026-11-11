@@ -1,6 +1,6 @@
 import { readTicketFilters, readQueuePage, readQueueView } from "../lib/ticketFilters";
 import type { QueueScope, QueueView } from "../lib/ticketFilters";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { createSavedFilter, deleteSavedFilter, listOrganizations, listSavedFilters, listTickets, listUsers } from "../api/endpoints";
@@ -30,8 +30,10 @@ export function TicketsPage() {
   const { scope, status: statusFilter, priority: priorityFilter, organization: organizationFilter,
     assignee: assigneeFilter, risk: slaRiskFilter, search, openOnly, overdue: overdueOnly } = readTicketFilters(searchParams);
   const sort: "created_desc" | "number_asc" | "number_desc" = searchParams.get("sort") === "number_asc" ? "number_asc" : searchParams.get("sort") === "number_desc" ? "number_desc" : "created_desc";
-  const activeFilterCount = [statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter, openOnly, overdueOnly].filter(Boolean).length;
-  const [filtersOpen, setFiltersOpen] = useState(activeFilterCount > 0);
+  const activeFilterCount = [statusFilter, priorityFilter, organizationFilter, assigneeFilter, slaRiskFilter, openOnly && !overdueOnly, overdueOnly, sort !== "created_desc"].filter(Boolean).length;
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
   const [debouncedSearch, setDebouncedSearch] = useState(search);
   useEffect(() => { const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300); return () => clearTimeout(timer); }, [search]);
   const qc = useQueryClient();
@@ -75,7 +77,7 @@ export function TicketsPage() {
   function applySavedFilter(values: Record<string, string | number | undefined>) {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== "") params.set(key, String(value));
-    params.delete("page"); setSearchParams(params, { replace: true }); setFiltersOpen(true);
+    params.delete("page"); setSearchParams(params, { replace: true }); setFiltersOpen(false);
   }
   function choosePage(nextPage: number) {
     setSearchParams((prev) => { const next = new URLSearchParams(prev); if (nextPage === 0) next.delete("page"); else next.set("page", String(nextPage + 1)); return next; }, { replace: true });
@@ -103,25 +105,50 @@ export function TicketsPage() {
   }, [view, listQuery.isSuccess, listQuery.isPlaceholderData, page, pageCount, setSearchParams]);
   const orgsById = new Map((orgsQuery.data ?? []).map((o) => [o.id, o]));
   const usersById = new Map((usersQuery.data ?? []).map((u) => [u.id, u]));
+  useLayoutEffect(() => {
+    const root = workspaceRef.current, controls = controlsRef.current;
+    if (!root || !controls || view !== "kanban" || !ticketsQuery.isSuccess) return;
+    const fitBoard = () => {
+      const board = root.querySelector(".kanban-board");
+      if (!board) return;
+      const height = Math.max(240, Math.min(window.innerHeight - 90, window.innerHeight - board.getBoundingClientRect().top - 48));
+      root.style.setProperty("--queue-board-height", `${height}px`);
+    };
+    const observer = new ResizeObserver(fitBoard);
+    observer.observe(controls); window.addEventListener("resize", fitBoard); fitBoard();
+    return () => { observer.disconnect(); window.removeEventListener("resize", fitBoard); };
+  }, [view, ticketsQuery.isSuccess]);
+  const activeFilters: { key: string; label: string }[] = [];
+  if (organizationFilter) activeFilters.push({ key: "organization_id", label: orgsById.get(organizationFilter)?.name ?? "Организация" });
+  if (assigneeFilter) activeFilters.push({ key: "assigned_engineer_id", label: usersById.get(assigneeFilter)?.full_name ?? "Исполнитель" });
+  if (statusFilter) activeFilters.push({ key: "status_filter", label: STATUS_LABELS[statusFilter] });
+  if (priorityFilter) activeFilters.push({ key: "priority", label: priorityFilter });
+  if (slaRiskFilter) activeFilters.push({ key: "sla_risk", label: slaRiskFilter === "warning" ? "Риск SLA" : "SLA нарушен" });
+  if (overdueOnly) activeFilters.push({ key: "overdue", label: "Просроченные" });
+  else if (openOnly) activeFilters.push({ key: "open_only", label: "Незавершённые" });
+  if (sort !== "created_desc") activeFilters.push({ key: "sort", label: sort === "number_asc" ? "Номер ↑" : "Номер ↓" });
   const queueReturn = `/tickets?${new URLSearchParams({ ...Object.fromEntries(searchParams), view, scope }).toString()}`;
 
-  return <div className="view ticket-workspace">
-    <div className="toolbar queue-heading"><div><h1 className="view-title">Заявки</h1><p>{SCOPES.find((s) => s.value === scope)?.description}</p></div><div className="spacer" /><Link to="/tickets/new" className="btn btn-primary">+ Новая заявка</Link></div>
-    <div className="queue-controls">
-      <div className="queue-navigation"><div className="queue-tabs" role="group" aria-label="Показывать заявки">{SCOPES.map((item) => <button type="button" key={item.value} className={scope === item.value ? "active" : ""} aria-pressed={scope === item.value} onClick={() => chooseScope(item.value)}>{item.label}</button>)}</div>
-      <div className="view-toggle" role="group" aria-label="Вид заявок"><button type="button" className={view === "list" ? "active" : ""} aria-pressed={view === "list"} onClick={() => chooseView("list")}><ViewIcon />Список</button><button type="button" className={view === "kanban" ? "active" : ""} aria-pressed={view === "kanban"} onClick={() => chooseView("kanban")}><ViewIcon board />Канбан</button></div></div>
-      <div className="queue-search-row"><input type="search" placeholder={scope === "archived" ? "Найти в архиве по номеру, теме или переписке…" : "Найти заявку по номеру, теме или переписке…"} value={search} onChange={(e) => updateUrl("q", e.target.value)} aria-label="Поиск заявок" />
-        <button type="button" className={`btn btn-ghost queue-filter-button ${activeFilterCount ? "has-filters" : ""}`} aria-expanded={filtersOpen} aria-controls="queue-filters" onClick={() => setFiltersOpen((v) => !v)}>Фильтры{activeFilterCount > 0 && <span>{activeFilterCount}</span>}</button>
-        <select aria-label="Сортировка заявок" value={sort} onChange={(e) => updateUrl("sort", e.target.value)}><option value="created_desc">Сначала новые</option><option value="number_asc">Номер: по возрастанию</option><option value="number_desc">Номер: по убыванию</option></select>
+  return <div ref={workspaceRef} className="view ticket-workspace">
+    <div ref={controlsRef} className="queue-controls">
+      <div className="queue-workbar"><h1 className="view-title">Заявки <span className="queue-total" role="status">{ticketsQuery.isSuccess ? total : "…"}</span></h1>
+        <div className="queue-tabs" role="group" aria-label="Показывать заявки">{SCOPES.map((item) => <button type="button" key={item.value} title={item.description} className={scope === item.value ? "active" : ""} aria-pressed={scope === item.value} onClick={() => chooseScope(item.value)}>{item.label}</button>)}</div>
+        <div className="spacer" /><Link to="/tickets/new" className="btn btn-primary queue-create">+ Новая заявка</Link>
       </div>
+      <div className="queue-tools"><div className="view-toggle" role="group" aria-label="Вид заявок"><button type="button" className={view === "list" ? "active" : ""} aria-pressed={view === "list"} onClick={() => chooseView("list")}><ViewIcon />Список</button><button type="button" className={view === "kanban" ? "active" : ""} aria-pressed={view === "kanban"} onClick={() => chooseView("kanban")}><ViewIcon board />Канбан</button></div>
+        <input type="search" placeholder={scope === "archived" ? "Поиск в архиве…" : "Поиск заявок…"} value={search} onChange={(e) => updateUrl("q", e.target.value)} aria-label="Поиск заявок" />
+        <button type="button" className={`btn btn-ghost queue-filter-button ${activeFilterCount ? "has-filters" : ""}`} title="Фильтры и сортировка" aria-expanded={filtersOpen} aria-controls="queue-filters" onClick={() => setFiltersOpen((v) => !v)}>Фильтры{activeFilterCount > 0 && <span>{activeFilterCount}</span>}</button>
+      </div>
+      {!filtersOpen && activeFilters.length > 0 && <div className="queue-active-filters" aria-label="Применённые фильтры">{activeFilters.slice(0, 2).map((filter) => <button type="button" className="queue-filter-pill" key={filter.key} title={`Убрать фильтр: ${filter.label}`} onClick={() => updateUrl(filter.key, "")}><span>{filter.label}</span><span aria-hidden="true">×</span></button>)}{activeFilters.length > 2 && <button type="button" className="btn-link" onClick={() => setFiltersOpen(true)}>Ещё {activeFilters.length - 2}</button>}<button type="button" className="btn-link" onClick={resetFilters}>Сбросить</button></div>}
       {filtersOpen && <div id="queue-filters" className="queue-filter-panel"><div className="filter-bar">
         <label>Статус<select value={statusFilter} onChange={(e) => updateUrl("status_filter", e.target.value)} aria-label="Статус"><option value="">Все статусы</option>{STATUS_OPTIONS.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}</select></label>
         <label>Приоритет<select value={priorityFilter} onChange={(e) => updateUrl("priority", e.target.value)} aria-label="Приоритет"><option value="">Любой приоритет</option>{["P1", "P2", "P3", "P4"].map((p) => <option key={p}>{p}</option>)}</select></label>
         <label>Организация<select value={organizationFilter} onChange={(e) => updateUrl("organization_id", e.target.value)} aria-label="Организация"><option value="">Все организации</option>{(orgsQuery.data ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
         <label>Исполнитель<select value={assigneeFilter} onChange={(e) => updateUrl("assigned_engineer_id", e.target.value)} aria-label="Исполнитель"><option value="">Все исполнители</option>{(usersQuery.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}</select></label>
+        <label>Сортировка<select aria-label="Сортировка заявок" value={sort} onChange={(e) => updateUrl("sort", e.target.value)}><option value="created_desc">Сначала новые</option><option value="number_asc">Номер: по возрастанию</option><option value="number_desc">Номер: по убыванию</option></select></label>
         <label>SLA<select value={slaRiskFilter} onChange={(e) => updateUrl("sla_risk", e.target.value)} aria-label="SLA"><option value="">Любой SLA</option><option value="warning">Риск нарушения</option><option value="breached">Нарушен</option></select></label>
       </div><div className="queue-extra-filters"><label><input type="checkbox" checked={openOnly} disabled={scope === "archived"} onChange={(e) => updateUrl("open_only", e.target.checked)} />Только незавершённые</label>{overdueOnly && <span className="status-tag status-waiting">Просрочен срок решения</span>}<button type="button" className="btn-link" onClick={resetFilters}>Сбросить фильтры</button></div></div>}
-      <div className="queue-filter-summary"><div className="saved-filters">{(savedFiltersQuery.data ?? []).map((f) => <span className="saved-filter-chip" key={f.id}><button type="button" onClick={() => applySavedFilter(f.criteria)}>{f.name}</button><button type="button" className="saved-filter-remove" title={`Удалить фильтр ${f.name}`} disabled={deleteFilterMutation.isPending} onClick={() => deleteFilterMutation.mutate(f.id)}>×</button></span>)}<button type="button" className="btn-link" disabled={saveFilterMutation.isPending} onClick={() => { const name = window.prompt("Название фильтра"); if (name?.trim()) saveFilterMutation.mutate(name.trim()); }}>Сохранить фильтр</button></div><span className="muted" role="status">{ticketsQuery.isSuccess ? `Найдено: ${total}` : "Загрузка…"}</span></div>
+      {filtersOpen && <div className="queue-filter-summary"><div className="saved-filters">{(savedFiltersQuery.data ?? []).map((f) => <span className="saved-filter-chip" key={f.id}><button type="button" onClick={() => applySavedFilter(f.criteria)}>{f.name}</button><button type="button" className="saved-filter-remove" title={`Удалить фильтр ${f.name}`} disabled={deleteFilterMutation.isPending} onClick={() => deleteFilterMutation.mutate(f.id)}>×</button></span>)}<button type="button" className="btn-link" disabled={saveFilterMutation.isPending} onClick={() => { const name = window.prompt("Название фильтра"); if (name?.trim()) saveFilterMutation.mutate(name.trim()); }}>Сохранить фильтр</button></div></div>}
     </div>
     {(saveFilterMutation.isError || deleteFilterMutation.isError) && <ErrorBanner message={(saveFilterMutation.error ?? deleteFilterMutation.error)?.message ?? "Не удалось изменить фильтр"} />}
     {ticketsQuery.isLoading && <Loading />}{ticketsQuery.isError && <ErrorBanner message={ticketsQuery.error?.message ?? "Не удалось загрузить заявки"} />}

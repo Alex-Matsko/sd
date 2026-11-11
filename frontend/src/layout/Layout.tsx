@@ -287,7 +287,7 @@ export function Layout() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${location.pathname === "/tickets" || location.pathname.startsWith("/tickets/") ? " ticket-focused" : ""}`}>
       <a className="skip-link" href="#main-content">Перейти к содержимому</a>
       {mobileOpen && <button className="sidebar-overlay" aria-label="Закрыть меню" onClick={() => setMobileOpen(false)} />}
       <aside id="main-navigation" className={`sidebar${mobileOpen ? " sidebar-open" : ""}`}>
