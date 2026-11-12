@@ -66,7 +66,7 @@ export function TicketTimer({ ticketId, status }: { ticketId: number; status: Ti
         {stopMutation.isPending ? "Остановка…" : "Остановить таймер"}</button>}
       {canStart && (!runningHere || status !== "in_progress") && <button type="button" className="btn btn-primary ticket-start-work" disabled={!ready} onClick={() => startMutation.mutate()}>
           <svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true" fill="currentColor"><path d="M6 3.5v13L16 10z" /></svg>
-          {startMutation.isPending ? "Запуск…" : status === "resolved" || status === "waiting_customer" || status === "waiting_third_party" ? "Возобновить работу" : "Начать работу"}
+          {startMutation.isPending ? "Запуск…" : status === "in_progress" ? "Запустить таймер" : status === "resolved" || status === "waiting_customer" || status === "waiting_third_party" ? "Возобновить работу" : "Начать работу"}
         </button>}
       {timerQuery.isPending && <span className="muted" role="status">Проверка таймера…</span>}
     </div>
