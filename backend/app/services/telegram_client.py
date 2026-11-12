@@ -10,6 +10,7 @@ trust-store handling needed the way MAX's Russian state CA required.
 """
 
 import os
+import time
 
 import httpx
 
@@ -38,15 +39,32 @@ def _check(response: httpx.Response, method: str) -> dict:
     return data
 
 
+def _retry_read(operation):
+    """One fresh connection after a proxy/TLS failure on an idempotent call.
+
+    Message/document sends are deliberately excluded: an ambiguous response
+    must not cause a second immediate external send.
+    """
+    for attempt in range(2):
+        try:
+            return operation()
+        except httpx.TransportError:
+            if attempt:
+                raise
+            time.sleep(0.5)
+
+
 def get_updates(base_url: str, token: str, offset: int | None, timeout: int = 20, limit: int = 100) -> list[dict]:
     """One long-poll call to getUpdates. `offset` is the last seen update_id +
     1 (Telegram's own ack-by-offset scheme - acks everything below it)."""
     params: dict = {"timeout": timeout, "limit": limit}
     if offset is not None:
         params["offset"] = offset
-    with _client(timeout=timeout + 10) as client:
-        response = client.get(_url(base_url, token, "getUpdates"), params=params)
-    return _check(response, "getUpdates")["result"]
+    def fetch():
+        with _client(timeout=timeout + 10) as client:
+            response = client.get(_url(base_url, token, "getUpdates"), params=params)
+        return _check(response, "getUpdates")["result"]
+    return _retry_read(fetch)
 
 
 def send_message(
@@ -88,25 +106,30 @@ def set_commands(base_url: str, token: str, commands: list[dict]) -> dict:
     """POST setMyCommands - {"commands": [{"command": "start", "description":
     ...}]}. Unlike MAX's /me/commands, this is Telegram's own long-standing
     feature and reliably renders as the "/" command menu in the client."""
-    with _client(timeout=15) as client:
-        response = client.post(_url(base_url, token, "setMyCommands"), json={"commands": commands})
-    return _check(response, "setMyCommands")
+    def configure():
+        with _client(timeout=15) as client:
+            response = client.post(_url(base_url, token, "setMyCommands"), json={"commands": commands})
+        return _check(response, "setMyCommands")
+    return _retry_read(configure)
 
 
 def get_file_path(base_url: str, token: str, file_id: str) -> str | None:
     """getFile resolves a file_id to a download path - Telegram attachments
     arrive as an opaque id, not a direct URL (unlike MAX's occasional direct
     `url`), so this extra hop is required before downloading."""
-    with _client(timeout=15) as client:
-        response = client.get(_url(base_url, token, "getFile"), params={"file_id": file_id})
-    data = _check(response, "getFile")
-    return data["result"].get("file_path")
+    def fetch():
+        with _client(timeout=15) as client:
+            response = client.get(_url(base_url, token, "getFile"), params={"file_id": file_id})
+        return _check(response, "getFile")["result"].get("file_path")
+    return _retry_read(fetch)
 
 
 def download_file(base_url: str, token: str, file_path: str) -> bytes:
-    with _client(timeout=30) as client:
-        from app.services.attachments import download_limited
-        return download_limited(client, f"{base_url}/file/bot{token}/{file_path}")
+    def fetch():
+        with _client(timeout=30) as client:
+            from app.services.attachments import download_limited
+            return download_limited(client, f"{base_url}/file/bot{token}/{file_path}")
+    return _retry_read(fetch)
 
 
 def send_document(base_url: str, token: str, chat_id: str, filename: str, content: bytes, mime_type: str) -> dict:

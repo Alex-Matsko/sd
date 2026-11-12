@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # marginal risk, since the portal exposes only that client's own data.
     portal_token_expire_minutes: int = 720
     # Public base URL of the portal, used to build magic links in emails.
+    staff_base_url: str = ""
     portal_base_url: str = "http://localhost:8081/portal"
     portal_magic_link_ttl_minutes: int = 30
 

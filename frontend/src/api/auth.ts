@@ -64,3 +64,10 @@ export function changeOwnPassword(currentPassword: string, newPassword: string) 
     body: { current_password: currentPassword, new_password: newPassword },
   });
 }
+
+
+export const requestMaxLinkCode = () => apiRequest<TelegramLinkCode>("/auth/me/max-link-code", { method: "POST" });
+export const unlinkMax = () => apiRequest<User>("/auth/me/max-unlink", { method: "POST" });
+export const updateMaxNotifications = (enabled: boolean) => apiRequest<User>("/auth/me/max-notifications", { method: "PATCH", body: { enabled } });
+
+export const updateTelegramNotifications = (scope: "all" | "assigned" | "off") => apiRequest<User>("/auth/me/telegram-notifications", { method: "PATCH", body: { scope } });

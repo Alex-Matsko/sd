@@ -30,3 +30,6 @@ class UserRead(BaseModel):
     role: UserRole
     is_active: bool
     telegram_id: str | None
+    telegram_notification_scope: str
+    max_linked: bool
+    max_notify_new_tickets: bool

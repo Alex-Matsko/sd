@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { changeOwnPassword, fetchCurrentUser, requestTelegramLinkCode, unlinkTelegram } from "../api/auth";
+import { changeOwnPassword, fetchCurrentUser, requestTelegramLinkCode, unlinkTelegram, requestMaxLinkCode, unlinkMax, updateMaxNotifications, updateTelegramNotifications } from "../api/auth";
 import { ErrorBanner, Loading } from "../components/ui";
 import { USER_ROLE_LABELS, formatDateTime } from "../lib/labels";
 
@@ -29,6 +29,9 @@ export function ProfilePage() {
       qc.invalidateQueries({ queryKey: ["me"] });
     },
   });
+
+  const telegramPreference = useMutation({ mutationFn: updateTelegramNotifications,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
 
   if (meQuery.isLoading) return <div className="view"><Loading /></div>;
   if (meQuery.isError || !meQuery.data) {
@@ -61,14 +64,14 @@ export function ProfilePage() {
       </div>
 
       <PasswordPanel />
+      <MaxNotificationPanel />
 
       <div className="panel" style={{ maxWidth: 520 }}>
         <div className="panel-head">
           <h2>Уведомления в Telegram</h2>
         </div>
         <p className="muted">
-          Привяжите личный Telegram, чтобы получать уведомления о нарушении SLA по вашим заявкам напрямую в мессенджер
-          — в дополнение к колокольчику в панели.
+          Новые заявки, назначения, ответы клиентов и риски SLA — прямо в Telegram. Выберите все заявки или только назначенные лично вам.
         </p>
 
         {user.telegram_id ? (
@@ -76,6 +79,10 @@ export function ProfilePage() {
             <p>
               <span className="status-tag status-resolved">Привязан</span>
             </p>
+            <label className="form-row">Какие заявки присылать<select aria-label="Уведомления Telegram" disabled={telegramPreference.isPending} value={telegramPreference.isPending ? telegramPreference.variables : user.role === "engineer" && user.telegram_notification_scope === "all" ? "assigned" : user.telegram_notification_scope} onChange={(event) => telegramPreference.mutate(event.target.value as "all" | "assigned" | "off")}>
+              {user.role !== "engineer" && <option value="all">Все заявки, включая неразобранные</option>}<option value="assigned">Только назначенные мне</option><option value="off">Уведомления выключены</option>
+            </select></label>
+            {telegramPreference.isError && <ErrorBanner message={telegramPreference.error.message} />}
             {unlinkMutation.isError && <ErrorBanner message={(unlinkMutation.error as Error).message} />}
             <div className="modal-foot" style={{ padding: 0, borderTop: "none", justifyContent: "flex-start" }}>
               <button className="btn btn-ghost" disabled={unlinkMutation.isPending} onClick={() => unlinkMutation.mutate()}>
@@ -170,4 +177,33 @@ function PasswordPanel() {
       </div>
     </div>
   );
+}
+
+
+function MaxNotificationPanel() {
+  const qc = useQueryClient();
+  const [code, setCode] = useState<{ code: string; expires_at: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [copyHelp, setCopyHelp] = useState(false);
+  const codeElement = useRef<HTMLElement>(null);
+  const me = useQuery({ queryKey: ["me"], queryFn: fetchCurrentUser, refetchInterval: (query) => code && !query.state.data?.max_linked ? 4_000 : false });
+  const request = useMutation({ mutationFn: requestMaxLinkCode, onSuccess: (value) => { setCode(value); setCopied(false); setCopyHelp(false); } });
+  const unlink = useMutation({ mutationFn: unlinkMax, onSuccess: () => { setCode(null); qc.invalidateQueries({ queryKey: ["me"] }); } });
+  const preference = useMutation({ mutationFn: updateMaxNotifications, onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
+  const linked = Boolean(me.data?.max_linked);
+  const fullQueue = me.data?.role !== "engineer";
+  return <section className="panel max-notification-panel" aria-label="Уведомления в MAX">
+    <div className="panel-head"><h2>Уведомления в MAX</h2><span className={`status-tag ${linked ? "status-resolved" : "status-closed"}`}>{linked ? "Привязан" : "Не привязан"}</span></div>
+    <p className="muted">Получайте номер, тему, приоритет, клиента и ссылку на новую заявку прямо в MAX — из всех каналов service desk.</p>
+    {(request.isError || unlink.isError || preference.isError) && <ErrorBanner message={(request.error ?? unlink.error ?? preference.error)?.message ?? "Не удалось изменить настройки"} />}
+    {linked ? <>
+      <label className="max-notification-option"><input type="checkbox" checked={preference.isPending ? Boolean(preference.variables) : me.data?.max_notify_new_tickets ?? false} disabled={preference.isPending} onChange={(event) => preference.mutate(event.target.checked)} /><span>{fullQueue ? "Уведомлять обо всех новых заявках" : "Уведомлять о новых назначенных мне заявках"}</span></label>
+      <p className="muted">Уведомления включаются после привязки. Заявки, которые вы создаёте сами, повторно не присылаются.</p>
+      <button type="button" className="btn btn-ghost" disabled={unlink.isPending} onClick={() => unlink.mutate()}>Отвязать MAX</button>
+    </> : <>
+      <ol className="max-link-steps"><li>Получите одноразовый код.</li><li>Откройте бота вашей службы поддержки в MAX.</li><li>Отправьте ему команду из блока ниже. Уведомления включатся автоматически.</li></ol>
+      {code && <div className="max-link-code"><code ref={codeElement}>/link {code.code}</code><button type="button" className="btn btn-ghost" onClick={async () => { try { await navigator.clipboard.writeText(`/link ${code.code}`); setCopied(true); setCopyHelp(false); } catch { const range = document.createRange(); if (codeElement.current) { range.selectNodeContents(codeElement.current); window.getSelection()?.removeAllRanges(); window.getSelection()?.addRange(range); } setCopied(false); setCopyHelp(true); } }}>{copied ? "Скопировано" : "Копировать"}</button>{copyHelp && <p className="muted" role="status">Команда выделена. Скопируйте её через меню браузера или Ctrl/Cmd+C.</p>}<p className="muted">Код действует до {formatDateTime(code.expires_at)}. После отправки статус обновится автоматически.</p></div>}
+      <button type="button" className="btn btn-primary" disabled={request.isPending} onClick={() => request.mutate()}>{code ? "Получить новый код" : "Получить код для MAX"}</button>
+    </>}
+  </section>;
 }

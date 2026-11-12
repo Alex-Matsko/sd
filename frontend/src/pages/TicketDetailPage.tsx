@@ -308,7 +308,7 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
               {(historyQuery.data ?? []).map((h) => (
                 <div className="history-row" key={h.id}>
                   <span className="muted">{formatDateTime(h.created_at)}</span>
-                  <span>{h.action}</span>
+                  <span>{h.action === "automation_applied" ? `Автоматизация: ${typeof h.changes?.rule_name === "string" ? h.changes.rule_name : "правило"}` : h.action}</span>
                 </div>
               ))}
               {historyQuery.isSuccess && (historyQuery.data ?? []).length === 0 && <p className="muted">История пуста</p>}

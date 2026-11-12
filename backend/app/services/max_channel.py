@@ -12,10 +12,13 @@ any remaining field-name gap is a one-function fix.
 """
 
 import logging
+import hashlib
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import httpx
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.enums import (
@@ -621,6 +624,43 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
     logger.warning("MAX: неизвестный callback payload=%r", payload)
 
 
+def _handle_staff(db: Session, config: MaxConfig, parsed: ParsedUpdate) -> bool:
+    """Staff messages never enter the customer ticket flow, including bad codes."""
+    from app.services import audit, login_guard
+    text = parsed.text.strip()
+    if parsed.kind == "text" and re.match(r"^/link(?:\s|$)", text, re.IGNORECASE):
+        match = re.fullmatch(r"/link\s+([0-9a-f]{12})", text, re.IGNORECASE)
+        if login_guard.guard.seconds_left("max-staff-link", parsed.external_user_id):
+            _send(config, parsed.chat_id, "Слишком много попыток. Попробуйте позже и получите новый код в профиле.")
+            return True
+        digest = hashlib.sha256(match.group(1).upper().encode()).hexdigest() if match else ""
+        db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"max-staff:{parsed.external_user_id}"))))
+        user = db.query(User).filter(User.max_link_code_hash == digest, User.is_active.is_(True),
+                                     User.max_link_code_expires_at > datetime.now(timezone.utc)).with_for_update().first()
+        if user is None:
+            login_guard.guard.register_failure("max-staff-link", parsed.external_user_id)
+            _send(config, parsed.chat_id, "Код не найден или устарел. Получите новый код в «Профиль → Уведомления в MAX» и отправьте /link КОД.")
+            return True
+        existing = db.query(User.id).filter(or_(User.max_id == parsed.external_user_id, User.max_chat_id == parsed.chat_id), User.id != user.id).first()
+        if existing or user.max_id:
+            _send(config, parsed.chat_id, "Этот аккаунт уже привязан. Сначала отвяжите MAX в профиле текущего сотрудника.")
+            return True
+        user.max_id, user.max_chat_id = parsed.external_user_id, parsed.chat_id
+        user.max_link_code_hash = user.max_link_code_expires_at = None
+        user.max_notify_new_tickets = True
+        audit.record(db, entity_type="user", entity_id=user.id, action="max_linked", user_id=user.id,
+                     changes={"new_ticket_notifications": True})
+        db.commit()
+        login_guard.guard.register_success("max-staff-link", parsed.external_user_id)
+        _send(config, parsed.chat_id, f"MAX привязан к профилю {user.full_name}. Уведомления о новых доступных вам заявках включены. Настройки — в профиле service desk.")
+        return True
+    linked = db.query(User).filter(User.max_id == parsed.external_user_id).first()
+    if linked is not None:
+        _send(config, parsed.chat_id, "Это аккаунт сотрудника: здесь приходят уведомления. Работать с заявками и управлять уведомлениями можно в панели service desk.")
+        return True
+    return False
+
+
 def handle_update(db: Session, raw_update: dict) -> None:
     parsed = _extract_incoming(raw_update)
     if parsed is None:
@@ -629,6 +669,9 @@ def handle_update(db: Session, raw_update: dict) -> None:
 
     config = load_max_config(db)
     if config is None:
+        return
+
+    if _handle_staff(db, config, parsed):
         return
 
     state = _get_or_create_state(db, parsed.external_user_id, parsed.chat_id)

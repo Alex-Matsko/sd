@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -21,3 +22,11 @@ class TelegramLinkCodeRead(BaseModel):
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=8)
+
+
+class MaxNotificationSettings(BaseModel):
+    enabled: bool
+
+
+class TelegramNotificationSettings(BaseModel):
+    scope: Literal["all", "assigned", "off"]

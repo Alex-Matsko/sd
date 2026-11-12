@@ -246,8 +246,8 @@ def process_outbound(db: Session, job_id: int, lease_token: str):
         # Held across transport calls: other workers skip the locked job even
         # if a slow provider call outlives its lease.
         job = db.query(ChannelJob).filter_by(id=job_id, lease_token=lease_token, state="processing").with_for_update().one()
-        send_job(db, job)
-        job.state, job.completed_at, job.last_error = "sent", now(), None
+        delivered = send_job(db, job)
+        job.state, job.completed_at, job.last_error = "discarded" if delivered is False else "sent", now(), None
         job.lease_until, job.lease_token = None, None
         db.commit()
         return True

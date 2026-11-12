@@ -625,12 +625,18 @@ def _try_link_engineer(db: Session, config: TelegramConfig, parsed: ParsedUpdate
     code = match.group(1).upper()
     user = (
         db.query(User)
-        .filter(User.telegram_link_code == code, User.telegram_link_code_expires_at > datetime.now(timezone.utc))
+        .filter(User.telegram_link_code == code, User.is_active.is_(True), User.telegram_link_code_expires_at > datetime.now(timezone.utc))
         .first()
     )
     if user is None:
         _send(config, parsed.chat_id, "Код не найден или устарел. Получите новый код в профиле в веб-панели.")
         return True
+    existing = db.query(User.id).filter(User.telegram_id == parsed.external_user_id, User.id != user.id).first()
+    if existing:
+        _send(config, parsed.chat_id, "Telegram уже привязан к другому сотруднику. Сначала отвяжите его в текущем профиле.")
+        return True
+    from app.services.ticket_access import sees_full_queue
+    user.telegram_notification_scope = "all" if sees_full_queue(user) else "assigned"
     user.telegram_id = parsed.external_user_id
     user.telegram_link_code = None
     user.telegram_link_code_expires_at = None
@@ -650,6 +656,9 @@ def handle_update(db: Session, raw_update: dict) -> None:
         return
 
     if _try_link_engineer(db, config, parsed):
+        return
+    if db.query(User.id).filter(User.telegram_id == parsed.external_user_id).first():
+        _send(config, parsed.chat_id, "Это аккаунт сотрудника: здесь приходят уведомления. Работать с заявками и менять настройки можно в панели service desk.")
         return
 
     state = _get_or_create_state(db, parsed.external_user_id, parsed.chat_id)

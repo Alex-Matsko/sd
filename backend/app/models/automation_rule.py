@@ -6,12 +6,11 @@ from app.models.base import Base, TimestampMixin
 
 
 class AutomationRule(Base, TimestampMixin):
-    """Status-automation rule, evaluated by the worker (services/automation.py)
-    on the same cadence as the SLA sweep. Kept to one trigger type for now
-    (auto-close, section 4.2) rather than a speculative generic condition/
-    action DSL - `trigger_type` is the extension point for future rule kinds
-    without a new migration, but each kind still needs matching evaluation
-    code, same tradeoff as integration_settings.config."""
+    """Time-based status transitions, evaluated by the worker.
+
+    Supported conditions have explicit evaluation code, keeping rule
+    validation and execution consistent without arbitrary executable scripts.
+    """
 
     __tablename__ = "automation_rules"
 

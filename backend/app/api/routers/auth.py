@@ -1,4 +1,5 @@
 import secrets
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -19,7 +20,7 @@ from app.db import get_db
 from app.services import login_guard
 from app.models.auth import RefreshToken
 from app.models.user import User
-from app.schemas.auth import PasswordChangeRequest, RefreshRequest, TelegramLinkCodeRead, TokenResponse
+from app.schemas.auth import MaxNotificationSettings, TelegramNotificationSettings, PasswordChangeRequest, RefreshRequest, TelegramLinkCodeRead, TokenResponse
 from app.schemas.user import UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -135,8 +136,55 @@ def request_telegram_link_code(db: Session = Depends(get_db), user: User = Depen
 
 @router.post("/me/telegram-unlink", response_model=UserRead)
 def unlink_telegram(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> User:
-    user.telegram_id = None
+    user.telegram_id = user.telegram_link_code = user.telegram_link_code_expires_at = None
+    user.telegram_notification_scope = "off"
     db.add(user)
     db.commit()
     db.refresh(user)
+    return user
+
+
+@router.post("/me/max-link-code", response_model=TelegramLinkCodeRead)
+def request_max_link_code(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.services import max_channel
+    if max_channel.load_max_config(db) is None:
+        raise HTTPException(status_code=409, detail="Канал MAX не настроен. Обратитесь к администратору.")
+    user = db.query(User).filter_by(id=user.id).with_for_update().one()
+    if user.max_id:
+        raise HTTPException(status_code=409, detail="MAX уже привязан. Сначала отвяжите текущий аккаунт.")
+    code = secrets.token_hex(6).upper()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+    user.max_link_code_hash = hashlib.sha256(code.encode()).hexdigest()
+    user.max_link_code_expires_at = expires_at
+    db.commit()
+    return TelegramLinkCodeRead(code=code, expires_at=expires_at)
+
+
+@router.patch("/me/max-notifications", response_model=UserRead)
+def update_max_notifications(payload: MaxNotificationSettings, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.services.audit import record
+    user.max_notify_new_tickets = payload.enabled
+    record(db, entity_type="user", entity_id=user.id, action="max_notifications_updated", user_id=user.id,
+           changes={"enabled": payload.enabled})
+    db.commit()
+    return user
+
+
+@router.post("/me/max-unlink", response_model=UserRead)
+def unlink_max(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.services.audit import record
+    user.max_id = user.max_chat_id = user.max_link_code_hash = user.max_link_code_expires_at = None
+    user.max_notify_new_tickets = False
+    record(db, entity_type="user", entity_id=user.id, action="max_unlinked", user_id=user.id)
+    db.commit()
+    return user
+
+
+@router.patch("/me/telegram-notifications", response_model=UserRead)
+def update_telegram_notifications(payload: TelegramNotificationSettings, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.services import ticket_access
+    if payload.scope == "all" and not ticket_access.sees_full_queue(user):
+        raise HTTPException(status_code=403, detail="Уведомления обо всех заявках доступны только сотрудникам с доступом ко всей очереди")
+    user.telegram_notification_scope = payload.scope
+    db.commit()
     return user

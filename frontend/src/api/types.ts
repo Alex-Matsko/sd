@@ -50,6 +50,9 @@ export interface User {
   role: UserRole;
   is_active: boolean;
   telegram_id: string | null;
+  telegram_notification_scope: "all" | "assigned" | "off";
+  max_linked: boolean;
+  max_notify_new_tickets: boolean;
 }
 
 export interface OrganizationEmailDomain {
@@ -241,7 +244,7 @@ export interface Ticket {
   sla: TicketSlaView | null;
 }
 
-export type AutomationTriggerType = "resolved_without_reply";
+export type AutomationTriggerType = "resolved_without_reply" | "status_without_reply" | "status_age";
 
 export interface SlaViolation {
   ticket_id: number;
@@ -284,6 +287,15 @@ export interface ReportsOverview {
     by_organization: { label: string; average: number; count: number }[];
   };
   backlog_aging: { bucket: string; count: number }[];
+}
+
+export interface AutomationRuleInput {
+  name: string;
+  trigger_type: AutomationTriggerType;
+  from_status: TicketStatus;
+  to_status: TicketStatus;
+  threshold_days: number;
+  is_active: boolean;
 }
 
 export interface AutomationRule {

@@ -64,7 +64,7 @@ AUDITED_TABLES = {
 }
 
 # Поля, значения которых в журнал не попадают ни при каких условиях.
-_SECRET_HINTS = ("password", "secret", "token", "encrypted")
+_SECRET_HINTS = ("password", "secret", "token", "encrypted", "link_code")
 
 
 def _is_secret(field: str) -> bool:

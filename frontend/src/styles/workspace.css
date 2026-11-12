@@ -473,3 +473,33 @@ pre.attachment-document-sample { white-space: pre-wrap; max-height: 70px; overfl
   .attachment-sheet th, .attachment-sheet td { min-width: 80px; }
   .pdf-preview-navigation { gap: 8px; font-size: 11px; }
 }
+
+.max-notification-panel { max-width: 620px; }
+.max-notification-panel > .muted, .max-link-steps { font-size: 12px; line-height: 1.7; }
+.max-notification-option { display: flex; align-items: center; gap: 10px; padding: 12px 0; font-size: 13px; }
+.max-notification-option input { width: 17px; height: 17px; flex: none; }
+.max-link-steps { padding-left: 20px; margin: 16px 0; }
+.max-link-code { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px; margin: 16px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.max-link-code code { font: 14px var(--font-mono); user-select: all; overflow-wrap: anywhere; }
+.max-link-code .btn { min-height: 32px; font-size: 11px; }
+.max-link-code p { flex-basis: 100%; margin: 0; font-size: 11px; }
+.automation-page > .view-description { margin: 0 0 20px; }
+.automation-rule .panel-head { justify-content: space-between; }
+.automation-rule .panel-head h2 { overflow-wrap: anywhere; }
+.automation-condition { color: var(--text-muted); font-size: 12px; margin: 12px 0; }
+.automation-rule-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.automation-rule-actions > .muted { font-size: 11px; }
+.automation-rule-actions .btn { min-height: 34px; font-size: 12px; }
+.automation-transition-fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+.automation-dialog .form-row { margin: 0; font-size: 12px; }
+.automation-dialog input, .automation-dialog select { min-width: 0; width: 100%; }
+.automation-dialog input[type="checkbox"] { width: 17px; }
+.automation-dialog .muted { font-size: 11px; line-height: 1.6; }
+.automation-rule-summary { margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--accent-soft); color: var(--text); font-size: 12px; line-height: 1.7; }
+@media (max-width: 640px) {
+  .automation-page > .toolbar { flex-wrap: wrap; }
+  .automation-page > .toolbar > .btn { margin-left: auto; }
+  .automation-transition-fields { grid-template-columns: minmax(0,1fr); }
+  .automation-dialog .modal-body { padding: 16px; }
+  .automation-rule-actions > .muted { width: 100%; }
+}

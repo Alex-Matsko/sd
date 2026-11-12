@@ -183,3 +183,45 @@ def test_send_document_uploads_private_bytes_without_a_public_url(monkeypatch):
     assert result["message_id"] == 45
     assert captured["path"] == "/bottest-token/sendDocument"
     assert b'filename="private.txt"' in captured["body"] and b"private bytes" in captured["body"]
+
+
+@pytest.mark.parametrize('error', [httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ProxyError])
+def test_poll_reconnects_after_one_transient_transport_failure(monkeypatch, error):
+    requests = []
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            raise error('temporary proxy failure')
+        return httpx.Response(200, json={'ok': True, 'result': []})
+    monkeypatch.setattr(httpx, 'Client', _mock_client_factory(handler))
+    monkeypatch.setattr(telegram_client.time, 'sleep', lambda seconds: None)
+    assert telegram_client.get_updates('https://api.telegram.org', 'test-token', 123) == []
+    assert len(requests) == 2
+    assert all(r.url.params['offset'] == '123' for r in requests)
+
+
+def test_persistent_poll_failure_remains_visible_and_sends_are_not_retried(monkeypatch):
+    requests = []
+    def handler(request):
+        requests.append(request)
+        raise httpx.RemoteProtocolError('proxy failed')
+    monkeypatch.setattr(httpx, 'Client', _mock_client_factory(handler))
+    monkeypatch.setattr(telegram_client.time, 'sleep', lambda seconds: None)
+    with pytest.raises(httpx.RemoteProtocolError):
+        telegram_client.get_updates('https://api.telegram.org', 'test-token', None)
+    assert len(requests) == 2
+    requests.clear()
+    with pytest.raises(httpx.RemoteProtocolError):
+        telegram_client.send_message('https://api.telegram.org', 'test-token', '42', 'text')
+    assert len(requests) == 1
+
+
+def test_authentication_error_is_not_hidden_by_retries(monkeypatch):
+    requests = []
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(401, json={'ok': False, 'description': 'Unauthorized'})
+    monkeypatch.setattr(httpx, 'Client', _mock_client_factory(handler))
+    with pytest.raises(telegram_client.TelegramApiError):
+        telegram_client.get_updates('https://api.telegram.org', 'test-token', None)
+    assert len(requests) == 1

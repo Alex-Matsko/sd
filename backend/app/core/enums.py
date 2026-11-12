@@ -116,9 +116,11 @@ class NotificationType(str, Enum):
 
 class AutomationTriggerType(str, Enum):
     # Section 4.2: "«Решена» → «Закрыта»: автозакрытие через N дней без ответа
-    # клиента". The only trigger type today; more (e.g. time-in-status
-    # escalation moves) can be added later without a schema change.
+    # клиента". Stored as VARCHAR, so new explicitly supported conditions
+    # do not require changing a native database enum.
     RESOLVED_WITHOUT_REPLY = "resolved_without_reply"
+    STATUS_WITHOUT_REPLY = "status_without_reply"
+    STATUS_AGE = "status_age"
 
 
 class ScheduleCadence(str, Enum):

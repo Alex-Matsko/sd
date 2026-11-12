@@ -5,6 +5,7 @@ import type {
   Call,
   AuditLogEntry,
   AutomationRule,
+  AutomationRuleInput,
   BusinessCalendar,
   Category,
   Channel,
@@ -406,7 +407,10 @@ export function getReportsOverview(filters: { date_from?: string; date_to?: stri
 export function listAutomationRules() {
   return apiRequest<AutomationRule[]>("/automation-rules");
 }
-export function updateAutomationRule(id: number, payload: { threshold_days?: number; is_active?: boolean }) {
+export function createAutomationRule(payload: AutomationRuleInput) {
+  return apiRequest<AutomationRule>("/automation-rules", { method: "POST", body: payload });
+}
+export function updateAutomationRule(id: number, payload: Partial<AutomationRuleInput>) {
   return apiRequest<AutomationRule>(`/automation-rules/${id}`, { method: "PATCH", body: payload });
 }
 

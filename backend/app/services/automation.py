@@ -2,18 +2,19 @@
 автозакрытие через N дней без ответа клиента"). Evaluated by the worker on
 the same cadence as the SLA sweep - see app/worker.py.
 
-Only one trigger type exists today (RESOLVED_WITHOUT_REPLY); see
-models/automation_rule.py for why this isn't a generic rule DSL.
+Supports time in status and time without a customer reply.
 """
 
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.enums import AutomationTriggerType
+from app.core.enums import AutomationTriggerType, MessageDirection
 from app.models.audit import AuditLog
 from app.models.automation_rule import AutomationRule
 from app.models.ticket import Ticket
+from app.models.message import Message
 from app.services import tickets as tickets_service
 
 
@@ -33,25 +34,38 @@ def _time_in_current_status(db: Session, ticket: Ticket) -> datetime:
     return last_change.created_at if last_change is not None else ticket.created_at
 
 
-def _run_resolved_without_reply(db: Session, rule: AutomationRule, now: datetime) -> int:
-    # A client reply while RESOLVED already flips the ticket back to
-    # IN_PROGRESS (services/messages.add_message) before this ever runs, so
-    # "still RESOLVED" already means "no reply since" - no extra check needed.
-    candidates = db.query(Ticket).filter(Ticket.status == rule.from_status).all()
+def _run_rule(db: Session, rule: AutomationRule, now: datetime, handled: set[int]) -> int:
+    candidate_ids = [row[0] for row in db.query(Ticket.id).filter(Ticket.status == rule.from_status).order_by(Ticket.id)]
     touched = 0
-    for ticket in candidates:
-        resolved_since = _time_in_current_status(db, ticket)
-        if now - resolved_since >= timedelta(days=rule.threshold_days):
+    for ticket_id in candidate_ids:
+        if ticket_id in handled:
+            continue
+        ticket = db.query(Ticket).filter(Ticket.id == ticket_id, Ticket.status == rule.from_status).with_for_update(skip_locked=True).first()
+        if ticket is None:
+            continue
+        since = _time_in_current_status(db, ticket)
+        if rule.trigger_type in (AutomationTriggerType.RESOLVED_WITHOUT_REPLY, AutomationTriggerType.STATUS_WITHOUT_REPLY):
+            last_reply = db.query(func.max(Message.created_at)).filter(Message.ticket_id == ticket.id,
+                Message.direction == MessageDirection.INBOUND).scalar()
+            if last_reply is not None:
+                since = max(since, last_reply)
+        if now - since >= timedelta(days=rule.threshold_days):
+            # The status service commits this audit alongside the transition.
+            db.add(AuditLog(entity_type="ticket", entity_id=ticket.id, action="automation_applied",
+                            user_id=None, changes={"rule_id": rule.id, "rule_name": rule.name}))
             tickets_service.transition_status(db, ticket, rule.to_status, actor=None)
+            handled.add(ticket.id)
             touched += 1
     return touched
 
 
 def run_automation_rules(db: Session, now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
-    rules = db.query(AutomationRule).filter(AutomationRule.is_active.is_(True)).all()
+    rules = db.query(AutomationRule).filter(AutomationRule.is_active.is_(True)).order_by(AutomationRule.id).all()
     touched = 0
+    handled: set[int] = set()
     for rule in rules:
-        if rule.trigger_type == AutomationTriggerType.RESOLVED_WITHOUT_REPLY:
-            touched += _run_resolved_without_reply(db, rule, now)
+        if rule.threshold_days < 1 or rule.to_status not in tickets_service.ALLOWED_TRANSITIONS.get(rule.from_status, set()):
+            continue
+        touched += _run_rule(db, rule, now, handled)
     return touched
