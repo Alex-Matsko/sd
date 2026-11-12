@@ -10,7 +10,7 @@ from datetime import date, datetime, timezone
 import jwt
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from uuid import UUID
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -414,13 +414,12 @@ async def attach_file(
     return PortalAttachmentRead(id=attachment.id, filename=attachment.filename, size_bytes=attachment.size_bytes)
 
 
-@router.get("/tickets/{ticket_id}/attachments/{attachment_id}")
-def download_attachment(
+def _get_portal_attachment(
     ticket_id: int,
     attachment_id: int,
-    contact: Contact = Depends(get_current_contact),
-    db: Session = Depends(get_db),
-) -> FileResponse:
+    contact: Contact,
+    db: Session,
+) -> Attachment:
     """Отдаёт вложение своей заявки.
 
     Вложение ищется через сообщение своей заявки, поэтому идентификатор из
@@ -444,6 +443,30 @@ def download_attachment(
     )
     if attachment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Вложение не найдено")
+    return attachment
+
+
+@router.get("/tickets/{ticket_id}/attachments/{attachment_id}/preview")
+def preview_attachment(
+    ticket_id: int, attachment_id: int, sheet: int = Query(0, ge=0),
+    contact: Contact = Depends(get_current_contact), db: Session = Depends(get_db),
+):
+    from app.services import attachment_preview
+    attachment = _get_portal_attachment(ticket_id, attachment_id, contact, db)
+    try:
+        return attachment_preview.preview_attachment(attachment, sheet)
+    except attachment_preview.PreviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.get("/tickets/{ticket_id}/attachments/{attachment_id}")
+def download_attachment(
+    ticket_id: int,
+    attachment_id: int,
+    contact: Contact = Depends(get_current_contact),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    attachment = _get_portal_attachment(ticket_id, attachment_id, contact, db)
     path = Path(attachment.stored_path)
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Файл недоступен")

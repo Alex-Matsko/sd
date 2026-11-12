@@ -5,15 +5,19 @@ new-ticket creation, and CSAT capture. The MAX HTTP client is always faked -
 there is no live bot token in this environment (see docs/decisions.md)."""
 
 import pytest
+from pathlib import Path
+from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from app.core.enums import Channel, MessageDirection, Priority, TicketStatus, TicketType
 from app.models.channel_conversation_state import ChannelConversationState
+from app.models.channel_job import ChannelJob
 from app.models.contact import Contact
 from app.models.message import Message
 from app.models.organization import Organization
 from app.models.ticket import Ticket
 from app.schemas.integration_setting import IntegrationSettingUpdate
+from app.schemas.message import MessageRead
 from app.schemas.ticket import TicketCreate
 from app.services import integration_settings, max_channel
 from app.services import tickets as tickets_service
@@ -116,6 +120,97 @@ def test_extract_link_falls_back_to_flat_mid():
     # Defensive fallback only - the confirmed live shape nests under
     # link.message.mid (see _text_update's reply_mid handling).
     assert max_channel._extract_link_mid({"type": "reply", "mid": "mid.flat"}) == "mid.flat"
+
+
+def _forward_update(text="", forwarded_text="", attachments=None):
+    update = _text_update(user_id="forward-client", chat_id="forward-chat", text=text, mid="mid.forward-envelope")
+    update["message"]["link"] = {
+        "type": "forward", "sender": {"user_id": "original-author"},
+        "message": {"mid": "mid.original", "text": forwarded_text, "attachments": attachments or []},
+    }
+    return update
+
+
+@pytest.mark.parametrize("own_text,forwarded_text,expected", [
+    ("", "", ""), ("", "Пересланный текст", "Пересланный текст"),
+    ("Комментарий", "Пересланный текст", "Комментарий\n\nПересланный текст"),
+])
+def test_extract_forward_preserves_content_and_envelope_identity(own_text, forwarded_text, expected):
+    attachment = {"type": "file", "filename": "Документ.pdf", "payload": {"url": "https://files.invalid/document"}}
+    parsed = max_channel._extract_incoming(_forward_update(own_text, forwarded_text, [attachment]))
+    assert parsed.text == expected
+    assert parsed.attachments == [attachment]
+    assert parsed.external_user_id == "forward-client"
+    assert parsed.mid == "mid.forward-envelope"
+    assert parsed.reply_to_mid is None
+
+
+def test_forward_preserves_direct_attachments_and_handles_null_body():
+    forwarded = {"type": "image", "payload": {"url": "https://files.invalid/forwarded"}}
+    direct = {"type": "file", "filename": "log.txt", "payload": {"url": "https://files.invalid/direct"}}
+    update = _forward_update(attachments=[forwarded])
+    update["message"]["body"]["attachments"] = [direct]
+    assert max_channel._extract_incoming(update).attachments == [direct, forwarded]
+    update["message"]["body"] = None
+    assert max_channel._extract_incoming(update).attachments == [forwarded]
+
+
+def test_reply_does_not_import_quoted_text_or_attachments():
+    update = _forward_update(text="Новый ответ", forwarded_text="Старая цитата", attachments=[{"type": "file"}])
+    update["message"]["link"]["type"] = "reply"
+    parsed = max_channel._extract_incoming(update)
+    assert parsed.text == "Новый ответ"
+    assert parsed.attachments == []
+    assert parsed.reply_to_mid == "mid.original"
+
+
+@pytest.mark.parametrize("fail_first_download", [False, True])
+def test_forwarded_files_are_atomic_visible_and_keep_original_names(db, max_enabled, contact, tmp_path, monkeypatch, _fake_send, fail_first_download):
+    monkeypatch.setattr("app.config.settings.attachments_dir", str(tmp_path))
+    contact.max_id = "forward-client"
+    db.commit()
+    ticket = tickets_service.create_ticket(db, TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT,
+        channel=Channel.MAX, subject="Пересланные файлы", manual_priority=Priority.P3, manual_priority_reason="test"), actor=None)
+    db.add(ChannelConversationState(channel=Channel.MAX, external_user_id="forward-client", chat_id="forward-chat",
+                                   contact_id=contact.id, active_ticket_id=ticket.id))
+    db.commit()
+    contents = {"https://files.invalid/pdf": b"%PDF-test", "https://files.invalid/image": b"\x89PNG\r\n\x1a\ndata"}
+    calls = []
+    def download(client, url):
+        calls.append(url)
+        if fail_first_download and len(calls) == 2:
+            raise TimeoutError("mock download failure")
+        return contents[url]
+    monkeypatch.setattr(max_channel.attachments_service, "download_limited", download)
+    update = _forward_update(attachments=[
+        {"type": "file", "filename": "Документ.pdf", "payload": {"url": "https://files.invalid/pdf"}},
+        {"type": "image", "payload": {"url": "https://files.invalid/image"}},
+    ])
+    job_id = channel_queue.capture_update(db, Channel.MAX, update, max_enabled)
+    result = channel_queue.process_inbound(db, *channel_queue.claim(db, "inbound", job_id))
+    if fail_first_download:
+        assert result is False
+        assert db.query(Message).filter_by(ticket_id=ticket.id).count() == 0
+        assert not [p for p in tmp_path.rglob("*") if p.is_file()]
+        assert db.query(ChannelJob).filter(ChannelJob.event_key.like(f"event:{job_id}:reply:%")).count() == 0
+        job = db.get(ChannelJob, job_id)
+        job.available_at = channel_queue.now() - timedelta(seconds=1)
+        db.commit()
+        assert channel_queue.process_inbound(db, *channel_queue.claim(db, "inbound", job_id)) is True
+    else:
+        assert result is True
+    message = db.query(Message).filter_by(ticket_id=ticket.id).one()
+    visible = MessageRead.model_validate(message)
+    assert visible.body == ""
+    assert visible.author_contact_id == contact.id
+    assert [a.filename for a in visible.attachments] == ["Документ.pdf", "image.png"]
+    assert visible.attachments[1].mime_type == "image/png"
+    assert [Path(a.stored_path).read_bytes() for a in message.attachments] == list(contents.values())
+    assert db.get(ChannelJob, job_id).state == "processed"
+    assert channel_queue.claim(db, "inbound", job_id) is None
+    assert channel_queue.capture_update(db, Channel.MAX, update, max_enabled) is None
+    assert db.query(ChannelJob).filter(ChannelJob.event_key.like(f"event:{job_id}:reply:%")).count() == 1
+    assert _fake_send == []  # only a queued acknowledgment, no external sends
 
 
 # --- bot_started -------------------------------------------------------

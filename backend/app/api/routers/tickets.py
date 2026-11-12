@@ -3,7 +3,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import ValidationError
 from fastapi.responses import FileResponse
 from sqlalchemy import and_, func, or_, select
@@ -458,13 +458,12 @@ async def upload_attachment(
     return attachment
 
 
-@router.get("/{ticket_id}/attachments/{attachment_id}")
-def download_attachment(
+def _get_visible_attachment(
     ticket_id: int,
     attachment_id: int,
-    db: Session = Depends(get_db),
-    actor: User = Depends(get_current_user),
-) -> FileResponse:
+    db: Session,
+    actor: User,
+) -> Attachment:
     """Serves a stored attachment back. Without this, files arriving over
     email/MAX/Telegram were written to disk and listed in the API but could
     never be opened by anyone (found in audit). The attachment is resolved
@@ -479,6 +478,30 @@ def download_attachment(
     )
     if attachment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Вложение не найдено")
+    return attachment
+
+
+@router.get("/{ticket_id}/attachments/{attachment_id}/preview")
+def preview_attachment(
+    ticket_id: int, attachment_id: int, sheet: int = Query(0, ge=0),
+    db: Session = Depends(get_db), actor: User = Depends(get_current_user),
+):
+    from app.services import attachment_preview
+    attachment = _get_visible_attachment(ticket_id, attachment_id, db, actor)
+    try:
+        return attachment_preview.preview_attachment(attachment, sheet)
+    except attachment_preview.PreviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.get("/{ticket_id}/attachments/{attachment_id}")
+def download_attachment(
+    ticket_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> FileResponse:
+    attachment = _get_visible_attachment(ticket_id, attachment_id, db, actor)
     path = Path(attachment.stored_path)
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Файл вложения недоступен на диске")

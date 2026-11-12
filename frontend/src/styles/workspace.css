@@ -419,3 +419,57 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px
   .ticket-time-form > input[type="text"] { grid-column: 1 / -1; min-width: 0; width: 100%; }
   .ticket-time-form > .btn { grid-column: 1 / -1; justify-self: end; }
 }
+
+/* Authenticated document previews stay inside the ticket and client portal. */
+.message-attachments { display: flex; flex-wrap: wrap; gap: 12px; }
+.attachment-document { width: min(290px, 100%); max-width: 100%; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elevated); overflow: hidden; }
+.attachment-document-cover { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; width: 100%; height: 132px; padding: 12px; border: 0; border-bottom: 1px solid var(--border); background: var(--bg); color: var(--text-muted); cursor: pointer; overflow: hidden; text-align: left; }
+.attachment-document-cover:hover { background: var(--accent-soft); }
+.attachment-file-type { display: inline-flex; padding: 4px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-elevated); color: var(--accent); font-size: 10px; font-weight: 700; }
+.attachment-document-symbol { align-self: center; font-size: 38px; line-height: 1; color: var(--text-faint); }
+.attachment-document-open { position: absolute; right: 8px; bottom: 8px; border-radius: 5px; background: var(--bg-elevated); color: var(--accent); padding: 4px 7px; font-size: 10px; }
+.attachment-document-sample { width: 100%; table-layout: fixed; border-collapse: collapse; color: var(--text-muted); font: 8px/1.4 var(--font-sans); pointer-events: none; margin: 0; }
+.attachment-document-sample td { padding: 4px; border: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+pre.attachment-document-sample { white-space: pre-wrap; max-height: 70px; overflow: hidden; }
+.attachment-document-caption { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 11px; }
+.attachment-document-caption strong { color: var(--text); font-weight: 550; overflow-wrap: anywhere; }
+.attachment-document-caption > span { color: var(--text-muted); font-size: 10px; }
+.attachment-document-caption > div { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.attachment-document-caption .btn-link { font-size: 11px; }
+.attachment-preview-dialog { width: min(1160px, 94vw); max-width: 94vw; height: min(860px, 92dvh); max-height: 92dvh; margin: auto; padding: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-elevated); color: var(--text); overflow: hidden; }
+.attachment-preview-dialog[open] { display: flex; flex-direction: column; }
+.attachment-preview-dialog::backdrop { background: rgb(7 12 24 / 65%); }
+.attachment-preview-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.attachment-preview-dialog > header > strong { min-width: 0; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
+.attachment-preview-dialog > header > div { display: flex; align-items: center; gap: 12px; flex: none; }
+.attachment-preview-dialog > header .btn { min-height: 32px; font-size: 11px; }
+.attachment-preview-dialog > header .icon-btn { font-size: 24px; }
+.attachment-preview-content { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px 16px; overflow: auto; gap: 12px; }
+.attachment-sheet-tabs { display: flex; gap: 6px; flex: none; overflow-x: auto; padding-bottom: 4px; }
+.attachment-sheet-tabs button { flex: none; padding: 8px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text-muted); font-size: 12px; cursor: pointer; }
+.attachment-sheet-tabs button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.attachment-sheet-scroll { overflow: auto; min-height: 0; flex: 1; border: 1px solid var(--border); border-radius: 7px; }
+.attachment-sheet { border-collapse: separate; border-spacing: 0; font-size: 11px; min-width: 100%; }
+.attachment-sheet th, .attachment-sheet td { padding: 7px 10px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); min-width: 95px; max-width: 360px; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: top; }
+.attachment-sheet th { background: var(--bg); color: var(--text-muted); font-weight: 500; }
+.attachment-sheet thead th { position: sticky; top: 0; z-index: 1; text-align: center; }
+.attachment-sheet tr > th:first-child { position: sticky; left: 0; min-width: 38px; width: 38px; text-align: center; }
+.attachment-sheet thead th:first-child { z-index: 2; }
+.attachment-text-preview { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.7 var(--font-mono); }
+.attachment-preview-notice, .attachment-preview-dialog > footer { color: var(--text-muted); font-size: 11px; line-height: 1.6; margin: 0; flex: none; }
+.attachment-preview-dialog > footer { padding: 8px 16px; border-top: 1px solid var(--border); }
+.pdf-preview { min-width: 0; text-align: center; }
+.pdf-preview canvas { display: block; max-width: 100%; height: auto; margin: 12px auto; background: white; box-shadow: var(--shadow-sm); }
+.pdf-preview-navigation { display: flex; align-items: center; justify-content: center; gap: 16px; font-size: 12px; }
+.pdf-preview-navigation .btn { min-height: 34px; font-size: 11px; }
+@media (max-width: 640px) {
+  .attachment-document { width: 100%; }
+  .attachment-preview-dialog { max-width: 100vw; width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+  .attachment-preview-dialog > header { align-items: flex-start; padding: 10px 12px; gap: 8px; }
+  .attachment-preview-dialog > header > strong { font-size: 11px; }
+  .attachment-preview-dialog > header > div { gap: 6px; }
+  .attachment-preview-dialog > header .btn { max-width: 110px; font-size: 10px; }
+  .attachment-preview-content { padding: 10px; }
+  .attachment-sheet th, .attachment-sheet td { min-width: 80px; }
+  .pdf-preview-navigation { gap: 8px; font-size: 11px; }
+}

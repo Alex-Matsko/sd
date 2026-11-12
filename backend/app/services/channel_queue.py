@@ -10,7 +10,7 @@ import hashlib
 import json
 import uuid
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, exists, inspect, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, aliased
 
@@ -178,6 +178,13 @@ class DeferredCommitSession(Session):
     The caller explicitly uses Session.commit(unit) to release its savepoint
     after the event and all its effects have been recorded together.
     """
+    def add(self, instance, _warn=True):
+        # A later download can fail before the pending attachment is flushed.
+        # Remember its new file now so the failed event also removes that file.
+        if isinstance(instance, Attachment) and inspect(instance).transient:
+            self.info.setdefault("created_files", set()).add(instance.stored_path)
+        return super().add(instance, _warn=_warn)
+
     def flush(self, objects=None):
         paths = self.info.setdefault("created_files", set())
         paths.update(item.stored_path for item in self.new if isinstance(item, Attachment))

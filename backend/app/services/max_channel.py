@@ -152,6 +152,12 @@ def _extract_incoming(update: dict) -> ParsedUpdate | None:
         sender = message.get("sender") or {}
         recipient = message.get("recipient") or {}
         body = message.get("body") or {}
+        link = message.get("link") or {}
+        # MAX puts forwarded content in link.message, leaving body empty.
+        # A reply's link is only a quote: importing it would duplicate old files.
+        forwarded = (link.get("message") or {}) if link.get("type") == "forward" else {}
+        text = "\n\n".join(part.strip() for part in (body.get("text") or "", forwarded.get("text") or "") if part.strip())
+        attachments = [*(body.get("attachments") or []), *(forwarded.get("attachments") or [])]
         user_id = sender.get("user_id")
         chat_id = recipient.get("chat_id")
         if user_id is None or chat_id is None or not _is_dialog(recipient):
@@ -161,10 +167,10 @@ def _extract_incoming(update: dict) -> ParsedUpdate | None:
             external_user_id=str(user_id),
             chat_id=str(chat_id),
             display_name=sender.get("name") or sender.get("username") or "",
-            text=(body.get("text") or "").strip(),
-            attachments=body.get("attachments") or [],
+            text=text,
+            attachments=attachments,
             mid=body.get("mid"),
-            reply_to_mid=_extract_link_mid(message.get("link") or {}),
+            reply_to_mid=_extract_link_mid(link),
         )
 
     if update_type == "message_callback":
@@ -288,10 +294,7 @@ def _send(config: MaxConfig, chat_id: str, text: str, buttons: list[list[dict]] 
 
 
 def _store_max_attachment(db: Session, message: Message, attachment: dict) -> None:
-    """MAX attachments come back as typed payloads; only the ones exposing a
-    direct fetch `url` can be downloaded without the platform's separate
-    upload/token exchange, which isn't confirmed against a live bot yet - see
-    module docstring. Others are logged and skipped rather than guessed at."""
+    """Download before acknowledging the event; failure rolls back its message."""
     payload = attachment.get("payload") or {}
     url = payload.get("url")
     att_type = attachment.get("type", "unknown")
@@ -304,8 +307,13 @@ def _store_max_attachment(db: Session, message: Message, attachment: dict) -> No
     except Exception:
         logger.exception("MAX: не удалось скачать вложение")
         raise
-    filename = payload.get("filename") or att_type
-    db.add(attachments_service.store_attachment(message.id, filename, content, None))
+    from app.services.message_content import image_mime
+    mime_type = image_mime(content)
+    filename = attachment.get("filename") or payload.get("filename")
+    if not filename:
+        extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}.get(mime_type, "")
+        filename = f"{att_type}{extension}"
+    db.add(attachments_service.store_attachment(message.id, filename, content, mime_type))
 
 
 def _resolve_reply_target(db: Session, ticket_id: int, reply_to_mid: str | None) -> int | None:

@@ -1,3 +1,4 @@
+import type { AttachmentPreviewData } from "../lib/attachmentPreview";
 import type { MessageBlock, MessageUploadBlock } from "../api/types";
 /** Client-portal HTTP layer.
  *
@@ -240,3 +241,5 @@ export async function portalFileBlob(path: string): Promise<Blob> {
   if (!res.ok) throw new Error("Не удалось открыть скриншот");
   return res.blob();
 }
+
+export const portalAttachmentPreview = (path: string, sheet: number) => request<AttachmentPreviewData>(`${path}/preview?sheet=${sheet}`);

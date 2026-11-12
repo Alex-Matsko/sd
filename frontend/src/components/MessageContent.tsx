@@ -1,3 +1,4 @@
+import { AttachmentPreview } from "./AttachmentPreview";
 import { ImagePreview } from "./ImagePreview";
 import { isImageAttachment, rasterImageBlob } from "../lib/imagePreview";
 import { useEffect, useState } from "react";
@@ -5,7 +6,7 @@ import { apiFileBlob, apiDownload } from "../api/client";
 import { portalFileBlob, downloadPortalFile } from "../portal/api";
 import type { MessageBlock } from "../api/types";
 
-type FileInfo = { id: number; filename: string; mime_type?: string | null };
+type FileInfo = { id: number; filename: string; mime_type?: string | null; size_bytes?: number };
 function InlineImage({ ticketId, attachment, portal, compact = false }: { ticketId: number; attachment: FileInfo; portal: boolean; compact?: boolean }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
@@ -31,7 +32,6 @@ function InlineImage({ ticketId, attachment, portal, compact = false }: { ticket
 export function MessageContent({ ticketId, body, blocks, attachments, portal = false }: {
   ticketId: number; body: string; blocks?: MessageBlock[] | null; attachments: FileInfo[]; portal?: boolean;
 }) {
-  const [downloadError, setDownloadError] = useState("");
   const inline = new Set((blocks ?? []).flatMap((b) => b.type === "image" ? [b.attachment_id] : []));
   const remaining = attachments.filter((a) => !inline.has(a.id));
   return <div className="rich-message-content">
@@ -41,10 +41,6 @@ export function MessageContent({ ticketId, body, blocks, attachments, portal = f
       return attachment ? <InlineImage key={i} ticketId={ticketId} attachment={attachment} portal={portal} /> : <p key={i}>Скриншот недоступен</p>;
     })}
     <div className="message-image-previews">{remaining.filter(isImageAttachment).map((a) => <InlineImage key={a.id} ticketId={ticketId} attachment={a} portal={portal} compact />)}</div>
-    <div className="message-attachments">{remaining.filter((a) => !isImageAttachment(a)).map((a) => <button key={a.id} type="button" className="attachment-chip" onClick={() => {
-      const path = `/tickets/${ticketId}/attachments/${a.id}`;
-      (portal ? downloadPortalFile(path, a.filename) : apiDownload(path, a.filename)).catch(() => setDownloadError("Не удалось скачать файл"));
-    }}>{a.filename}</button>)}</div>
-    {downloadError && <p className="rich-editor-error" role="alert">{downloadError}</p>}
+    <div className="message-attachments">{remaining.filter((a) => !isImageAttachment(a)).map((a) => <AttachmentPreview key={a.id} ticketId={ticketId} attachment={a} portal={portal} />)}</div>
   </div>;
 }
