@@ -474,15 +474,45 @@ pre.attachment-document-sample { white-space: pre-wrap; max-height: 70px; overfl
   .pdf-preview-navigation { gap: 8px; font-size: 11px; }
 }
 
-.max-notification-panel { max-width: 620px; }
-.max-notification-panel > .muted, .max-link-steps { font-size: 12px; line-height: 1.7; }
 .max-notification-option { display: flex; align-items: center; gap: 10px; padding: 12px 0; font-size: 13px; }
 .max-notification-option input { width: 17px; height: 17px; flex: none; }
-.max-link-steps { padding-left: 20px; margin: 16px 0; }
-.max-link-code { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px; margin: 16px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
-.max-link-code code { font: 14px var(--font-mono); user-select: all; overflow-wrap: anywhere; }
-.max-link-code .btn { min-height: 32px; font-size: 11px; }
-.max-link-code p { flex-basis: 100%; margin: 0; font-size: 11px; }
+.profile-page { max-width: 1120px; }
+.profile-account-summary { display: grid; grid-template-columns: 1.2fr 1.4fr 1fr; gap: 16px; margin: 0; }
+.profile-account-summary > div { min-width: 0; }
+.profile-account-summary dt { color: var(--text-muted); font-size: 11px; margin-bottom: 7px; }
+.profile-account-summary dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.profile-section-description { color: var(--text-muted); font-size: 12px; line-height: 1.6; margin: -2px 0 16px; }
+.notification-channels { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; align-items: stretch; }
+.notification-channel { display: flex; flex-direction: column; min-width: 0; gap: 12px; padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
+.notification-channel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.notification-channel-header h3 { margin: 0; font-size: 15px; font-weight: 650; }
+.notification-channel-header .status-tag { flex: none; font-size: 10px; }
+.notification-events { min-height: 38px; margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.notification-channel-content { display: flex; flex: 1; flex-direction: column; gap: 12px; min-width: 0; }
+.notification-channel .form-row { font-size: 12px; margin: 0; gap: 8px; }
+.notification-channel select { width: 100%; min-width: 0; min-height: 40px; font-size: 12px; }
+.notification-channel-note { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.7; }
+.notification-connect-note { padding: 12px; border: 1px dashed var(--border); border-radius: 8px; background: var(--bg-elevated); }
+.notification-channel-actions { padding-top: 4px; }
+.notification-channel-actions .btn { min-height: 36px; font-size: 12px; }
+.notification-link-code { padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); }
+.notification-link-code p { margin: 0; font-size: 11px; line-height: 1.6; }
+.notification-link-code > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 9px 0; }
+.notification-link-code code { font: 12px var(--font-mono); user-select: all; overflow-wrap: anywhere; }
+.notification-link-code .btn { min-height: 30px; padding: 5px 8px; font-size: 11px; }
+.notification-link-help { margin: 14px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.7; }
+.profile-password-fields { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+.profile-password-fields .form-row { margin: 0; font-size: 12px; }
+.profile-password-fields input { min-width: 0; width: 100%; }
+.profile-password .modal-foot { margin-top: 16px; }
+@media (max-width: 760px) {
+  .notification-channels, .profile-password-fields { grid-template-columns: minmax(0,1fr); }
+  .profile-account-summary { grid-template-columns: minmax(0,1fr); gap: 10px; }
+  .profile-account-summary > div { display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 10px; align-items: baseline; }
+  .profile-account-summary dt { margin: 0; }
+  .notification-channel { padding: 14px; }
+  .notification-events { min-height: 0; }
+}
 .automation-page > .view-description { margin: 0 0 20px; }
 .automation-rule .panel-head { justify-content: space-between; }
 .automation-rule .panel-head h2 { overflow-wrap: anywhere; }
