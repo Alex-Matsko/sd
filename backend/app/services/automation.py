@@ -220,6 +220,7 @@ def run_automation_rules(db: Session, now=None):
                     run = unit.get(AutomationRun, previous_id) if previous_id else AutomationRun(rule_id=rule_id, ticket_id=ticket_id,
                         revision=rule.revision, episode=episode, occurrence=occurrence, created_at=now)
                     run.state, run.error, run.available_at = 'applied', None, None
+                    run.created_at = now
                     run.attempts = (run.attempts or 0) + 1
                     unit.add(run); unit.flush()
                     _apply(unit, current_rule, current_ticket, run)

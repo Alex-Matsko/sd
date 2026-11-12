@@ -247,3 +247,18 @@ def test_channel_and_priority_filters_limit_candidates(api, db, contact):
     assert automation.run_automation_rules(db, future) == 0
     rule.filters = {'organization_id': contact.organization_id, 'channels': ['portal'], 'priorities': ['P1', 'P3']}; db.commit()
     assert automation.run_automation_rules(db, future) == 1
+
+
+def test_repeat_waits_full_interval_after_a_recovered_execution(api, db, contact, monkeypatch):
+    ticket, rule, future = ticket_and_rule(api, db, contact, repeat_hours=24, max_runs=3)
+    original = messages.add_message
+    def fail(*args, **kwargs):
+        raise RuntimeError('temporary failure')
+    monkeypatch.setattr(messages, 'add_message', fail)
+    assert automation.run_automation_rules(db, future) == 0
+    monkeypatch.setattr(messages, 'add_message', original)
+    recovered = future + timedelta(days=2)
+    assert automation.run_automation_rules(db, recovered) == 1
+    assert automation.run_automation_rules(db, recovered + timedelta(hours=23)) == 0
+    assert automation.run_automation_rules(db, recovered + timedelta(hours=24)) == 1
+    assert db.query(Message).filter_by(ticket_id=ticket.id).count() == 2
