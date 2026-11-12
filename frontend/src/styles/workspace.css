@@ -564,3 +564,21 @@ pre.attachment-document-sample { white-space: pre-wrap; max-height: 70px; overfl
 .automation-editor-section > .form-row + .muted { margin: 10px 0 0; }
 .automation-action-editor .form-row, .automation-editor-section > .form-row { margin-top: 12px; }
 .automation-action-editor textarea { width: 100%; resize: vertical; }
+
+.ticket-workbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; border: 1px solid var(--border); border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 12px; padding: 14px 16px; margin-bottom: 18px; }
+.ticket-workbar-summary { display: flex; align-items: center; gap: 12px; flex: 1 1 260px; min-width: 0; }
+.ticket-workbar-icon { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px; color: var(--accent); background: var(--bg-elevated); }
+.ticket-workbar-summary strong { display: block; font-size: 13px; }
+.ticket-workbar-summary p { margin: 5px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.ticket-workbar-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }
+.ticket-workbar-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; white-space: nowrap; }
+.ticket-workbar-running { background: var(--success-bg); border-left-color: var(--success); }
+.ticket-workbar-running .ticket-workbar-icon { color: var(--success); }
+.ticket-workbar-notice, .ticket-workbar-error { width: 100%; margin: 0; font-size: 12px; }
+.ticket-workbar-error { color: var(--danger); }
+@media (max-width: 600px) {
+  .ticket-workbar { padding: 12px; gap: 12px; }
+  .ticket-workbar-summary { flex-basis: 100%; }
+  .ticket-workbar-actions { width: 100%; justify-content: space-between; }
+  .ticket-workbar-actions .ticket-start-work { width: 100%; }
+}

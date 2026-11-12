@@ -160,6 +160,8 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
         <StatusTag status={ticket.status} />
       </div>
 
+      <TicketTimer key={`work-${id}`} ticketId={id} status={ticket.status} />
+
       <div className="ticket-layout">
         <div className="ticket-main">
           {ticket.sla && (
@@ -259,7 +261,6 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
           <div className="panel">
             <div className="panel-head">
               <h2>Учёт времени</h2>
-              <TicketTimer ticketId={id} />
             </div>
             <div className="time-entries">
               {(timeEntriesQuery.data ?? []).map((entry) => (

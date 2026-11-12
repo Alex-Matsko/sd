@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.core.enums import TicketStatus
 from app.models.active_timer import ActiveTimer
 from app.models.contract import Contract
 from app.models.ticket import Ticket
@@ -53,22 +54,45 @@ MIN_TIMER_SECONDS = 60
 TIMER_COMMENT = "По таймеру"
 
 
-def start_timer(db: Session, ticket: Ticket, engineer: User) -> ActiveTimer:
-    """Starts the engineer's work timer on this ticket, stopping whatever was
-    running before (see ActiveTimer: one per person). The previous timer is
-    banked as a time entry rather than discarded - the work happened, and
-    silently losing it would be worse than an entry the engineer can edit."""
-    existing = db.query(ActiveTimer).filter(ActiveTimer.user_id == engineer.id).first()
-    if existing is not None:
-        if existing.ticket_id == ticket.id:
-            return existing
-        stop_timer(db, engineer, comment="Автоматически остановлен при запуске таймера по другой заявке")
+class TimerTicketNotFound(ValueError):
+    pass
 
-    timer = ActiveTimer(user_id=engineer.id, ticket_id=ticket.id, started_at=datetime.now(timezone.utc))
-    db.add(timer)
+
+def start_timer(db: Session, ticket: Ticket, engineer: User) -> ActiveTimer:
+    """Start work, bank the previous timer and change status atomically.
+
+    A second click keeps elapsed time. User and ticket locks serialize timer
+    switches and prevent starting work from an obsolete status/access check.
+    """
+    from app.services import ticket_access, tickets
+    from app.services.channel_queue import DeferredCommitSession
+
+    ticket_id, user_id = ticket.id, engineer.id
+    db.query(User.id).filter(User.id == user_id).with_for_update().one()
+    with DeferredCommitSession(bind=db.connection(), join_transaction_mode="create_savepoint") as unit:
+        current = unit.query(Ticket).filter(Ticket.id == ticket_id).with_for_update().first()
+        actor = unit.get(User, user_id)
+        if current is None or not ticket_access.can_see(unit, actor, current):
+            raise TimerTicketNotFound("Заявка не найдена")
+        status = TicketStatus(current.status)
+        if status in (TicketStatus.CLOSED, TicketStatus.CANCELLED):
+            raise ValueError("Нельзя начать работу по закрытой или отменённой заявке")
+
+        timer = unit.query(ActiveTimer).filter(ActiveTimer.user_id == user_id).first()
+        if timer is not None and timer.ticket_id != ticket_id:
+            stop_timer(unit, actor, comment="Автоматически остановлен при запуске таймера по другой заявке")
+            timer = None
+        if status != TicketStatus.IN_PROGRESS:
+            tickets.transition_status(unit, current, TicketStatus.IN_PROGRESS, actor)
+        if timer is None:
+            timer = ActiveTimer(user_id=user_id, ticket_id=ticket_id, started_at=datetime.now(timezone.utc))
+            unit.add(timer)
+            unit.flush()
+        timer_id = timer.id
+        Session.commit(unit)
     db.commit()
-    db.refresh(timer)
-    return timer
+    db.expire_all()
+    return db.get(ActiveTimer, timer_id)
 
 
 def stop_timer(db: Session, engineer: User, comment: str | None = None) -> TimeEntry | None:
@@ -78,7 +102,8 @@ def stop_timer(db: Session, engineer: User, comment: str | None = None) -> TimeE
     entry - a mis-click shouldn't leave a row in the client's billing report.
     Elapsed time is rounded up, so 90 seconds of work bills as 2 minutes
     rather than 1."""
-    timer = db.query(ActiveTimer).filter(ActiveTimer.user_id == engineer.id).first()
+    db.query(User.id).filter(User.id == engineer.id).with_for_update().one()
+    timer = db.query(ActiveTimer).filter(ActiveTimer.user_id == engineer.id).populate_existing().first()
     if timer is None:
         return None
 

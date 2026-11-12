@@ -561,7 +561,12 @@ def start_timer(
     ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)
 ) -> dict:
     ticket = _get_ticket_or_404(db, ticket_id, actor)
-    timer = time_entries_service.start_timer(db, ticket, actor)
+    try:
+        timer = time_entries_service.start_timer(db, ticket, actor)
+    except time_entries_service.TimerTicketNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return {"running": True, "ticket_id": timer.ticket_id, "started_at": timer.started_at}
 
 
