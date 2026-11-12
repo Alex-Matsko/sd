@@ -112,8 +112,8 @@ export async function portalLogin(email: string, password: string) {
   return data;
 }
 
-export function requestMagicLink(email: string) {
-  return request<{ sent: boolean }>("/auth/magic-link", { method: "POST", body: { email } });
+export function requestMagicLink(email: string, ticketId?: number) {
+  return request<{ sent: boolean }>("/auth/magic-link", { method: "POST", body: { email, ticket_id: ticketId } });
 }
 
 export async function consumeMagicLink(token: string) {

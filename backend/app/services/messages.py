@@ -33,6 +33,7 @@ def add_message(
     author_user: User | None = None,
     author_contact: Contact | None = None,
     attachments: list[tuple[str, bytes, str | None]] | None = None,
+    *, automation_key: str | None = None,
 ) -> Message:
     from app.services.tickets import transition_status
 
@@ -56,6 +57,9 @@ def add_message(
             if previous.request_digest != request_digest:
                 raise RequestConflict("Этот идентификатор запроса уже использован для другого сообщения")
             return previous
+
+    if automation_key:
+        request_key = automation_key
 
     reply_to_message_id = None
     if payload.reply_to_message_id is not None:
@@ -98,7 +102,7 @@ def add_message(
         job.payload = {**job.payload, "attachment_ids": [item.id for item in message.attachments]}
 
     # First outbound reply fixes the reaction SLA outcome permanently.
-    if payload.direction == MessageDirection.OUTBOUND and not external_delivery and ticket.first_response_at is None:
+    if payload.direction == MessageDirection.OUTBOUND and not external_delivery and not automation_key and ticket.first_response_at is None:
         sla.register_first_response(ticket, datetime.now(timezone.utc))
         db.add(ticket)
 

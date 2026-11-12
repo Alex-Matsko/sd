@@ -63,7 +63,7 @@ function MessengerCard({ channel, user }: { channel: Messenger; user: User }) {
   }
   return <section className="notification-channel" aria-label={`Уведомления в ${name}`}>
     <header className="notification-channel-header"><h3>{name}</h3><span className={`status-tag ${linked ? "status-resolved" : "status-closed"}`}>{linked ? "Подключён" : "Не подключён"}</span></header>
-    <p className="notification-events">{channel === "telegram" ? "Новые заявки, назначения, ответы клиентов и риски SLA." : "Новые заявки из всех каналов service desk."}</p>
+    <p className="notification-events">Новые заявки, назначения, ответы клиентов, статусы и риски SLA.</p>
     <div className="notification-channel-content">
       {linked ? <>
         <label className="form-row">Какие заявки присылать<select aria-label={`Уведомления ${name}`} value={scope} disabled={preference.isPending || unlink.isPending} onChange={(event) => preference.mutate(event.target.value as NotificationScope)}>

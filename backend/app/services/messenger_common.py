@@ -20,6 +20,7 @@ from app.models.contact import Contact, ContactPhone
 from app.models.message import Message
 from app.models.ticket import Ticket
 from app.services import tickets as tickets_service
+from app.services.ticket_messages import STATUS_LABELS_RU, ticket_notice
 
 WELCOME_TEXT = (
     "Здравствуйте! Это бот службы поддержки «Открытые Горизонты». Опишите проблему одним сообщением - "
@@ -39,16 +40,7 @@ START_COMMANDS = {"/start", "start", "старт", "меню", "/menu"}
 # genuinely new contact - docs/decisions.md).
 LINK_PHONE_COMMANDS = {"/link", "связать телефон", "привязать телефон", "объединить обращения"}
 
-STATUS_LABELS_RU = {
-    TicketStatus.NEW: "новая",
-    TicketStatus.ASSIGNED: "назначена",
-    TicketStatus.IN_PROGRESS: "в работе",
-    TicketStatus.WAITING_CUSTOMER: "ждём вас",
-    TicketStatus.WAITING_THIRD_PARTY: "ждём третью сторону",
-    TicketStatus.RESOLVED: "решена",
-    TicketStatus.CLOSED: "закрыта",
-    TicketStatus.CANCELLED: "отменена",
-}
+
 
 # RESOLVED is deliberately not in OPEN_TICKET_STATUSES (it's not "open" for
 # gluing/routing purposes - see messages.add_message's reopen check), but
@@ -212,14 +204,14 @@ def close_ticket_chain(db: Session, ticket: Ticket) -> Ticket:
     chains the same one-hop transitions transition_status already validates
     - IN_PROGRESS -> RESOLVED -> CLOSED, hopping through IN_PROGRESS first
     if needed - rather than a special-cased jump that would bypass SLA/audit
-    bookkeeping. Accepted trade-off: the client sees each hop's own status
-    notification plus the CSAT request, not one single message."""
+    bookkeeping. Intermediate transitions retain SLA/audit bookkeeping; only the final
+    closure sends a message."""
     status = TicketStatus(ticket.status)
     if status in PRE_RESOLUTION_STATUSES:
-        ticket = tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
+        ticket = tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None, notify_status=False)
         status = TicketStatus.IN_PROGRESS
     if status == TicketStatus.IN_PROGRESS:
-        ticket = tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
+        ticket = tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None, notify_status=False)
     if TicketStatus(ticket.status) == TicketStatus.RESOLVED:
         ticket = tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
     return ticket

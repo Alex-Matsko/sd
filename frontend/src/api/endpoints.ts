@@ -5,6 +5,8 @@ import type {
   Call,
   AuditLogEntry,
   AutomationRule,
+  AutomationPreview,
+  AutomationRun,
   AutomationRuleInput,
   BusinessCalendar,
   Category,
@@ -607,4 +609,14 @@ export function setClientReportSent(id: number, sent: boolean) {
 export function downloadStoredClientReport(report: ClientReportSummary, format: "pdf" | "xlsx") {
   const name = `Отчёт ${report.organization_name} ${report.period_title}.${format}`;
   return apiDownload(`/client-reports/${report.id}/${format}`, name);
+}
+
+export function previewAutomationRule(payload: AutomationRuleInput) {
+  return apiRequest<AutomationPreview>("/automation-rules/preview", { method: "POST", body: payload });
+}
+export function listAutomationRuns(id: number) {
+  return apiRequest<AutomationRun[]>(`/automation-rules/${id}/runs`);
+}
+export function retryAutomationRun(ruleId: number, runId: number) {
+  return apiRequest<void>(`/automation-rules/${ruleId}/runs/${runId}/retry`, { method: "POST" });
 }

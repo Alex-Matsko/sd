@@ -39,7 +39,7 @@ function cadenceDetail(schedule: TicketSchedule): string {
 // а «Создать сейчас» переносилось на две строки.
 const COLUMNS = "1.4fr 1.2fr 1fr 100px 110px 290px";
 
-export function TicketSchedulesPage() {
+export function TicketSchedulesPage({ embedded = false }: { embedded?: boolean }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<TicketSchedule | "new" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -78,9 +78,7 @@ export function TicketSchedulesPage() {
   return (
     <div className="view">
       <div className="toolbar">
-        <h1 className="view-title" style={{ marginBottom: 0 }}>
-          Плановые заявки
-        </h1>
+        {embedded ? <h2 className="view-title" style={{ marginBottom: 0 }}>Плановые заявки</h2> : <h1 className="view-title" style={{ marginBottom: 0 }}>Плановые заявки</h1>}
         <div className="spacer" />
         <button className="btn btn-primary" onClick={() => setEditing("new")}>
           Добавить расписание
@@ -167,6 +165,7 @@ function ScheduleModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [active, setActive] = useState(schedule?.is_active ?? false);
   const [name, setName] = useState(schedule?.name ?? "");
   const [subject, setSubject] = useState(schedule?.subject ?? "");
   const [body, setBody] = useState(schedule?.body ?? "");
@@ -194,6 +193,7 @@ function ScheduleModal({
     mutationFn: () => {
       const payload: Record<string, unknown> = {
         name: name.trim(),
+        is_active: active,
         subject: subject.trim(),
         body: body.trim() || null,
         cadence,
@@ -216,7 +216,7 @@ function ScheduleModal({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" role="dialog" aria-label="Расписание плановых заявок" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>{schedule ? "Плановая заявка" : "Новая плановая заявка"}</h3>
           <button className="icon-btn" onClick={onClose}>
@@ -365,6 +365,7 @@ function ScheduleModal({
             </div>
           </div>
         </div>
+        <label className="max-notification-option" style={{ margin: "0 24px 16px" }}><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} />Расписание включено</label>
         <div className="modal-foot">
           <button className="btn btn-ghost" onClick={onClose}>
             Отмена

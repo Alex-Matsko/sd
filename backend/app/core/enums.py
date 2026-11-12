@@ -99,6 +99,7 @@ class NotificationType(str, Enum):
     WORK_APPROVAL = "work_approval"
     WORK_UPDATED = "work_updated"
     CHANNEL_ERROR = "channel_error"
+    AUTOMATION_REMINDER = "automation_reminder"
     # ТЗ 4.2 требует уведомлять исполнителя об ответе клиента, ТЗ р. 8 — о
     # работе, попавшей к инженеру. Раньше существовали только SLA-события,
     # то есть инженер узнавал о заявке лишь когда по ней уже горел срок.
@@ -121,6 +122,7 @@ class AutomationTriggerType(str, Enum):
     RESOLVED_WITHOUT_REPLY = "resolved_without_reply"
     STATUS_WITHOUT_REPLY = "status_without_reply"
     STATUS_AGE = "status_age"
+    DEADLINE_OVERDUE = "deadline_overdue"
 
 
 class ScheduleCadence(str, Enum):

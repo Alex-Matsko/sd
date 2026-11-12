@@ -325,3 +325,20 @@ def test_access_requires_an_email(db: Session, contact: Contact):
         )
     assert exc.value.status_code == 400
     assert "email" in exc.value.detail
+
+
+def test_magic_link_keeps_only_visible_ticket_context(db: Session, client_contact: Contact, monkeypatch):
+    from urllib.parse import urlsplit, parse_qs
+    monkeypatch.setattr('app.config.settings.portal_base_url', 'https://service.o-horizons.com/portal')
+    ticket = _ticket(db, client_contact)
+    _, link = portal.issue_magic_link(db, 'client.portal@example.com', ticket.id)
+    parsed = urlsplit(link)
+    params = parse_qs(parsed.query)
+    assert parsed.scheme == 'https' and parsed.netloc == 'service.o-horizons.com'
+    assert params['ticket'] == [str(ticket.id)]
+    assert portal.consume_magic_link(db, params['token'][0]).id == client_contact.id
+    other = Contact(organization_id=client_contact.organization_id, full_name='Коллега')
+    db.add(other); db.commit()
+    private = _ticket(db, other)
+    _, link = portal.issue_magic_link(db, 'client.portal@example.com', private.id)
+    assert 'ticket=' not in link

@@ -16,6 +16,7 @@ router = APIRouter(prefix="/ticket-schedules", tags=["ticket-schedules"])
 
 
 class ScheduleCreate(BaseModel):
+    is_active: bool = True
     name: str
     contact_id: int
     subject: str

@@ -13,6 +13,7 @@ class PortalLoginRequest(BaseModel):
 
 class PortalMagicLinkRequest(BaseModel):
     email: EmailStr
+    ticket_id: int | None = Field(default=None, gt=0)
 
 
 class PortalTokenResponse(BaseModel):

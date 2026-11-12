@@ -118,7 +118,7 @@ def request_magic_link(
     check_login_allowed("magic-link", payload.email, client_ip)
     login_guard.guard.register_failure("magic-link", payload.email, client_ip)
 
-    result = portal.issue_magic_link(db, payload.email)
+    result = portal.issue_magic_link(db, payload.email, payload.ticket_id)
     if result is not None:
         contact, link = result
         _send_magic_link(db, contact, link)

@@ -127,7 +127,7 @@ def create_ticket(db: Session, payload: TicketCreate, actor: User | None) -> Tic
     return ticket
 
 
-def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, actor: User | None) -> Ticket:
+def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, actor: User | None, *, notify_status: bool = True) -> Ticket:
     old_status = TicketStatus(ticket.status)
     allowed = ALLOWED_TRANSITIONS.get(old_status, set())
     if new_status not in allowed:
@@ -168,11 +168,13 @@ def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, act
     # modules import tickets_service.create_ticket.
     from app.services import max_channel, telegram_channel
 
-    if new_status == TicketStatus.CLOSED:
+    if notify_status and new_status == TicketStatus.CLOSED:
         max_channel.request_csat(db, ticket)
         telegram_channel.request_csat(db, ticket)
-    max_channel.notify_status_change(db, ticket, new_status)
-    telegram_channel.notify_status_change(db, ticket, new_status)
+    if notify_status:
+        max_channel.notify_status_change(db, ticket, new_status)
+        telegram_channel.notify_status_change(db, ticket, new_status)
+        staff_notifications.notify_status_change(db, ticket, new_status)
 
     audit.record(
         db,

@@ -54,6 +54,10 @@ class Message(Base):
     channel_job: Mapped["ChannelJob | None"] = relationship(lazy="selectin", uselist=False)
 
     @property
+    def is_automated(self):
+        return bool(self.request_key and self.request_key.startswith("automation:"))
+
+    @property
     def delivery(self):
         job = self.channel_job
         return job if job is not None and job.kind == "outbound" else None

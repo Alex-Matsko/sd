@@ -573,7 +573,7 @@ def test_transition_status_notifies_client_of_new_status(db: Session, max_enable
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
 
     channel_queue.run_batch(db, "outbound")
-    assert any("изменён: в работе" in s["text"] for s in _fake_send)
+    assert any("Статус: В работе" in s["text"] for s in _fake_send)
 
 
 def test_transition_to_closed_does_not_duplicate_with_csat_message(db: Session, max_enabled, contact: Contact, _fake_send):

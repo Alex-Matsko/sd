@@ -311,7 +311,7 @@ def test_transition_status_notifies_client(db: Session, telegram_enabled, contac
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
 
     channel_queue.run_batch(db, "outbound")
-    assert any("изменён: в работе" in s["text"] for s in _fake_send)
+    assert any("Статус: В работе" in s["text"] for s in _fake_send)
 
 
 def test_notify_assignment_change_sends_engineer_name(db: Session, telegram_enabled, contact: Contact, engineer_user, _fake_send):

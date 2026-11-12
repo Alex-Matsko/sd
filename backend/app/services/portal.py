@@ -103,7 +103,7 @@ def _hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def issue_magic_link(db: Session, email: str) -> tuple[Contact, str] | None:
+def issue_magic_link(db: Session, email: str, ticket_id: int | None = None) -> tuple[Contact, str] | None:
     """Returns (contact, link) or None when the address is unknown.
 
     The caller must respond identically either way - a different response for
@@ -122,7 +122,12 @@ def issue_magic_link(db: Session, email: str) -> tuple[Contact, str] | None:
         )
     )
     db.commit()
-    return contact, f"{settings.portal_base_url.rstrip('/')}/login?token={raw}"
+    from urllib.parse import urlencode
+    params = {}
+    if ticket_id is not None and get_visible_ticket(db, contact, ticket_id) is not None:
+        params["ticket"] = ticket_id
+    params["token"] = raw
+    return contact, f"{settings.portal_base_url.rstrip('/')}/login?{urlencode(params)}"
 
 
 def consume_magic_link(db: Session, raw_token: str) -> Contact:

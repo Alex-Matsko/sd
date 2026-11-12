@@ -1,15 +1,4 @@
-"""Уведомления сотруднику: в интерфейсе и в Telegram (ТЗ р. 8).
-
-Доставка была написана внутри SLA-движка и оттуда никому не доступна,
-поэтому уведомлений в системе существовало ровно четыре вида — все про SLA.
-При этом ТЗ 4.2 прямо требует: «Ответ клиента… автоматически возвращает её
-"В работе" **и уведомляет исполнителя"». Статус переключался, уведомления не
-было; о назначенной заявке инженер тоже не узнавал — о нём узнавал клиент в
-мессенджере, а исполнитель нет.
-
-Здесь общий канал доставки: запись в колокольчик, живой push через
-LISTEN/NOTIFY и дубль в Telegram тем, кто привязал аккаунт.
-"""
+"""Staff bell, realtime push and matching Telegram/MAX subscriptions."""
 
 import logging
 
@@ -32,7 +21,9 @@ def notify(db: Session, user_ids: set[int], type_: NotificationType, ticket: Tic
         # никогда не будят ради строки, которую откатил бы rollback.
         realtime.publish_notification(db, user_id, type_.value, title, ticket.id)
     if telegram:
-        notify_telegram(db, user_ids, title, ticket)
+        heading = {NotificationType.TICKET_ASSIGNED: "Назначен исполнитель",
+                   NotificationType.CUSTOMER_REPLIED: "Ответ клиента"}.get(type_, title)
+        notify_telegram(db, user_ids, heading, ticket)
 
 
 def telegram_allowed(db, user, ticket):
@@ -51,20 +42,34 @@ def max_allowed(db, user, ticket):
                  ticket.assigned_engineer_id == user.id))
 
 
-def notify_telegram(db: Session, user_ids: set[int], title: str, ticket: Ticket) -> None:
-    from sqlalchemy import or_
-    from app.services import telegram_channel
+def notify_telegram(db: Session, user_ids: set[int], title: str, ticket: Ticket, *, broadcast_all: bool = True) -> None:
+    # Compatibility entrypoint: both messengers use the same card and scope.
+    from app.services import max_channel, telegram_channel
     from app.services.channel_queue import enqueue_notification
-    if telegram_channel.load_telegram_config(db) is None:
+    from app.services.ticket_messages import ticket_notice
+    enabled = {"telegram": telegram_channel.load_telegram_config(db) is not None,
+               "max": max_channel.load_max_config(db) is not None}
+    if not any(enabled.values()):
         return
-    users = db.query(User).filter(User.telegram_id.isnot(None), User.is_active.is_(True),
-                                 or_(User.id.in_(user_ids), User.telegram_notification_scope == "all")).all()
+    users = db.query(User).filter(User.is_active.is_(True)).all()
+    text = ticket_notice(ticket, title)
     for user in users:
-        if not telegram_allowed(db, user, ticket):
+        if not broadcast_all and user.id not in user_ids:
             continue
-        job = enqueue_notification(db, "telegram", user.telegram_id, title)
-        job.ticket_id = ticket.id
-        job.payload = {**job.payload, "staff_user_id": user.id, "staff_notice": "ticket_event"}
+        for channel, recipient, allowed in (("telegram", user.telegram_id, telegram_allowed(db, user, ticket)),
+                                             ("max", user.max_chat_id, max_allowed(db, user, ticket))):
+            if not enabled[channel] or not allowed:
+                continue
+            job = enqueue_notification(db, channel, recipient, text)
+            job.ticket_id = ticket.id
+            job.payload = {**job.payload, "staff_user_id": user.id, "staff_notice": "ticket_event"}
+            if channel == "max":
+                job.payload = {**job.payload, "staff_max_id": user.max_id}
+
+
+def notify_status_change(db: Session, ticket: Ticket, status) -> None:
+    from app.services.ticket_messages import status_headline
+    notify_telegram(db, set(), status_headline(status), ticket)
 
 
 def notify_assignment(db: Session, ticket: Ticket, engineer: User | None) -> None:
@@ -81,17 +86,10 @@ def notify_assignment(db: Session, ticket: Ticket, engineer: User | None) -> Non
 
 
 def notify_customer_reply(db: Session, ticket: Ticket) -> None:
-    """Исполнителю — об ответе клиента (ТЗ 4.2).
-
-    Некому уведомлять — заявка ещё не назначена: её и так видно в общей
-    очереди, а рассылать всем подряд означало бы сделать колокольчик
-    бесполезным.
-    """
-    if not ticket.assigned_engineer_id:
-        return
+    """Bell to the assignee; bot events also reach full-queue subscribers."""
     notify(
         db,
-        {ticket.assigned_engineer_id},
+        {ticket.assigned_engineer_id} if ticket.assigned_engineer_id else set(),
         NotificationType.CUSTOMER_REPLIED,
         ticket,
         f"Клиент ответил в заявке {ticket.display_number}: {ticket.subject}",
@@ -178,22 +176,15 @@ def notify_new_ticket(db: Session, ticket: Ticket, actor: User | None = None) ->
 
 
 def notify_new_ticket_messengers(db: Session, ticket: Ticket, actor: User | None = None) -> None:
-    from urllib.parse import urlsplit
     from sqlalchemy.dialects.postgresql import insert
-    from app.config import settings
     from app.models.channel_job import ChannelJob
     from sqlalchemy import or_
     from app.services import max_channel, telegram_channel, ticket_access
+    from app.services.ticket_messages import ticket_notice
     enabled = {"max": max_channel.load_max_config(db) is not None, "telegram": telegram_channel.load_telegram_config(db) is not None}
     if not any(enabled.values()):
         return
-    base = settings.staff_base_url.strip().rstrip("/") or settings.portal_base_url.removesuffix("/portal").rstrip("/")
-    url = f"{base}/tickets/{ticket.id}" if urlsplit(base).scheme in ("http", "https") and urlsplit(base).netloc else ""
-    channel = getattr(ticket.channel, "value", ticket.channel)
-    text = (f"Новая заявка {ticket.display_number}\nПриоритет: {ticket.priority.value}\n"
-            f"Тема: {ticket.subject}\nКлиент: {ticket.organization.name}\nКанал: {str(channel).upper()}")
-    if url:
-        text += f"\n\n{url}"
+    text = ticket_notice(ticket, "Новая заявка")
     users = db.query(User).filter(User.is_active.is_(True), or_(User.max_id.isnot(None), User.telegram_id.isnot(None))).all()
     for user in users:
         if (actor and actor.id == user.id) or not ticket_access.can_see(db, user, ticket):

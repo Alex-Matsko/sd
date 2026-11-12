@@ -221,6 +221,7 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
                   <div key={m.id} className={`message message-${m.direction}`}>
                     <div className="message-head">
                       <span className="message-direction">{MESSAGE_DIRECTION_LABELS[m.direction]}</span>
+                      {m.is_automated && <span className="status-tag">Автоматизация</span>}
                       <span className="muted">{CHANNEL_LABELS[m.channel]}</span>
                       <span className="spacer" />
                       <span className="muted">{formatDateTime(m.created_at)}</span>

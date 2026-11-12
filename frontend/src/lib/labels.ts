@@ -111,6 +111,7 @@ export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   work_assigned: "Назначение в проект",
   work_approval: "Согласование проекта",
   work_updated: "Изменение проекта",
+  automation_reminder: "Напоминание автоматизации",
   channel_error: "Ошибка фоновой обработки",
   ticket_assigned: "Назначена заявка",
   ticket_unassigned: "Новая заявка",

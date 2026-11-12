@@ -408,7 +408,8 @@ def _create_ticket_from_text(
     _send(
         config,
         parsed.chat_id,
-        f"Заявка {ticket.display_number} создана{parent_note}, мы уже работаем над ней.{identity_hint}",
+        messenger_common.ticket_notice(ticket, "Новая заявка", client=True,
+            detail=f"Заявка создана{parent_note}. Мы получили ваше обращение.{identity_hint}"),
         buttons=_menu_buttons_for(ticket),
     )
     return ticket
@@ -747,9 +748,9 @@ def notify_status_change(db: Session, ticket: Ticket, new_status: TicketStatus) 
     state = _find_chat_state(db, ticket.contact_id)
     if state is None:
         return
-    label = _STATUS_LABELS_RU.get(new_status, new_status.value)
     from app.services.channel_queue import enqueue_notification
-    enqueue_notification(db, "max", state.chat_id, f"Статус заявки {ticket.display_number} изменён: {label}.", ticket=ticket)
+    from app.services.ticket_messages import ticket_notice, status_headline
+    enqueue_notification(db, "max", state.chat_id, ticket_notice(ticket, status_headline(new_status), client=True), ticket=ticket)
 
 
 def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None) -> None:
@@ -765,7 +766,8 @@ def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None)
     if state is None:
         return
     from app.services.channel_queue import enqueue_notification
-    enqueue_notification(db, "max", state.chat_id, f"Заявку {ticket.display_number} теперь ведёт: {engineer.full_name}.", ticket=ticket)
+    from app.services.ticket_messages import ticket_notice
+    enqueue_notification(db, "max", state.chat_id, ticket_notice(ticket, "Назначен исполнитель", client=True, detail=f"Заявку теперь ведёт: {engineer.full_name}."), ticket=ticket)
 
 
 def request_csat(db: Session, ticket: Ticket) -> None:
@@ -782,8 +784,9 @@ def request_csat(db: Session, ticket: Ticket) -> None:
     buttons = [[{"type": "callback", "text": str(n), "payload": f"csat:{ticket.id}:{n}"} for n in range(1, 6)]]
     try:
         from app.services.channel_queue import enqueue_notification
+        from app.services.ticket_messages import ticket_notice
         enqueue_notification(db, "max", state.chat_id,
-            f"Заявка {ticket.display_number} закрыта. Оцените, пожалуйста, качество решения от 1 до 5.",
+            ticket_notice(ticket, "Заявка закрыта", client=True, detail="Оцените, пожалуйста, качество решения от 1 до 5."),
             buttons=buttons, ticket=ticket)
         ticket.csat_requested_at = datetime.now(timezone.utc)
         db.add(ticket)

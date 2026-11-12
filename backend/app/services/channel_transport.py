@@ -20,7 +20,7 @@ def _checkpoint(db, job, **changes):
 
 
 def _first_response(db, message):
-    if message is not None and message.ticket.first_response_at is None:
+    if message is not None and not message.is_automated and message.ticket.first_response_at is None:
         sla.register_first_response(message.ticket, now())
         db.add(message.ticket)
 

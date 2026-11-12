@@ -45,7 +45,10 @@ function formatDate(value: string | null): string {
 export function PortalApp() {
   const qc = useQueryClient();
   const [authed, setAuthed] = useState(!!getPortalToken());
-  const [openTicketId, setOpenTicketId] = useState<number | null>(null);
+  const [openTicketId, setOpenTicketId] = useState<number | null>(() => {
+    const value = Number(new URLSearchParams(window.location.search).get("ticket"));
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  });
   const [creating, setCreating] = useState(false);
   const magicRequest = useRef<Promise<unknown> | null>(null);
 
@@ -70,16 +73,26 @@ export function PortalApp() {
     magicRequest.current
       .then(() => setAuthed(true))
       .catch(() => setAuthed(false))
-      .finally(() => window.history.replaceState({}, "", window.location.pathname));
+      .finally(() => {
+        params.delete("token");
+        window.history.replaceState({}, "", window.location.pathname + (params.size ? `?${params}` : ""));
+      });
   }, []);
+
+  function openTicket(id: number | null) {
+    setOpenTicketId(id);
+    const params = new URLSearchParams(window.location.search);
+    if (id === null) params.delete("ticket"); else params.set("ticket", String(id));
+    window.history.replaceState({}, "", window.location.pathname + (params.size ? `?${params}` : ""));
+  }
 
   if (!authed) return <PortalLogin onAuthed={() => setAuthed(true)} />;
   if (creating) return <PortalNewTicket onDone={() => setCreating(false)} />;
-  if (openTicketId !== null) return <PortalTicketView id={openTicketId} onBack={() => setOpenTicketId(null)} />;
+  if (openTicketId !== null) return <PortalTicketView id={openTicketId} onBack={() => openTicket(null)} />;
 
   return (
     <PortalTicketList
-      onOpen={setOpenTicketId}
+      onOpen={openTicket}
       onCreate={() => setCreating(true)}
       onLogout={() => {
         setPortalToken(null);
@@ -122,7 +135,10 @@ function PortalLogin({ onAuthed }: { onAuthed: () => void }) {
   });
 
   const linkMutation = useMutation({
-    mutationFn: () => requestMagicLink(email.trim()),
+    mutationFn: () => requestMagicLink(email.trim(), (() => {
+      const id = Number(new URLSearchParams(window.location.search).get("ticket"));
+      return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+    })()),
     onSuccess: () => {
       setError(null);
       setLinkSent(true);

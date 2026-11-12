@@ -57,6 +57,8 @@
 
 Результаты проверки от 06.11.2026 и описание исправлений: [docs/project-review.md](docs/project-review.md). Для разработки frontend нужен Node.js 22.12+; перед сборкой выполняются `npm run lint` и `npm test`.
 
+Правила, напоминания и регулярные работы: [docs/automation.md](docs/automation.md). Предварительная проверка правил не отправляет сообщений.
+
 ## Стек
 
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy 2, Alembic, PostgreSQL 16

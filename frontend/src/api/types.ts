@@ -37,6 +37,7 @@ export type NotificationType =
   | "ticket_assigned"
   | "ticket_unassigned"
   | "channel_error"
+  | "automation_reminder"
   | "customer_replied"
   | "sla_reaction_warning"
   | "sla_reaction_breach"
@@ -245,7 +246,7 @@ export interface Ticket {
   sla: TicketSlaView | null;
 }
 
-export type AutomationTriggerType = "resolved_without_reply" | "status_without_reply" | "status_age";
+export type AutomationTriggerType = "resolved_without_reply" | "status_without_reply" | "status_age" | "deadline_overdue";
 
 export interface SlaViolation {
   ticket_id: number;
@@ -290,24 +291,50 @@ export interface ReportsOverview {
   backlog_aging: { bucket: string; count: number }[];
 }
 
+export interface AutomationAction {
+  type: "change_status" | "internal_note" | "notify_staff" | "client_reminder";
+  text: string;
+  recipient: "assignee" | "team" | "managers" | "users";
+  user_ids: number[];
+  channel: "ticket" | "email" | "telegram" | "max" | "portal";
+}
+export interface AutomationFilters {
+  organization_id?: number | null;
+  category_id?: number | null;
+  team_id?: number | null;
+  assigned_engineer_id?: number | null;
+  unassigned?: boolean;
+  priorities?: Priority[];
+  channels?: Channel[];
+}
 export interface AutomationRuleInput {
   name: string;
   trigger_type: AutomationTriggerType;
   from_status: TicketStatus;
-  to_status: TicketStatus;
+  to_status: TicketStatus | null;
   threshold_days: number;
+  delay_hours: number | null;
+  filters: AutomationFilters;
+  actions: AutomationAction[];
+  repeat_hours: number | null;
+  max_runs: number;
   is_active: boolean;
 }
-
-export interface AutomationRule {
+export interface AutomationRule extends AutomationRuleInput {
   id: number;
-  name: string;
-  trigger_type: AutomationTriggerType;
-  from_status: TicketStatus;
-  to_status: TicketStatus;
-  threshold_days: number;
-  is_active: boolean;
+  revision: number;
   updated_at: string;
+}
+export interface AutomationPreview {
+  matched_count: number;
+  ready_count: number;
+  samples: { ticket_id: number; display_number: string; subject: string; error: string | null;
+    actions: { type: AutomationAction["type"]; text: string; recipient_count: number | null }[] }[];
+}
+export interface AutomationRun {
+  id: number; ticket_id: number; display_number: string; subject: string; state: string;
+  error: string | null; attempts: number; created_at: string; occurrence: number; revision: number;
+  delivery: { id: number; state: string; error: string | null }[];
 }
 
 export interface Notification {
@@ -409,6 +436,7 @@ export type MessageBlock = { type: "text"; text: string } | { type: "image"; att
 export type MessageUploadBlock = { type: "text"; text: string } | { type: "image"; file_index: number };
 
 export interface Message {
+  is_automated: boolean;
   delivery: Delivery | null;
   id: number;
   ticket_id: number;

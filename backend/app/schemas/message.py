@@ -61,6 +61,7 @@ class MessageRead(BaseModel):
     author_user_id: int | None
     author_contact_id: int | None
     body: str
+    is_automated: bool = False
     content_blocks: list[TextBlock | ImageBlock] | None = None
     reply_to_message_id: int | None
     created_at: datetime

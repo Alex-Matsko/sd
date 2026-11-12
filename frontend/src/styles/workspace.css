@@ -533,3 +533,34 @@ pre.attachment-document-sample { white-space: pre-wrap; max-height: 70px; overfl
   .automation-dialog .modal-body { padding: 16px; }
   .automation-rule-actions > .muted { width: 100%; }
 }
+
+.automation-tabs, .automation-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 18px; }
+.automation-tabs + .view { padding: 0; }
+.automation-editor-section { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 16px 0; min-width: 0; }
+.automation-editor-section h4 { font-size: 14px; margin: 0 0 12px; }
+.automation-editor-section summary { cursor: pointer; font-weight: 600; }
+.automation-action-editor { background: var(--bg); border: 1px solid var(--border); border-radius: 9px; padding: 14px; margin-bottom: 12px; }
+.automation-action-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; overflow-wrap: anywhere; }
+.automation-action-head .btn { flex-shrink: 0; }
+.automation-checks { border: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 8px 0 16px; }
+.automation-checks legend { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.automation-checks label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.automation-variables { display: flex; flex-wrap: wrap; gap: 6px; }
+.automation-variables button { border: 1px solid var(--border); border-radius: 5px; background: var(--bg-elevated); color: var(--text-muted); font: 11px monospace; padding: 4px 6px; cursor: pointer; }
+.automation-variables button:hover { color: var(--text); border-color: var(--accent); }
+.automation-preview article, .automation-run { border-top: 1px solid var(--border); padding: 14px 0; overflow-wrap: anywhere; }
+.automation-message-preview { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border-radius: 8px; padding: 12px; font-size: 13px; }
+.automation-dialog textarea, .automation-dialog select { max-width: 100%; }
+.automation-dialog .error-text { color: var(--danger); }
+@media (max-width: 600px) {
+  .automation-editor-section { padding: 12px; }
+  .automation-action-editor { padding: 10px; }
+  .automation-run .automation-action-head { align-items: flex-start; flex-direction: column; }
+}
+.automation-dialog[open] { display: flex; flex-direction: column; overflow: hidden; width: 780px; }
+.automation-dialog > form { display: flex; flex-direction: column; min-height: 0; max-height: calc(100dvh - 34px); }
+.automation-dialog .modal-head, .automation-dialog .modal-foot { flex-shrink: 0; }
+.automation-dialog .modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.automation-editor-section > .form-row + .muted { margin: 10px 0 0; }
+.automation-action-editor .form-row, .automation-editor-section > .form-row { margin-top: 12px; }
+.automation-action-editor textarea { width: 100%; resize: vertical; }
