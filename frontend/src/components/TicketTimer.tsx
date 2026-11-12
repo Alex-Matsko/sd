@@ -56,8 +56,8 @@ export function TicketTimer({ ticketId, status }: { ticketId: number; status: Ti
   const description = runningElsewhere && canStart ? `Таймер по ${timer?.display_number ?? "другой заявке"} остановится, время будет учтено в ней.`
     : !canStart ? "Новый таймер для этой заявки недоступен."
     : runningHere ? (status === "in_progress" ? "Время учитывается по этой заявке." : "Кнопка вернёт заявку в работу. Текущий таймер продолжит отсчёт.")
-    : status === "resolved" ? "Возобновление вернёт заявку в работу и запустит таймер."
-    : status === "in_progress" ? "Запустите таймер, чтобы учитывать время выполнения." : "Одно нажатие переведёт заявку в «В работе» и запустит таймер.";
+    : status === "resolved" ? "Возобновление вернёт заявку в работу."
+    : status === "in_progress" ? "Запустите таймер, чтобы учитывать время выполнения." : "Одно нажатие переведёт заявку в «В работе».";
   return <section className={`ticket-workbar ${runningHere ? "ticket-workbar-running" : ""}`} aria-label="Работа по заявке" aria-busy={pending}>
     <div className="ticket-workbar-summary"><span className="ticket-workbar-icon" aria-hidden="true"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 1.5M9 2h6M12 2v3" /></svg></span><div><strong>{title}</strong><p>{description}</p></div></div>
     <div className="ticket-workbar-actions">
