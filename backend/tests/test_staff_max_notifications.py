@@ -55,6 +55,7 @@ def update(text, user_id='max-staff-test', chat_id='staff-chat-test', kind='mess
 def subscribed(db, user, suffix=''):
     user.max_id, user.max_chat_id = f'max-{user.id}{suffix}', f'chat-{user.id}{suffix}'
     user.max_notify_new_tickets = True
+    user.max_notification_scope = "assigned" if user.role == UserRole.ENGINEER else "all"
     db.commit()
 
 
@@ -315,3 +316,81 @@ def test_telegram_link_sets_expected_default_and_staff_text_never_creates_ticket
     raw['message']['text'] = 'Новая заявка'
     telegram_channel.handle_update(db, raw)
     assert db.query(Ticket).count() == initial
+
+
+def test_max_scope_can_be_changed_and_legacy_clients_preserve_assigned_mode(api, db, actor):
+    subscribed(db, actor)
+    response = api.patch('/auth/me/max-notifications', json={'scope': 'assigned'})
+    assert response.status_code == 200
+    assert response.json()['max_notification_scope'] == 'assigned'
+    assert response.json()['max_notify_new_tickets'] is True
+    assert api.get('/auth/me').json()['max_notification_scope'] == 'assigned'
+    assert api.patch('/auth/me/max-notifications', json={'enabled': True}).json()['max_notification_scope'] == 'assigned'
+    response = api.patch('/auth/me/max-notifications', json={'enabled': False})
+    assert response.json()['max_notification_scope'] == 'off'
+    assert response.json()['max_notify_new_tickets'] is False
+    assert api.patch('/auth/me/max-notifications', json={'scope': 'all'}).json()['max_notification_scope'] == 'all'
+    assert api.post('/auth/me/max-unlink').json()['max_notification_scope'] == 'off'
+
+
+@pytest.mark.parametrize('payload', [{}, {'scope': 'unknown'}, {'scope': 'assigned', 'enabled': True}])
+def test_max_scope_rejects_ambiguous_or_invalid_settings(api, payload):
+    assert api.patch('/auth/me/max-notifications', json=payload).status_code == 422
+
+
+def test_engineer_max_scope_cannot_be_expanded_to_all(api, db, engineer_user):
+    subscribed(db, engineer_user)
+    app.dependency_overrides[get_current_user] = lambda: engineer_user
+    assert api.patch('/auth/me/max-notifications', json={'scope': 'all'}).status_code == 403
+    assert api.patch('/auth/me/max-notifications', json={'scope': 'assigned'}).json()['max_notification_scope'] == 'assigned'
+    assert api.patch('/auth/me/max-notifications', json={'scope': 'off'}).json()['max_notify_new_tickets'] is False
+    assert api.patch('/auth/me/max-notifications', json={'enabled': True}).json()['max_notification_scope'] == 'assigned'
+
+
+@pytest.mark.parametrize('scope,expected', [('all', [True, True, True]), ('assigned', [False, True, False]), ('off', [False, False, False])])
+def test_max_admin_personal_mode_filters_unassigned_and_other_engineers(api, db, actor, engineer_user, contact, scope, expected):
+    subscribed(db, actor)
+    assert api.patch('/auth/me/max-notifications', json={'scope': scope}).status_code == 200
+    samples = [make_ticket(db, contact), make_ticket(db, contact, engineer=actor), make_ticket(db, contact, engineer=engineer_user)]
+    assert [bool(jobs(db, ticket)) for ticket in samples] == expected
+
+
+def test_narrowing_max_scope_discards_queued_foreign_ticket(api, db, actor, engineer_user, contact, fake_max):
+    subscribed(db, actor)
+    ticket = make_ticket(db, contact, engineer=engineer_user)
+    job = jobs(db, ticket)[0]
+    assert api.patch('/auth/me/max-notifications', json={'scope': 'assigned'}).status_code == 200
+    assert channel_queue.process_outbound(db, *channel_queue.claim(db, 'outbound', job.id)) is True
+    db.refresh(job)
+    assert job.state == 'discarded' and fake_max == []
+
+
+def test_max_scope_migration_preserves_existing_preferences(db, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    connection = db.connection()
+    # The migration runs against a temporary table, never real staff accounts.
+    connection.exec_driver_sql('CREATE TEMP TABLE users (id integer, role varchar(20), max_notify_new_tickets boolean) ON COMMIT DROP')
+    connection.exec_driver_sql("INSERT INTO users VALUES (1,'ADMIN',true),(2,'MANAGER',true),(3,'DISPATCHER',true),(4,'ENGINEER',true),(5,'ADMIN',false),(6,'ENGINEER',false)")
+    path = Path(__file__).parents[1] / 'alembic/versions/d0e6f4a123c8_max_notification_scope.py'
+    spec = importlib.util.spec_from_file_location('max_scope_migration_test', path)
+    migration = importlib.util.module_from_spec(spec); spec.loader.exec_module(migration)
+    monkeypatch.setattr(migration, 'op', Operations(MigrationContext.configure(connection)))
+    migration.upgrade()
+    rows = connection.exec_driver_sql('SELECT id, max_notification_scope FROM users ORDER BY id').all()
+    assert rows == [(1,'all'),(2,'all'),(3,'all'),(4,'assigned'),(5,'off'),(6,'off')]
+    migration.downgrade()
+    assert connection.exec_driver_sql('SELECT count(*) FROM users WHERE max_notify_new_tickets').scalar() == 4
+
+
+def test_max_personal_mode_delivers_own_ticket_for_admin(api, db, actor, contact, fake_max):
+    subscribed(db, actor)
+    assert api.patch('/auth/me/max-notifications', json={'scope': 'assigned'}).status_code == 200
+    ticket = make_ticket(db, contact, engineer=actor)
+    job = jobs(db, ticket)[0]
+    assert channel_queue.process_outbound(db, *channel_queue.claim(db, 'outbound', job.id)) is True
+    db.refresh(job)
+    assert job.state == 'sent' and len(fake_max) == 1
+    assert ticket.display_number in fake_max[0][0][3]

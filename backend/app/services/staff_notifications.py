@@ -43,6 +43,14 @@ def telegram_allowed(db, user, ticket):
                  ticket.assigned_engineer_id == user.id))
 
 
+def max_allowed(db, user, ticket):
+    from app.services import ticket_access
+    return bool(user.is_active and user.max_id and user.max_chat_id and user.max_notify_new_tickets and
+                user.max_notification_scope in ("all", "assigned") and ticket_access.can_see(db, user, ticket) and
+                ((user.max_notification_scope == "all" and ticket_access.sees_full_queue(user)) or
+                 ticket.assigned_engineer_id == user.id))
+
+
 def notify_telegram(db: Session, user_ids: set[int], title: str, ticket: Ticket) -> None:
     from sqlalchemy import or_
     from app.services import telegram_channel
@@ -190,9 +198,7 @@ def notify_new_ticket_messengers(db: Session, ticket: Ticket, actor: User | None
     for user in users:
         if (actor and actor.id == user.id) or not ticket_access.can_see(db, user, ticket):
             continue
-        max_allowed = bool(user.max_notify_new_tickets and user.max_id and user.max_chat_id and
-                           (ticket_access.sees_full_queue(user) or ticket.assigned_engineer_id == user.id))
-        for channel, recipient, allowed in (("max", user.max_chat_id, max_allowed),
+        for channel, recipient, allowed in (("max", user.max_chat_id, max_allowed(db, user, ticket)),
                                             ("telegram", user.telegram_id, telegram_allowed(db, user, ticket))):
             if not enabled[channel] or not allowed:
                 continue

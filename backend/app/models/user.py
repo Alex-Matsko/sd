@@ -29,6 +29,7 @@ class User(Base, TimestampMixin):
     max_chat_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     max_link_code_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
     max_link_code_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    max_notification_scope: Mapped[str] = mapped_column(String(16), default="off", server_default="off")
     max_notify_new_tickets: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     @property

@@ -647,6 +647,8 @@ def _handle_staff(db: Session, config: MaxConfig, parsed: ParsedUpdate) -> bool:
             return True
         user.max_id, user.max_chat_id = parsed.external_user_id, parsed.chat_id
         user.max_link_code_hash = user.max_link_code_expires_at = None
+        from app.services.ticket_access import sees_full_queue
+        user.max_notification_scope = "all" if sees_full_queue(user) else "assigned"
         user.max_notify_new_tickets = True
         audit.record(db, entity_type="user", entity_id=user.id, action="max_linked", user_id=user.id,
                      changes={"new_ticket_notifications": True})

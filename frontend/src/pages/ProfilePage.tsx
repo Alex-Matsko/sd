@@ -47,10 +47,10 @@ function MessengerCard({ channel, user }: { channel: Messenger; user: User }) {
     onSuccess: (value) => { setCode(value); setCopyState("idle"); } });
   const unlink = useMutation({ mutationFn: channel === "telegram" ? unlinkTelegram : unlinkMax,
     onSuccess: () => { setCode(null); return qc.invalidateQueries({ queryKey: ["me"] }); } });
-  const preference = useMutation({ mutationFn: (scope: NotificationScope) => channel === "telegram" ? updateTelegramNotifications(scope) : updateMaxNotifications(scope !== "off"),
+  const preference = useMutation({ mutationFn: (scope: NotificationScope) => channel === "telegram" ? updateTelegramNotifications(scope) : updateMaxNotifications(scope),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
-  const savedScope = channel === "telegram" ? (user.telegram_notification_scope === "all" && !fullQueue ? "assigned" : user.telegram_notification_scope)
-    : user.max_notify_new_tickets ? (fullQueue ? "all" : "assigned") : "off";
+  const storedScope = channel === "telegram" ? user.telegram_notification_scope : user.max_notification_scope;
+  const savedScope = storedScope === "all" && !fullQueue ? "assigned" : storedScope;
   const scope = preference.isPending ? preference.variables : savedScope;
   const error = request.error ?? unlink.error ?? preference.error;
   async function copyCommand() {
@@ -67,8 +67,8 @@ function MessengerCard({ channel, user }: { channel: Messenger; user: User }) {
     <div className="notification-channel-content">
       {linked ? <>
         <label className="form-row">Какие заявки присылать<select aria-label={`Уведомления ${name}`} value={scope} disabled={preference.isPending || unlink.isPending} onChange={(event) => preference.mutate(event.target.value as NotificationScope)}>
-          {fullQueue && <option value="all">{channel === "telegram" ? "Все заявки, включая неразобранные" : "Все новые заявки, включая неразобранные"}</option>}
-          {(channel === "telegram" || !fullQueue) && <option value="assigned">Только назначенные мне</option>}
+          {fullQueue && <option value="all">Все заявки, включая неразобранные</option>}
+          <option value="assigned">Только назначенные мне</option>
           <option value="off">Уведомления выключены</option>
         </select></label>
         <p className="notification-channel-note">{scope === "off" ? "Доставка приостановлена. Аккаунт остаётся подключённым." : scope === "assigned" ? "Уведомления только по заявкам, назначенным лично вам." : "Включая заявки без исполнителя и назначенные другим сотрудникам."}</p>

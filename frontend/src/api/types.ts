@@ -52,6 +52,7 @@ export interface User {
   telegram_id: string | null;
   telegram_notification_scope: "all" | "assigned" | "off";
   max_linked: boolean;
+  max_notification_scope: "all" | "assigned" | "off";
   max_notify_new_tickets: boolean;
 }
 

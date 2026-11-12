@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TokenResponse(BaseModel):
@@ -25,7 +25,15 @@ class PasswordChangeRequest(BaseModel):
 
 
 class MaxNotificationSettings(BaseModel):
-    enabled: bool
+    # `enabled` keeps already-open clients compatible during rollout.
+    scope: Literal["all", "assigned", "off"] | None = None
+    enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def one_setting(self):
+        if (self.scope is None) == (self.enabled is None):
+            raise ValueError("Передайте scope либо enabled")
+        return self
 
 
 class TelegramNotificationSettings(BaseModel):

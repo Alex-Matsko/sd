@@ -163,9 +163,23 @@ def request_max_link_code(db: Session = Depends(get_db), user: User = Depends(ge
 @router.patch("/me/max-notifications", response_model=UserRead)
 def update_max_notifications(payload: MaxNotificationSettings, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app.services.audit import record
-    user.max_notify_new_tickets = payload.enabled
+    from app.services import ticket_access
+    scope = payload.scope
+    if scope is None:
+        if not payload.enabled:
+            scope = "off"
+        elif user.max_notification_scope != "off":
+            scope = user.max_notification_scope
+            if scope == "all" and not ticket_access.sees_full_queue(user):
+                scope = "assigned"
+        else:
+            scope = "all" if ticket_access.sees_full_queue(user) else "assigned"
+    if scope == "all" and not ticket_access.sees_full_queue(user):
+        raise HTTPException(status_code=403, detail="Уведомления обо всех заявках доступны только сотрудникам с доступом ко всей очереди")
+    user.max_notification_scope = scope
+    user.max_notify_new_tickets = scope != "off"
     record(db, entity_type="user", entity_id=user.id, action="max_notifications_updated", user_id=user.id,
-           changes={"enabled": payload.enabled})
+           changes={"scope": scope})
     db.commit()
     return user
 
@@ -175,6 +189,7 @@ def unlink_max(db: Session = Depends(get_db), user: User = Depends(get_current_u
     from app.services.audit import record
     user.max_id = user.max_chat_id = user.max_link_code_hash = user.max_link_code_expires_at = None
     user.max_notify_new_tickets = False
+    user.max_notification_scope = "off"
     record(db, entity_type="user", entity_id=user.id, action="max_unlinked", user_id=user.id)
     db.commit()
     return user

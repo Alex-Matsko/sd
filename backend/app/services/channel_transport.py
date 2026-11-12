@@ -52,9 +52,8 @@ def send_job(db, job):
         if job.channel == "telegram":
             if user.telegram_id != payload.get("recipient") or not staff_notifications.telegram_allowed(db, user, ticket):
                 return False
-        elif (not user.max_notify_new_tickets or user.max_id != payload.get("staff_max_id") or
-              user.max_chat_id != payload.get("recipient") or
-              (not ticket_access.sees_full_queue(user) and ticket.assigned_engineer_id != user.id)):
+        elif (user.max_id != payload.get("staff_max_id") or user.max_chat_id != payload.get("recipient") or
+              not staff_notifications.max_allowed(db, user, ticket)):
             return False
     module = {"email": email_channel, "max": max_channel, "telegram": telegram_channel}[job.channel]
     if job.channel == "email":
