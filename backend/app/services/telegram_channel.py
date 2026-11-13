@@ -14,6 +14,7 @@ Verified end-to-end against a real bot token on 2026-07-31.
 """
 
 import logging
+import sys
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ from app.services import integration_settings
 from app.services import messages as messages_service
 from app.services import messenger_common
 from app.services import telegram_client
+from app.services.customer_delivery import preferred_channel
 from app.services import tickets as tickets_service
 from app.services.messenger_common import (
     MY_TICKETS_COMMANDS,
@@ -299,7 +301,7 @@ def _send(
         return None
 
 
-def _store_telegram_attachment(db: Session, message: Message, config: TelegramConfig, attachment: dict) -> None:
+def _attachment_data(config: TelegramConfig, attachment: dict):
     try:
         file_path = telegram_client.get_file_path(config.base_url, config.token, attachment["file_id"])
         if not file_path:
@@ -308,7 +310,11 @@ def _store_telegram_attachment(db: Session, message: Message, config: TelegramCo
     except Exception:
         logger.exception("Telegram: не удалось скачать вложение")
         raise
-    db.add(attachments_service.store_attachment(message.id, attachment["filename"], content, attachment.get("mime_type")))
+    return attachment["filename"], content, attachment.get("mime_type")
+
+
+def _store_telegram_attachment(db: Session, message: Message, config: TelegramConfig, attachment: dict) -> None:
+    db.add(attachments_service.store_attachment(message.id, *_attachment_data(config, attachment)))
 
 
 def _resolve_reply_target(db: Session, ticket_id: int, reply_to_mid: int | None) -> int | None:
@@ -322,7 +328,7 @@ def _acknowledge_gluing(config: TelegramConfig, chat_id: str, ticket: Ticket) ->
     """See max_channel._acknowledge_gluing for why this ack exists at all.
     Unlike MAX, the main menu itself doesn't need repeating here - Telegram's
     persistent command menu already covers it (see _close_button_for)."""
-    _send(config, chat_id, f"Принято по заявке {ticket.display_number}.", buttons=_close_button_for(ticket))
+    _send(config, chat_id, f"Принято по заявке {ticket.display_number} — {ticket.subject}.", buttons=_close_button_for(ticket))
 
 
 def _append_message(db: Session, config: TelegramConfig, ticket: Ticket, contact: Contact, parsed: ParsedUpdate, ambiguous: bool = False) -> Message:
@@ -451,7 +457,11 @@ def _handle_text(db: Session, config: TelegramConfig, state: ChannelConversation
 
     if text_lower in NEW_TICKET_COMMANDS:
         _cancel_pending_ticket_flow(state)
+        from app.services import messenger_dialog
+        if messenger_dialog.create_from_waiting(db, "telegram", config, state, contact, sys.modules[__name__]):
+            return
         state.awaiting_new_ticket_text = True
+        state.updated_at = datetime.now(timezone.utc)
         db.add(state)
         db.commit()
         _send(config, parsed.chat_id, "Опишите проблему одним сообщением - я создам заявку.")
@@ -469,56 +479,8 @@ def _handle_text(db: Session, config: TelegramConfig, state: ChannelConversation
         _handle_link_phone_reply(db, config, state, contact, parsed)
         return
 
-    if state.awaiting_revive_text:
-        state.awaiting_revive_text = False
-        parent_ticket_id = state.revive_parent_ticket_id
-        state.revive_parent_ticket_id = None
-        db.add(state)
-        _create_ticket_from_text(db, config, state, contact, parsed, parent_ticket_id=parent_ticket_id)
-        return
-
-    if state.awaiting_new_ticket_text:
-        state.awaiting_new_ticket_text = False
-        db.add(state)
-        _create_ticket_from_text(db, config, state, contact, parsed)
-        return
-
-    # Dialog gluing rule (section 2, item 3): stick to the client's active
-    # ticket until they switch (via "Мои заявки") or it stops being open.
-    if state.active_ticket_id is not None:
-        active = db.get(Ticket, state.active_ticket_id)
-        if active is not None and TicketStatus(active.status) in OPEN_TICKET_STATUSES:
-            _append_message(db, config, active, contact, parsed)
-            db.commit()
-            _acknowledge_gluing(config, parsed.chat_id, active)
-            return
-        state.active_ticket_id = None
-
-    open_tickets = _list_open_tickets(db, contact)
-    if len(open_tickets) == 1:
-        state.active_ticket_id = open_tickets[0].id
-        db.add(state)
-        _append_message(db, config, open_tickets[0], contact, parsed)
-        db.commit()
-        _acknowledge_gluing(config, parsed.chat_id, open_tickets[0])
-        return
-
-    if len(open_tickets) > 1:
-        if state.awaiting_ticket_choice:
-            state.awaiting_ticket_choice = False
-            state.active_ticket_id = open_tickets[0].id
-            db.add(state)
-            _append_message(db, config, open_tickets[0], contact, parsed, ambiguous=True)
-            db.commit()
-            _acknowledge_gluing(config, parsed.chat_id, open_tickets[0])
-            return
-        state.awaiting_ticket_choice = True
-        db.add(state)
-        db.commit()
-        _send_ticket_choice(config, parsed.chat_id, open_tickets)
-        return
-
-    _create_ticket_from_text(db, config, state, contact, parsed)
+    from app.services import messenger_dialog
+    messenger_dialog.route_text(db, "telegram", config, state, contact, parsed, sys.modules[__name__])
 
 
 def _record_csat(db: Session, config: TelegramConfig, ticket_id: int, rating: int, chat_id: str) -> None:
@@ -543,6 +505,9 @@ def _handle_callback(db: Session, config: TelegramConfig, state: ChannelConversa
             logger.exception("Telegram: не удалось подтвердить callback_query")
 
     payload = parsed.callback_payload
+    from app.services import messenger_dialog
+    if messenger_dialog.handle_callback(db, "telegram", config, state, contact, parsed, sys.modules[__name__]):
+        return
 
     if payload == "cmd:my_tickets":
         _send_my_tickets(db, config, contact, parsed.chat_id)
@@ -565,7 +530,11 @@ def _handle_callback(db: Session, config: TelegramConfig, state: ChannelConversa
 
     if payload in ("new_ticket", "cmd:new_ticket"):
         state.awaiting_ticket_choice = False
+        from app.services import messenger_dialog
+        if messenger_dialog.create_from_waiting(db, "telegram", config, state, contact, sys.modules[__name__]):
+            return
         state.awaiting_new_ticket_text = True
+        state.updated_at = datetime.now(timezone.utc)
         db.add(state)
         db.commit()
         _send(config, parsed.chat_id, "Опишите проблему одним сообщением - я создам заявку.")
@@ -576,7 +545,7 @@ def _handle_callback(db: Session, config: TelegramConfig, state: ChannelConversa
         if ticket is None or ticket.contact_id != contact.id:
             _send(config, parsed.chat_id, "Заявка не найдена.")
             return
-        if TicketStatus(ticket.status) not in OPEN_TICKET_STATUSES:
+        if TicketStatus(ticket.status) not in messenger_dialog.REPLYABLE:
             state.awaiting_ticket_choice = False
             state.awaiting_revive_text = True
             state.revive_parent_ticket_id = ticket.id
@@ -588,8 +557,10 @@ def _handle_callback(db: Session, config: TelegramConfig, state: ChannelConversa
                 f"Заявка {ticket.display_number} закрыта. Опишите, что случилось - я создам новую заявку и свяжу её с {ticket.display_number}.",
             )
             return
+        _cancel_pending_ticket_flow(state)
         state.active_ticket_id = ticket.id
-        state.awaiting_ticket_choice = False
+        state.updated_at = datetime.now(timezone.utc)
+        messenger_dialog.consume(db, "telegram", config, state, contact, ticket, sys.modules[__name__])
         db.add(state)
         db.commit()
         _send(
@@ -721,7 +692,7 @@ def _find_chat_state(db: Session, contact_id: int) -> ChannelConversationState |
 
 def notify_status_change(db: Session, ticket: Ticket, new_status: TicketStatus) -> None:
     """See max_channel.notify_status_change - identical rule, Telegram side."""
-    if Channel(ticket.channel) != Channel.TELEGRAM or new_status == TicketStatus.CLOSED:
+    if preferred_channel(db, ticket) != Channel.TELEGRAM or new_status == TicketStatus.CLOSED:
         return
     config = load_telegram_config(db)
     if config is None:
@@ -735,7 +706,7 @@ def notify_status_change(db: Session, ticket: Ticket, new_status: TicketStatus) 
 
 
 def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None) -> None:
-    if Channel(ticket.channel) != Channel.TELEGRAM or engineer is None:
+    if preferred_channel(db, ticket) != Channel.TELEGRAM or engineer is None:
         return
     config = load_telegram_config(db)
     if config is None:
@@ -749,7 +720,7 @@ def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None)
 
 
 def request_csat(db: Session, ticket: Ticket) -> None:
-    if Channel(ticket.channel) != Channel.TELEGRAM:
+    if preferred_channel(db, ticket) != Channel.TELEGRAM:
         return
     config = load_telegram_config(db)
     if config is None:

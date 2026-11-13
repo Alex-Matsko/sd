@@ -23,7 +23,7 @@ const COMPONENTS: Record<string, string> = {
 };
 const STATES: Record<string, string> = {
   ok: "Работает", disabled: "Отключено", missing: "Не запущено", stale: "Нет сигнала", error: "Ошибка",
-  pending: "В очереди", processing: "Обрабатывается", retry: "Ожидает повтора", failed: "Нужна проверка",
+  waiting: "Ждёт выбора заявки клиентом", pending: "В очереди", processing: "Обрабатывается", retry: "Ожидает повтора", failed: "Нужна проверка",
   sent: "Принято каналом", processed: "Обработано", discarded: "Пропущено",
 };
 

@@ -10,6 +10,7 @@ test_all_models_are_registered.
 
 from app.models.work import WorkProject, WorkTask, WorkDependency, WorkApproval, WorkTicketLink, WorkComment
 from app.models.channel_job import ChannelJob, WorkerPulse
+from app.models.messenger_reply import MessengerReply
 from app.models.base import Base
 from app.models.organization import Organization, OrganizationEmailDomain, PublicEmailDomain
 from app.models.contact import Contact, ContactEmail, ContactPhone
@@ -42,6 +43,7 @@ from app.models.client_report import ClientReport
 from app.models.perimetr_conversation import PerimetrConversation, PerimetrConversationTicket
 
 __all__ = [
+    "MessengerReply",
     "WorkProject", "WorkTask", "WorkDependency", "WorkApproval", "WorkTicketLink", "WorkComment",
     "ChannelJob",
     "WorkerPulse",

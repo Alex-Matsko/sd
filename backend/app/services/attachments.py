@@ -31,7 +31,7 @@ def safe_filename(filename: str) -> str:
     return name or "file"
 
 
-def store_attachment(message_id: int, filename: str, content: bytes, mime_type: str | None) -> Attachment:
+def store_attachment(message_id: int, filename: str, content: bytes, mime_type: str | None, *, staging: bool = False) -> Attachment:
     """Writes `content` under attachments_dir/<year>/<month>/ (section 10:
     "структура по годам/месяцам") and returns an unsaved Attachment row - the
     caller adds/commits it as part of the enclosing message transaction.
@@ -43,7 +43,7 @@ def store_attachment(message_id: int, filename: str, content: bytes, mime_type: 
 
     safe_name = safe_filename(filename)
     today = date.today()
-    directory = Path(settings.attachments_dir) / str(today.year) / f"{today.month:02d}"
+    directory = Path(settings.attachments_dir) / "_pending" if staging else Path(settings.attachments_dir) / str(today.year) / f"{today.month:02d}"
     directory.mkdir(parents=True, exist_ok=True)
     stored_path = directory / f"{uuid.uuid4().hex}_{safe_name}"
     try:

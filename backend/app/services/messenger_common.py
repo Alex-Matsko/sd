@@ -23,9 +23,11 @@ from app.services import tickets as tickets_service
 from app.services.ticket_messages import STATUS_LABELS_RU, ticket_notice
 
 WELCOME_TEXT = (
-    "Здравствуйте! Это бот службы поддержки «Открытые Горизонты». Опишите проблему одним сообщением - "
-    "я создам заявку. Команда «Мои заявки» покажет ваши текущие обращения."
+    "Здравствуйте! Это служба поддержки «Открытые Горизонты». "
+    "Чтобы продолжить переписку, нажмите «Ответить по этой заявке» под сообщением или выберите обращение в «Мои заявки». "
+    "Для нового вопроса нажмите «Создать новую»."
 )
+
 NEW_TICKET_COMMANDS = {"/new", "новая заявка", "создать заявку", "создать новую"}
 MY_TICKETS_COMMANDS = {"/tickets", "мои заявки", "мои обращения"}
 # Neither MAX nor Telegram fires a distinct "first contact" event once a user
@@ -192,6 +194,9 @@ def merge_contacts(db: Session, from_contact: Contact, into_contact: Contact) ->
         else:
             into_contact.emails.append(email)
 
+    from app.models.messenger_reply import MessengerReply
+    db.query(MessengerReply).filter(MessengerReply.contact_id == from_contact.id).update(
+        {MessengerReply.contact_id: into_contact.id}, synchronize_session='fetch')
     db.add(into_contact)
     db.flush()
     db.delete(from_contact)

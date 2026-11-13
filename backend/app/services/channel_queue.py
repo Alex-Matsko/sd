@@ -81,7 +81,7 @@ def enqueue_message(db: Session, message: Message):
     if existing is not None:
         return existing
     ticket = message.ticket
-    payload = {"contact_id": ticket.contact_id, "organization_id": ticket.organization_id, "_sd_summary": message.body[:180], "attachment_ids": [item.id for item in message.attachments]}
+    payload = {"contact_id": ticket.contact_id, "organization_id": ticket.organization_id, "_sd_summary": message.body[:180], "ticket_context": True, "attachment_ids": [item.id for item in message.attachments]}
     if message.channel == Channel.EMAIL:
         contact = ticket.contact
         if contact and contact.emails:
@@ -127,7 +127,7 @@ def claim(db: Session, kind: str, job_id: int | None = None):
     # Never advance a conversation past an unresolved earlier event/message.
     blocked = exists(select(earlier.id).where(
         earlier.kind == ChannelJob.kind, earlier.stream_key == ChannelJob.stream_key,
-        earlier.id < ChannelJob.id, earlier.state.notin_(TERMINAL),
+        earlier.id < ChannelJob.id, earlier.state.notin_((*TERMINAL, "waiting")),
     ))
     query = db.query(ChannelJob).filter(ChannelJob.kind == kind, ready, ~blocked)
     if job_id is not None:
@@ -217,16 +217,19 @@ def process_inbound(db: Session, job_id: int, lease_token: str):
                     if parsed:
                         from app.models.channel_conversation_state import ChannelConversationState
                         state = unit.query(ChannelConversationState).filter_by(channel=Channel(job.channel), external_user_id=parsed.external_user_id).first()
-                        job.ticket_id = state.active_ticket_id if state else None
+                        job.ticket_id = state.active_ticket_id if state and not unit.info.get("waiting_inbound_event") else None
                         if job.ticket_id:
                             for reply in unit.query(ChannelJob).filter(ChannelJob.event_key.like(f"event:{job.id}:reply:%")):
                                 reply.ticket_id = job.ticket_id
-            job.state, job.completed_at, job.last_error = "processed", now(), None
+            job.state = "waiting" if unit.info.get("waiting_inbound_event") else "processed"
+            job.completed_at, job.last_error = (None if job.state == "waiting" else now()), None
             job.lease_until, job.lease_token = None, None
             Session.commit(unit)
             released = True
         db.commit()
         db.expire_all()
+        from app.services.messenger_dialog import cleanup_files
+        cleanup_files(unit.info.get('delete_files_after_commit', ()))
         return True
     except Exception as error:
         if unit is not None and not released:
@@ -281,6 +284,20 @@ def prune_completed(db: Session):
         job.payload = {"_sd_summary": job.payload.get("_sd_summary", ""), "_source_expired": True}
         count += 1
     db.commit()
+    from pathlib import Path
+    from app.services.messenger_dialog import cleanup_files
+    active = {meta['path'] for job in db.query(ChannelJob).filter_by(kind='inbound', state='waiting')
+              for meta in job.payload.get('_sd_pending_files', [])}
+    root = Path(settings.attachments_dir) / '_pending'
+    if root.is_dir():
+        expired = []
+        for path in root.iterdir():
+            try:
+                if path.is_file() and str(path) not in active and path.stat().st_mtime < (now() - timedelta(days=1)).timestamp():
+                    expired.append(str(path))
+            except OSError:
+                continue
+        cleanup_files(expired)
     return count
 
 

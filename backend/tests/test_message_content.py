@@ -91,7 +91,7 @@ def test_delivery_preserves_text_image_text_and_resumes_at_failed_part(db, conte
     with pytest.raises(RuntimeError, match='temporary'):
         channel_transport.send_job(db, job)
     assert job.payload['content_parts_sent'] == 1
-    assert sent == [('text', 'Сначала <текст>')]
+    assert sent == [('text', f'Заявка {ticket.display_number} — {ticket.subject}\n\nСначала <текст>')]
     if channel == 'telegram':
         def send_file(*args, **kwargs):
             sent.append(('file', args[4])); return {'message_id': 124}
@@ -99,7 +99,7 @@ def test_delivery_preserves_text_image_text_and_resumes_at_failed_part(db, conte
     else:
         monkeypatch.setattr(client, 'upload_file', lambda *a, **k: 'file-token')
     channel_transport.send_job(db, job)
-    assert sent == [('text', 'Сначала <текст>'), ('file', PNG), ('text', 'После скриншота')]
+    assert sent == [('text', f'Заявка {ticket.display_number} — {ticket.subject}\n\nСначала <текст>'), ('file', PNG), ('text', f'Заявка {ticket.display_number} — {ticket.subject}\n\nПосле скриншота')]
     assert job.payload['content_parts_sent'] == 3
     channel_transport.send_job(db, job)
     assert len(sent) == 3
@@ -131,7 +131,7 @@ def test_typed_endpoints_and_portal_do_not_expose_internal_text_or_images(db, co
             visible = client.get(f'/portal/tickets/{ticket.id}').json()
             assert visible['messages'] == []
             assert client.get(f'/portal/tickets/{ticket.id}/attachments/{file_id}').status_code == 404
-            draft['direction'] = 'outbound'; draft['request_id'] = str(uuid4())
+            draft['direction'] = 'outbound'; draft['channel'] = 'portal'; draft['request_id'] = str(uuid4())
             r = client.post(f'/tickets/{ticket.id}/replies/send', data={'payload': json.dumps(draft)}, files={'files': ('s.png', PNG, 'image/png')})
             assert r.status_code == 201, r.text
             visible = client.get(f'/portal/tickets/{ticket.id}').json()['messages']

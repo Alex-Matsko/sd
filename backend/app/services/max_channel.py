@@ -12,6 +12,7 @@ any remaining field-name gap is a one-function fix.
 """
 
 import logging
+import sys
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -41,6 +42,7 @@ from app.services import integration_settings
 from app.services import max_client
 from app.services import messages as messages_service
 from app.services import messenger_common
+from app.services.customer_delivery import preferred_channel
 from app.services import tickets as tickets_service
 from app.services.messenger_common import (
     MY_TICKETS_COMMANDS,
@@ -296,7 +298,7 @@ def _send(config: MaxConfig, chat_id: str, text: str, buttons: list[list[dict]] 
         logger.exception("MAX: ошибка отправки сообщения в чат %s", chat_id)
 
 
-def _store_max_attachment(db: Session, message: Message, attachment: dict) -> None:
+def _attachment_data(config, attachment: dict):
     """Download before acknowledging the event; failure rolls back its message."""
     payload = attachment.get("payload") or {}
     url = payload.get("url")
@@ -316,7 +318,11 @@ def _store_max_attachment(db: Session, message: Message, attachment: dict) -> No
     if not filename:
         extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}.get(mime_type, "")
         filename = f"{att_type}{extension}"
-    db.add(attachments_service.store_attachment(message.id, filename, content, mime_type))
+    return filename, content, mime_type
+
+
+def _store_max_attachment(db: Session, message: Message, attachment: dict) -> None:
+    db.add(attachments_service.store_attachment(message.id, *_attachment_data(None, attachment)))
 
 
 def _resolve_reply_target(db: Session, ticket_id: int, reply_to_mid: str | None) -> int | None:
@@ -334,7 +340,7 @@ def _acknowledge_gluing(config: MaxConfig, chat_id: str, ticket: Ticket) -> None
     docs/decisions.md). A one-line ack + the same main menu buttons used
     everywhere else fixes both without a special "exit" concept: switching
     tickets already works via "Мои заявки", it just needed to stay visible."""
-    _send(config, chat_id, f"Принято по заявке {ticket.display_number}.", buttons=_menu_buttons_for(ticket))
+    _send(config, chat_id, f"Принято по заявке {ticket.display_number} — {ticket.subject}.", buttons=_menu_buttons_for(ticket))
 
 
 def _append_message(db: Session, ticket: Ticket, contact: Contact, parsed: ParsedUpdate, ambiguous: bool = False) -> Message:
@@ -468,7 +474,11 @@ def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState
 
     if text_lower in NEW_TICKET_COMMANDS:
         _cancel_pending_ticket_flow(state)
+        from app.services import messenger_dialog
+        if messenger_dialog.create_from_waiting(db, "max", config, state, contact, sys.modules[__name__]):
+            return
         state.awaiting_new_ticket_text = True
+        state.updated_at = datetime.now(timezone.utc)
         db.add(state)
         db.commit()
         _send(config, parsed.chat_id, "Опишите проблему одним сообщением - я создам заявку.")
@@ -486,59 +496,8 @@ def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState
         _handle_link_phone_reply(db, config, state, contact, parsed)
         return
 
-    if state.awaiting_revive_text:
-        state.awaiting_revive_text = False
-        parent_ticket_id = state.revive_parent_ticket_id
-        state.revive_parent_ticket_id = None
-        db.add(state)
-        _create_ticket_from_text(db, config, state, contact, parsed, parent_ticket_id=parent_ticket_id)
-        return
-
-    if state.awaiting_new_ticket_text:
-        state.awaiting_new_ticket_text = False
-        db.add(state)
-        _create_ticket_from_text(db, config, state, contact, parsed)
-        return
-
-    # Dialog gluing rule (section 2, item 3): stick to the client's active
-    # ticket until they switch (via "Мои заявки") or it stops being open.
-    if state.active_ticket_id is not None:
-        active = db.get(Ticket, state.active_ticket_id)
-        if active is not None and TicketStatus(active.status) in OPEN_TICKET_STATUSES:
-            _append_message(db, active, contact, parsed)
-            db.commit()
-            _acknowledge_gluing(config, parsed.chat_id, active)
-            return
-        state.active_ticket_id = None
-
-    open_tickets = _list_open_tickets(db, contact)
-    if len(open_tickets) == 1:
-        state.active_ticket_id = open_tickets[0].id
-        db.add(state)
-        _append_message(db, open_tickets[0], contact, parsed)
-        db.commit()
-        _acknowledge_gluing(config, parsed.chat_id, open_tickets[0])
-        return
-
-    if len(open_tickets) > 1:
-        if state.awaiting_ticket_choice:
-            # Client replied with free text instead of pressing a button -
-            # same email-channel fallback (docs/decisions.md): most recently
-            # active ticket, flagged for dispatcher review.
-            state.awaiting_ticket_choice = False
-            state.active_ticket_id = open_tickets[0].id
-            db.add(state)
-            _append_message(db, open_tickets[0], contact, parsed, ambiguous=True)
-            db.commit()
-            _acknowledge_gluing(config, parsed.chat_id, open_tickets[0])
-            return
-        state.awaiting_ticket_choice = True
-        db.add(state)
-        db.commit()
-        _send_ticket_choice(config, parsed.chat_id, open_tickets)
-        return
-
-    _create_ticket_from_text(db, config, state, contact, parsed)
+    from app.services import messenger_dialog
+    messenger_dialog.route_text(db, "max", config, state, contact, parsed, sys.modules[__name__])
 
 
 def _record_csat(db: Session, config: MaxConfig, ticket_id: int, rating: int, chat_id: str) -> None:
@@ -557,6 +516,9 @@ def _record_csat(db: Session, config: MaxConfig, ticket_id: int, rating: int, ch
 
 def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> None:
     payload = parsed.callback_payload
+    from app.services import messenger_dialog
+    if messenger_dialog.handle_callback(db, "max", config, state, contact, parsed, sys.modules[__name__]):
+        return
 
     if payload == "cmd:my_tickets":
         _send_my_tickets(db, config, contact, parsed.chat_id)
@@ -579,7 +541,11 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
 
     if payload in ("new_ticket", "cmd:new_ticket"):
         state.awaiting_ticket_choice = False
+        from app.services import messenger_dialog
+        if messenger_dialog.create_from_waiting(db, "max", config, state, contact, sys.modules[__name__]):
+            return
         state.awaiting_new_ticket_text = True
+        state.updated_at = datetime.now(timezone.utc)
         db.add(state)
         db.commit()
         _send(config, parsed.chat_id, "Опишите проблему одним сообщением - я создам заявку.")
@@ -605,8 +571,10 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
                 f"Заявка {ticket.display_number} закрыта. Опишите, что случилось - я создам новую заявку и свяжу её с {ticket.display_number}.",
             )
             return
+        _cancel_pending_ticket_flow(state)
         state.active_ticket_id = ticket.id
-        state.awaiting_ticket_choice = False
+        state.updated_at = datetime.now(timezone.utc)
+        messenger_dialog.consume(db, "max", config, state, contact, ticket, sys.modules[__name__])
         db.add(state)
         db.commit()
         _send(
@@ -740,7 +708,7 @@ def notify_status_change(db: Session, ticket: Ticket, new_status: TicketStatus) 
     client isn't left guessing where their ticket stands. Skipped for CLOSED -
     request_csat's own message already announces the closure, and skipped
     for channels other than MAX the same way request_csat is."""
-    if Channel(ticket.channel) != Channel.MAX or new_status == TicketStatus.CLOSED:
+    if preferred_channel(db, ticket) != Channel.MAX or new_status == TicketStatus.CLOSED:
         return
     config = load_max_config(db)
     if config is None:
@@ -757,7 +725,7 @@ def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None)
     """Called from services/tickets.update_ticket when assigned_engineer_id
     changes - only fires for an actual assignment (there's currently no way
     to clear it back to None through that endpoint, see update_ticket)."""
-    if Channel(ticket.channel) != Channel.MAX or engineer is None:
+    if preferred_channel(db, ticket) != Channel.MAX or engineer is None:
         return
     config = load_max_config(db)
     if config is None:
@@ -773,7 +741,7 @@ def notify_assignment_change(db: Session, ticket: Ticket, engineer: User | None)
 def request_csat(db: Session, ticket: Ticket) -> None:
     """Called on Ticket -> CLOSED (services/tickets.transition_status) for
     every channel; only acts when the ticket's contact has a known MAX chat."""
-    if Channel(ticket.channel) != Channel.MAX:
+    if preferred_channel(db, ticket) != Channel.MAX:
         return
     config = load_max_config(db)
     if config is None:

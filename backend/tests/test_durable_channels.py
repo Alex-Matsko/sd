@@ -122,7 +122,7 @@ def test_partial_bot_delivery_retries_only_unsent_files(db, contact, actor, monk
     first_attempt = False
     job = db.get(ChannelJob, job_id); ready(db, job)
     assert queue.process_outbound(db, *queue.claim(db, "outbound", job_id)) is True
-    assert texts == ["Ответ"]
+    assert texts == [f"Заявка {ticket.display_number} — {ticket.subject}\n\nОтвет"]
     assert files == ["one.txt", "two.txt"]
 
 
@@ -191,7 +191,7 @@ def test_atomic_api_enforces_access_and_file_limit_without_partial_messages(db, 
     app.dependency_overrides[get_current_user] = lambda: actor
     try:
         with TestClient(app) as client:
-            result = client.post(f"/tickets/{ticket.id}/messages/send", data={"payload": '{"direction":"outbound","body":"reply"}'},
+            result = client.post(f"/tickets/{ticket.id}/messages/send", data={"payload": '{"direction":"outbound","body":"reply","channel":"portal"}'},
                                  files={"files": ("big.txt", b"x", "text/plain")})
             assert result.status_code == 413
             assert db.query(Message).filter_by(ticket_id=ticket.id).count() == 0

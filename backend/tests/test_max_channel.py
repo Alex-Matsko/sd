@@ -398,7 +398,7 @@ def max_channel_callback_for(ticket_id: int, user_id: str, chat_id: str) -> dict
     return _callback_update(user_id=user_id, chat_id=chat_id, payload=f"ticket:{ticket_id}")
 
 
-def test_multiple_open_tickets_plain_reply_falls_back_ambiguous(db: Session, max_enabled, contact: Contact, _fake_send):
+def test_multiple_open_tickets_plain_reply_waits_for_explicit_choice(db: Session, max_enabled, contact: Contact, _fake_send):
     contact.max_id = "u13"
     db.commit()
     created_tickets = []
@@ -406,20 +406,19 @@ def test_multiple_open_tickets_plain_reply_falls_back_ambiguous(db: Session, max
         payload = TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.MAX, subject=subject, manual_priority=Priority.P3, manual_priority_reason="test")
         created_tickets.append(tickets_service.create_ticket(db, payload, actor=None))
 
-    max_channel.handle_update(db, _text_update(user_id="u13", chat_id="c13", text="Первое сообщение"))
+    max_channel.handle_update(db, _text_update(user_id="u13", chat_id="c13", text="Первое сообщение", mid="mid.choice.first"))
     # Client answers with plain text instead of pressing a button.
-    max_channel.handle_update(db, _text_update(user_id="u13", chat_id="c13", text="Это про первую проблему"))
+    max_channel.handle_update(db, _text_update(user_id="u13", chat_id="c13", text="Это про первую проблему", mid="mid.choice.second"))
 
     state = db.query(ChannelConversationState).filter(ChannelConversationState.external_user_id == "u13").first()
-    assert state.awaiting_ticket_choice is False
-    assert state.active_ticket_id is not None
-
-    notes = (
-        db.query(Message)
-        .filter(Message.ticket_id == state.active_ticket_id, Message.direction == MessageDirection.INTERNAL_NOTE)
-        .all()
-    )
-    assert len(notes) == 1
+    assert state.awaiting_ticket_choice is True
+    assert state.active_ticket_id is None
+    from app.models.channel_job import ChannelJob
+    assert db.query(ChannelJob).filter_by(channel='max', state='waiting').count() == 2
+    assert db.query(Message).filter(Message.ticket_id.in_([t.id for t in created_tickets])).count() == 0
+    chosen = created_tickets[0]
+    max_channel.handle_update(db, max_channel_callback_for(chosen.id, user_id="u13", chat_id="c13"))
+    assert [m.body for m in db.query(Message).filter_by(ticket_id=chosen.id).order_by(Message.id)] == ["Первое сообщение", "Это про первую проблему"]
 
 
 def test_my_tickets_command_lists_tickets(db: Session, max_enabled, contact: Contact, _fake_send):
@@ -644,11 +643,11 @@ def test_try_send_outbound_uses_known_chat(db: Session, max_enabled, contact: Co
     channel_queue.run_batch(db, "outbound")
     assert len(_fake_send) == 1
     assert _fake_send[0]["chat_id"] == "c20"
-    assert _fake_send[0]["text"] == "Ответ инженера"
+    assert _fake_send[0]["text"] == f"Заявка {ticket.display_number} — {ticket.subject}\n\nОтвет инженера"
     # Menu buttons ride along on every engineer reply - the /me/commands
     # menu isn't visible on every MAX client (docs/decisions.md).
     payloads = {row[0]["payload"] for row in _fake_send[0]["buttons"]}
-    assert payloads == {"cmd:my_tickets", "cmd:new_ticket", f"close:{ticket.id}"}
+    assert payloads == {"cmd:my_tickets", "cmd:new_ticket", f"close:{ticket.id}", f"reply:{ticket.id}"}
 
 
 def test_inbound_reply_resolves_to_local_message(db: Session, max_enabled, _fake_send):

@@ -7,6 +7,7 @@ from app.core.enums import Channel, MessageDirection
 from app.models.message import Message
 from app.models.ticket import Ticket
 from app.services import email_channel, max_channel, max_client, sla, telegram_channel, telegram_client
+from app.services import messenger_dialog
 from app.services.channel_queue import ChannelFailure, PermanentChannelFailure, LEASE_SECONDS, now
 
 
@@ -106,10 +107,15 @@ def send_job(db, job):
     reply = (parent.max_message_id if job.channel == "max" else parent.telegram_message_id) if parent else payload.get("reply_to")
     buttons = payload.get("buttons") if message is None else (
         max_channel._menu_buttons_for(message.ticket) if job.channel == "max" else telegram_channel._close_button_for(message.ticket))
+    if ticket is not None and not payload.get('staff_notice'):
+        buttons = messenger_dialog.buttons(ticket, buttons)
     if message is not None and message.content_blocks is not None:
         _send_rich_parts(db, job, message, config, recipient, attachments, reply, buttons)
         return
-    chunks = [text[index:index + 3000] for index in range(0, len(text), 3000)]
+    context = messenger_dialog.header(ticket) if message is not None and payload.get('ticket_context') else ''
+    chunks = [context + text[index:index + 2400] for index in range(0, len(text), 2400)] if context else [text[index:index + 3000] for index in range(0, len(text), 3000)]
+    if context and not chunks:
+        chunks = [context.strip()]
     done = job.payload.get("text_chunks_sent", 0)
     for index in range(done, len(chunks)):
         if job.channel == "max":
@@ -129,7 +135,9 @@ def send_job(db, job):
                 raise ChannelFailure("Telegram не подтвердил отправку сообщения")
             if message and index == 0:
                 message.telegram_message_id = remote_id
-        _first_response(db, message)
+        messenger_dialog.remember(db, job, config, recipient, remote_id, message)
+        if text.strip():
+            _first_response(db, message)
         _checkpoint(db, job, text_chunks_sent=index + 1)
     sent = list(job.payload.get("sent_attachment_ids", []))
     for attachment in attachments:
@@ -138,7 +146,8 @@ def send_job(db, job):
         filename, content, mime = _file(attachment)
         if job.channel == "telegram":
             result = telegram_client.send_document(config.base_url, config.token, recipient, filename, content, mime)
-            if result.get("message_id") is None:
+            remote_id = result.get("message_id")
+            if remote_id is None:
                 raise ChannelFailure("Telegram не подтвердил отправку файла")
         else:
             tokens = dict(job.payload.get("max_file_tokens", {}))
@@ -149,8 +158,10 @@ def send_job(db, job):
                 _checkpoint(db, job, max_file_tokens=tokens)
             result = max_client.send_message(config.base_url, config.token, recipient, filename,
                                              attachments=[{"type": "file", "payload": {"token": token}}])
-            if not ((result.get("message") or {}).get("body") or {}).get("mid"):
+            remote_id = ((result.get("message") or {}).get("body") or {}).get("mid")
+            if not remote_id:
                 raise ChannelFailure("MAX не подтвердил отправку файла")
+        messenger_dialog.remember(db, job, config, recipient, remote_id, message)
         sent.append(attachment.id)
         _first_response(db, message)
         _checkpoint(db, job, sent_attachment_ids=sent)
@@ -166,9 +177,14 @@ def _send_rich_parts(db, job, message, config, recipient, attachments, reply, bu
         raise PermanentChannelFailure(str(exc))
     if not parts:
         raise PermanentChannelFailure("Сообщение пустое")
+    if job.payload.get('ticket_context'):
+        context = messenger_dialog.header(message.ticket)
+        parts = [(kind, context + value if kind == 'text' else value) for kind, value in parts]
+        if parts[0][0] != 'text':
+            parts.insert(0, ('context', context.strip()))
     for index in range(job.payload.get("content_parts_sent", 0), len(parts)):
         kind, value = parts[index]
-        if kind == "text":
+        if kind in ("text", "context"):
             if job.channel == "telegram":
                 result = telegram_client.send_message(config.base_url, config.token, recipient, value,
                     buttons=buttons if index == 0 else None, reply_to_message_id=reply if index == 0 else None)
@@ -197,5 +213,7 @@ def _send_rich_parts(db, job, message, config, recipient, attachments, reply, bu
                 message.telegram_message_id = remote_id
             else:
                 message.max_message_id = remote_id
-        _first_response(db, message)
+        messenger_dialog.remember(db, job, config, recipient, remote_id, message)
+        if kind != 'context':
+            _first_response(db, message)
         _checkpoint(db, job, content_parts_sent=index + 1)

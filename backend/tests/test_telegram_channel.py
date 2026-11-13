@@ -264,7 +264,7 @@ def test_try_send_outbound_with_reply_passes_parent_mid_and_stores_own_mid(db: S
     # Only the close button here, not the full main menu - see
     # test_second_message_attaches_and_acknowledges for why.
     payloads = {row[0]["payload"] for row in _fake_send[0]["buttons"]}
-    assert payloads == {f"close:{ticket.id}"}
+    assert payloads == {f"close:{ticket.id}", f"reply:{ticket.id}"}
 
 
 # --- client-initiated close -------------------------------------------------------

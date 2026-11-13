@@ -59,6 +59,8 @@
 
 Правила, напоминания и регулярные работы: [docs/automation.md](docs/automation.md). Предварительная проверка правил не отправляет сообщений.
 
+Доставка ответов и контекст заявок в ботах: [docs/customer-conversations.md](docs/customer-conversations.md). Источник «Телефон» сохраняется отдельно от выбранного канала ответа.
+
 ## Стек
 
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy 2, Alembic, PostgreSQL 16

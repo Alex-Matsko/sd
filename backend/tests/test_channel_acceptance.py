@@ -239,7 +239,7 @@ def test_bot_event_file_reply_and_temporary_upload_failure(db, contact, monkeypa
     assert not queue.process_outbound(db, *queue.claim(db, "outbound", reply.delivery.id))
     queue.retry(db, db.get(ChannelJob, reply.delivery.id))
     assert queue.process_outbound(db, *queue.claim(db, "outbound", reply.delivery.id))
-    assert len([item for item in posted if item.get("text") == "Готово"]) == 1
+    assert len([item for item in posted if item.get("text") == f"Заявка {ticket.display_number} — {ticket.subject}\n\nГотово"]) == 1
     assert len(posted) == 2  # accepted text and accepted file, never a duplicate reply
     if channel == Channel.MAX:
         assert uploaded == ["MAX upload request"]  # reuse the uploaded token after attachment.not.ready

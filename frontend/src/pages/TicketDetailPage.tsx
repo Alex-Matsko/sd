@@ -242,6 +242,8 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
                       </div>
                     )}
                     <MessageContent ticketId={id} body={m.body} blocks={m.content_blocks} attachments={m.attachments} />
+                    {m.direction === "outbound" && !m.delivery && ["phone", "whatsapp"].includes(m.channel) && <p className="rich-editor-error" role="status">Сообщение сохранено в системе и не отправлено через внешний канал. Выберите канал в форме ответа и отправьте его клиенту.</p>}
+                    {m.direction === "outbound" && !m.delivery && m.channel === "portal" && <p className="muted">Сохранено в личном кабинете · без отправки в мессенджер или на почту</p>}
                     {m.delivery && <DeliveryStatus ticketId={id} messageId={m.id} delivery={m.delivery} />}
                   </div>
                 );

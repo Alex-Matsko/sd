@@ -26,6 +26,7 @@ from app.schemas.time_entry import TimeEntryCreate, TimeEntryRead, TimeEntryUpda
 from app.services import attachments as attachments_service
 from app.services import audit as audit_service
 from app.services.message_content import MessageContentError
+from app.services.customer_delivery import CustomerDeliveryError
 from app.services import ticket_access
 from app.services import messages as messages_service
 from app.services import sla as sla_service
@@ -340,6 +341,12 @@ def list_related_tickets(
     return [_read_with_sla(db, t, cache) for t in related]
 
 
+@router.get("/{ticket_id}/reply-options")
+def customer_reply_options(ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)):
+    from app.services.customer_delivery import destinations
+    return destinations(db, _get_ticket_or_404(db, ticket_id, actor))
+
+
 @router.get("/{ticket_id}/messages", response_model=list[MessageRead])
 def list_messages(ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)) -> list[Message]:
     _get_ticket_or_404(db, ticket_id, actor)
@@ -355,7 +362,11 @@ def create_message(
 ) -> Message:
     ticket = _get_ticket_or_404(db, ticket_id, actor)
     try:
+        from app.services.customer_delivery import validate_reply
+        validate_reply(db, ticket, payload)
         return messages_service.add_message(db, ticket, payload, author_user=actor)
+    except CustomerDeliveryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except messages_service.RequestConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except MessageContentError as exc:
@@ -370,12 +381,16 @@ async def send_message(
     ticket = _get_ticket_or_404(db, ticket_id, actor)
     try:
         message_payload = MessageCreate.model_validate_json(payload)
+        from app.services.customer_delivery import validate_reply
+        validate_reply(db, ticket, message_payload)
         uploads = await attachments_service.read_uploads(files)
         if not message_payload.body.strip() and not uploads:
             raise HTTPException(status_code=422, detail="Введите сообщение или приложите файл")
         return messages_service.add_message(db, ticket, message_payload, author_user=actor, attachments=uploads)
     except ValidationError:
         raise HTTPException(status_code=422, detail="Некорректные поля сообщения")
+    except CustomerDeliveryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except messages_service.RequestConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except MessageContentError as exc:

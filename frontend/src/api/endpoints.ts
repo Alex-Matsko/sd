@@ -620,3 +620,12 @@ export function listAutomationRuns(id: number) {
 export function retryAutomationRun(ruleId: number, runId: number) {
   return apiRequest<void>(`/automation-rules/${ruleId}/runs/${runId}/retry`, { method: "POST" });
 }
+
+export interface CustomerReplyOptions {
+  source_channel: string;
+  default_channel: string | null;
+  options: { channel: string; available: boolean; destination: string | null; reason: string | null }[];
+}
+export function getCustomerReplyOptions(ticketId: number) {
+  return apiRequest<CustomerReplyOptions>(`/tickets/${ticketId}/reply-options`);
+}
