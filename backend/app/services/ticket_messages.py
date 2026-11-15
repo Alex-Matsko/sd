@@ -7,7 +7,7 @@ from app.core.enums import TicketStatus
 STATUS_LABELS_RU = {
     TicketStatus.NEW: "Новая", TicketStatus.ASSIGNED: "Назначена",
     TicketStatus.IN_PROGRESS: "В работе", TicketStatus.WAITING_CUSTOMER: "Ждём клиента",
-    TicketStatus.WAITING_THIRD_PARTY: "Ждём третью сторону", TicketStatus.RESOLVED: "Решена",
+    TicketStatus.WAITING_THIRD_PARTY: "Ждём третью сторону", TicketStatus.RESOLVED: "На приёмке",
     TicketStatus.CLOSED: "Закрыта", TicketStatus.CANCELLED: "Отменена",
 }
 
@@ -21,7 +21,7 @@ def ticket_url(ticket, *, client=False):
 
 
 def status_headline(status):
-    return {TicketStatus.RESOLVED: 'Работы завершены', TicketStatus.CLOSED: 'Заявка закрыта',
+    return {TicketStatus.RESOLVED: 'Результат готов к приёмке', TicketStatus.CLOSED: 'Заявка закрыта',
             TicketStatus.CANCELLED: 'Заявка отменена'}.get(status, 'Статус заявки изменён')
 
 

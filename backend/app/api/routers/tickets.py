@@ -297,6 +297,10 @@ def update_ticket(
 ) -> TicketRead:
     ticket = _get_ticket_or_404(db, ticket_id, actor)
     try:
+        if payload.status == TicketStatus.RESOLVED:
+            raise ValueError('Передайте описание результата и файлы через «Передать на приёмку»')
+        if payload.status == TicketStatus.CLOSED and not ticket.accepted_at:
+            raise ValueError('Заявка закрывается после приёмки результата клиентом')
         return _read_with_sla(db, tickets_service.update_ticket(db, ticket, payload, actor))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
@@ -633,3 +637,22 @@ def update_time_entry(
     if entry is None or entry.ticket_id != ticket_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Запись времени не найдена")
     return time_entries_service.update_time_entry(db, entry, payload, actor)
+
+
+@router.post("/{ticket_id}/resolution", response_model=TicketRead)
+async def publish_result(ticket_id: int, payload: str = Form(...), files: list[UploadFile] = File(default=[]),
+                         db: Session = Depends(get_db), actor: User = Depends(get_current_user)):
+    from app.services import customer_acceptance
+    ticket = _get_ticket_or_404(db, ticket_id, actor)
+    try:
+        parsed = MessageCreate.model_validate_json(payload)
+        from app.services.customer_delivery import validate_reply
+        validate_reply(db, ticket, parsed)
+        uploads = await attachments_service.read_uploads(files)
+        return _read_with_sla(db, customer_acceptance.submit(db, ticket, parsed, actor, uploads))
+    except attachments_service.AttachmentTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except messages_service.RequestConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

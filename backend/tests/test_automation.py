@@ -69,7 +69,7 @@ def _drain(db: Session) -> None:
     automation.run_automation_rules(db)
 
 
-def test_auto_close_fires_after_threshold(db: Session, contact: Contact):
+def test_auto_close_waits_for_explicit_customer_acceptance(db: Session, contact: Contact):
     rule = _default_rule(db)
     _drain(db)
 
@@ -79,9 +79,9 @@ def test_auto_close_fires_after_threshold(db: Session, contact: Contact):
     touched = automation.run_automation_rules(db)
     db.refresh(ticket)
 
-    assert touched == 1
-    assert TicketStatus(ticket.status) == TicketStatus.CLOSED
-    assert ticket.closed_at is not None
+    assert touched == 0
+    assert TicketStatus(ticket.status) == TicketStatus.RESOLVED
+    assert ticket.closed_at is None
 
 
 def test_auto_close_does_not_fire_before_threshold(db: Session, contact: Contact):
@@ -118,6 +118,7 @@ def test_inactive_rule_does_not_fire(db: Session, contact: Contact):
 
 def test_custom_threshold_is_respected(db: Session, contact: Contact):
     rule = _default_rule(db)
+    rule.to_status = TicketStatus.IN_PROGRESS
     rule.threshold_days = 1
     db.add(rule)
     db.commit()
@@ -131,7 +132,7 @@ def test_custom_threshold_is_respected(db: Session, contact: Contact):
     db.refresh(ticket)
 
     assert touched == 1
-    assert TicketStatus(ticket.status) == TicketStatus.CLOSED
+    assert TicketStatus(ticket.status) == TicketStatus.IN_PROGRESS
 
 
 def test_client_reply_removes_ticket_from_auto_close_candidates(db: Session, contact: Contact):

@@ -49,7 +49,7 @@ class Message(Base):
     telegram_message_id: Mapped[int | None] = mapped_column(Integer, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    ticket: Mapped["Ticket"] = relationship(back_populates="messages")
+    ticket: Mapped["Ticket"] = relationship(back_populates="messages", foreign_keys=[ticket_id])
     reply_to: Mapped["Message"] = relationship(remote_side="Message.id")
     channel_job: Mapped["ChannelJob | None"] = relationship(lazy="selectin", uselist=False)
 

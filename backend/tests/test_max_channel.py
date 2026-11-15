@@ -277,8 +277,7 @@ def test_my_tickets_command_cancels_pending_revive_flow(db: Session, max_enabled
     payload = TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.MAX, subject="Старая", manual_priority=Priority.P3, manual_priority_reason="test")
     old_ticket = tickets_service.create_ticket(db, payload, actor=None)
     tickets_service.transition_status(db, old_ticket, TicketStatus.IN_PROGRESS, actor=None)
-    tickets_service.transition_status(db, old_ticket, TicketStatus.RESOLVED, actor=None)
-    tickets_service.transition_status(db, old_ticket, TicketStatus.CLOSED, actor=None)
+    tickets_service.transition_status(db, old_ticket, TicketStatus.CANCELLED, actor=None)
 
     max_channel.handle_update(db, max_channel_callback_for(old_ticket.id, user_id="u-cancel2", chat_id="c-cancel2"))
     state = db.query(ChannelConversationState).filter(ChannelConversationState.external_user_id == "u-cancel2").first()
@@ -487,14 +486,13 @@ def test_new_ticket_button_callback_then_description(db: Session, max_enabled, _
 # --- "поднять старую" (revive a closed/cancelled ticket) -------------------------------------------------------
 
 
-def test_selecting_closed_ticket_prompts_revive_then_creates_linked_ticket(db: Session, max_enabled, contact: Contact, _fake_send):
+def test_selecting_cancelled_ticket_prompts_revive_then_creates_linked_ticket(db: Session, max_enabled, contact: Contact, _fake_send):
     contact.max_id = "u-revive"
     db.commit()
     payload = TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.MAX, subject="Старая проблема", manual_priority=Priority.P3, manual_priority_reason="test")
     old_ticket = tickets_service.create_ticket(db, payload, actor=None)
     tickets_service.transition_status(db, old_ticket, TicketStatus.IN_PROGRESS, actor=None)
-    tickets_service.transition_status(db, old_ticket, TicketStatus.RESOLVED, actor=None)
-    tickets_service.transition_status(db, old_ticket, TicketStatus.CLOSED, actor=None)
+    tickets_service.transition_status(db, old_ticket, TicketStatus.CANCELLED, actor=None)
 
     max_channel.handle_update(db, max_channel_callback_for(old_ticket.id, user_id="u-revive", chat_id="c-revive"))
     state = db.query(ChannelConversationState).filter(ChannelConversationState.external_user_id == "u-revive").first()

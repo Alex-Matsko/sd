@@ -5,7 +5,7 @@ import re
 
 from sqlalchemy.orm import Session
 
-from app.core.enums import AutomationTriggerType, Channel, MessageDirection, UserRole
+from app.core.enums import AutomationTriggerType, Channel, MessageDirection, TicketStatus, UserRole
 from app.models.audit import AuditLog
 from app.models.automation_rule import AutomationRule, AutomationRun
 from app.models.channel_job import ChannelJob
@@ -90,6 +90,8 @@ def _preflight(db, rule, ticket):
     except ValueError:
         return 'Проверьте параметры правила'
     for action in _actions(rule):
+        if action['type'] == 'change_status' and rule.to_status == TicketStatus.CLOSED and not ticket.accepted_at:
+            return 'Заявка ждёт явной приёмки клиентом; автоматическое закрытие отключено'
         if action['type'] == 'change_status' and rule.to_status not in tickets_service.ALLOWED_TRANSITIONS.get(ticket.status, set()):
             return 'Переход между статусами недопустим'
         if action['type'] == 'notify_staff' and not _recipients(db, ticket, action):

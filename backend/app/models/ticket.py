@@ -102,6 +102,9 @@ class Ticket(Base, TimestampMixin):
     sla_resolution_met: Mapped[bool | None] = mapped_column()
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    resolution_message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL", use_alter=True, name="fk_ticket_resolution_message"))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # CSAT (section 2.1: "оценка после закрытия (1-5)"); full reporting is
     # Stage 9, but the messenger bots request/capture the rating now, so the
     # column exists ahead of that stage the same way the SLA ones did.
@@ -119,7 +122,7 @@ class Ticket(Base, TimestampMixin):
     team: Mapped["Team"] = relationship()
     parent_ticket: Mapped["Ticket"] = relationship(remote_side="Ticket.id")
 
-    messages: Mapped[list["Message"]] = relationship(back_populates="ticket", order_by="(Message.created_at, Message.id)")
+    messages: Mapped[list["Message"]] = relationship(back_populates="ticket", foreign_keys="Message.ticket_id", order_by="(Message.created_at, Message.id)")
     time_entries: Mapped[list["TimeEntry"]] = relationship(back_populates="ticket")
 
     @property

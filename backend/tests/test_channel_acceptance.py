@@ -224,7 +224,8 @@ def test_bot_event_file_reply_and_temporary_upload_failure(db, contact, monkeypa
     module = telegram_channel if channel == Channel.TELEGRAM else max_channel
     config = module.load_telegram_config(db) if channel == Channel.TELEGRAM else module.load_max_config(db)
     module.poll_updates(db, config)
-    inbox = db.query(ChannelJob).filter_by(kind="inbound", channel=channel.value).one()
+    from app.services.messenger_dialog import account
+    inbox = db.query(ChannelJob).filter_by(kind="inbound", channel=channel.value).filter(ChannelJob.event_key.like(f"{channel.value}:{account(config)}:%")).one()
     assert inbox.state == "pending" and not posted
     assert queue.process_inbound(db, *queue.claim(db, "inbound", inbox.id))
     ticket = db.query(Message).filter_by(author_contact_id=contact.id, direction=MessageDirection.INBOUND).one().ticket
@@ -245,4 +246,4 @@ def test_bot_event_file_reply_and_temporary_upload_failure(db, contact, monkeypa
         assert uploaded == ["MAX upload request"]  # reuse the uploaded token after attachment.not.ready
     # Re-polling the same provider event must not create a second local message.
     module.poll_updates(db, config)
-    assert db.query(ChannelJob).filter_by(kind="inbound", channel=channel.value).count() == 1
+    assert db.query(ChannelJob).filter_by(kind="inbound", channel=channel.value).filter(ChannelJob.event_key.like(f"{channel.value}:{account(config)}:%")).count() == 1

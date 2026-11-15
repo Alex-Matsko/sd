@@ -338,6 +338,12 @@ export function createMessage(
   const action = payload.direction === "internal_note" ? "notes" : payload.direction === "outbound" ? "replies" : "messages";
   return apiForm<Message>(`/tickets/${ticketId}/${action}/send`, form);
 }
+export function publishTicketResult(ticketId: number, payload: Parameters<typeof createMessage>[1], files: File[] = []) {
+  const form = new FormData();
+  form.append("payload", JSON.stringify(payload));
+  files.forEach(file => form.append("files", file));
+  return apiForm<Ticket>(`/tickets/${ticketId}/resolution`, form);
+}
 export function uploadAttachment(ticketId: number, messageId: number, file: File) {
   return apiUpload<Attachment>(`/tickets/${ticketId}/messages/${messageId}/attachments`, file);
 }

@@ -133,6 +133,9 @@ def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, act
     if new_status not in allowed:
         raise ValueError(f"Переход {old_status.value} -> {new_status.value} не разрешён")
 
+    if new_status == TicketStatus.CLOSED and ticket.resolution_message_id and not ticket.accepted_at:
+        raise ValueError('Сначала клиент должен принять опубликованный результат')
+
     now = datetime.now(timezone.utc)
 
     was_paused = old_status in SLA_PAUSING_STATUSES
@@ -150,6 +153,7 @@ def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, act
     # переоткрытие не оставляло следа вообще.
     if old_status == TicketStatus.RESOLVED and new_status == TicketStatus.IN_PROGRESS:
         ticket.reopen_count = (ticket.reopen_count or 0) + 1
+        ticket.accepted_at = None
 
     # First resolution is fixed permanently - reopening never overwrites it
     # (docs/decisions.md: "SLA при переоткрытии заявки клиентом").

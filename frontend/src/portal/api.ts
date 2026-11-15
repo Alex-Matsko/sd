@@ -78,6 +78,8 @@ export interface PortalTicket {
   created_at: string;
   resolved_at: string | null;
   closed_at: string | null;
+  resolution_message_id: number | null;
+  accepted_at: string | null;
   csat_rating: number | null;
   assigned_engineer_name: string | null;
 }
@@ -243,3 +245,7 @@ export async function portalFileBlob(path: string): Promise<Blob> {
 }
 
 export const portalAttachmentPreview = (path: string, sheet: number) => request<AttachmentPreviewData>(`${path}/preview?sheet=${sheet}`);
+
+export function decidePortalResult(id: number, resolution_message_id: number, accept: boolean) {
+  return request<PortalTicket>(`/tickets/${id}/acceptance`, { method: "POST", body: { resolution_message_id, accept } });
+}

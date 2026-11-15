@@ -13,7 +13,7 @@ const HINTS: Partial<Record<TicketStatus, string>> = {
   waiting_customer: "таймер решения на паузе",
   waiting_third_party: "таймер решения на паузе",
   cancelled: "не работа: дубль, ошиблись адресом",
-  resolved: "закроется сама через несколько дней",
+  resolved: "передать результат",
 };
 
 /** Путь заявки в виде дорожки вместо списка кнопок «→ Статус».
@@ -32,7 +32,7 @@ export function StatusPipeline({
   disabled?: boolean;
   onChange: (next: TicketStatus) => void;
 }) {
-  const allowed = STATUS_TRANSITIONS[status] ?? [];
+  const allowed: TicketStatus[] = (STATUS_TRANSITIONS[status] ?? []).filter(step => step !== "closed");
   const currentIndex = MAIN_PATH.indexOf(status);
   // Заявка в ожидании физически находится между «В работе» и «Решена»:
   // подсвечиваем этот участок, чтобы дорожка не выглядела пустой.

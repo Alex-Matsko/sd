@@ -160,6 +160,8 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
         <StatusTag status={ticket.status} />
       </div>
 
+      {ticket.status === "resolved" && <div className="ticket-acceptance-note"><strong>Ожидаем приёмку клиента</strong><span>{ticket.resolution_message_id ? "Результат отправлен клиенту. Он сможет принять его или вернуть на доработку прямо в боте." : "Результат ещё не оформлен. Верните заявку в работу и передайте описание результата клиенту."}</span></div>}
+      {ticket.accepted_at && <div className="ticket-acceptance-note"><strong>Результат принят клиентом</strong><span>{formatDateTime(ticket.accepted_at)}</span></div>}
       <TicketTimer key={`work-${id}`} ticketId={id} status={ticket.status} />
 
       <div className="ticket-layout">
@@ -254,7 +256,7 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
             <div className="message-composers">
               <MessageComposer key={`note-${id}`} ticketId={id} direction="internal_note" replyTo={noteReplyTo?.ticket_id === id ? noteReplyTo : null}
                 clearReply={() => setNoteReplyTo(null)} templates={[]} recipient="" channel="" />
-              <MessageComposer key={`reply-${id}`} ticketId={id} direction="outbound" replyTo={replyTo?.ticket_id === id ? replyTo : null}
+              <MessageComposer key={`reply-${id}`} ticketId={id} direction="outbound" allowResolution={["in_progress", "closed"].includes(ticket.status)} replyTo={replyTo?.ticket_id === id ? replyTo : null}
                 clearReply={() => setReplyTo(null)} templates={templatesQuery.data ?? []}
                 recipient={contactQuery.data?.full_name ?? "Клиент заявки"} channel={CHANNEL_LABELS[ticket.channel]} />
             </div>
@@ -312,7 +314,7 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
               {(historyQuery.data ?? []).map((h) => (
                 <div className="history-row" key={h.id}>
                   <span className="muted">{formatDateTime(h.created_at)}</span>
-                  <span>{h.action === "automation_applied" ? `Автоматизация: ${typeof h.changes?.rule_name === "string" ? h.changes.rule_name : "правило"}` : h.action}</span>
+                  <span>{h.action === "automation_applied" ? `Автоматизация: ${typeof h.changes?.rule_name === "string" ? h.changes.rule_name : "правило"}` : ({ result_published: "Результат передан на приёмку", customer_accepted: "Клиент принял результат", customer_requested_rework: "Клиент запросил доработку" } as Record<string, string>)[h.action] ?? h.action}</span>
                 </div>
               ))}
               {historyQuery.isSuccess && (historyQuery.data ?? []).length === 0 && <p className="muted">История пуста</p>}
@@ -433,7 +435,7 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
             <StatusPipeline
               status={ticket.status}
               disabled={updateMutation.isPending}
-              onChange={(next) => updateMutation.mutate({ status: next })}
+              onChange={(next) => next === "resolved" ? document.getElementById("compose-outbound")?.scrollIntoView({ behavior: "smooth", block: "center" }) : updateMutation.mutate({ status: next })}
             />
           </div>
 

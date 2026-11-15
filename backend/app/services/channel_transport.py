@@ -34,7 +34,11 @@ def _file(attachment):
 
 
 def send_job(db, job):
-    message = db.get(Message, job.message_id) if job.message_id else None
+    payload = getattr(job, 'payload', {})
+    message = db.get(Message, job.message_id or payload.get('result_message_id')) if job.message_id or payload.get('result_message_id') else None
+    if payload.get('result_message_id'):
+        if message is None or message.ticket_id != job.ticket_id or message.ticket.resolution_message_id != message.id:
+            return False
     if job.message_id and message is None:
         raise PermanentChannelFailure("Сообщение удалено")
     if message is not None and message.direction != MessageDirection.OUTBOUND:
@@ -96,6 +100,14 @@ def send_job(db, job):
             parent = db.query(Message).filter(Message.ticket_id == ticket.id, Message.id != (message.id if message else -1),
                                              Message.email_message_id.isnot(None)).order_by(Message.id.desc()).first()
         rich_options = {"content_blocks": message.content_blocks, "attachment_ids": [a.id for a in attachments]} if message and message.content_blocks is not None else {}
+        if message and ticket.resolution_message_id == message.id:
+            from app.services.ticket_messages import ticket_url
+            instruction = 'Результат готов к приёмке. Проверьте описание и вложения.'
+            acceptance_link = 'Принять результат или вернуть на доработку: ' + ticket_url(ticket, client=True)
+            text = instruction + '\n\n' + text + '\n\n' + acceptance_link
+            if rich_options:
+                rich_options['content_blocks'] = [{'type': 'text', 'text': instruction}, *message.content_blocks,
+                                                  {'type': 'text', 'text': acceptance_link}]
         email_channel.send_outbound_email(config, recipient, ticket, text,
                                           parent.email_message_id if parent else None,
                                           attachments=[_file(item) for item in attachments], message_id=stable_id, **rich_options)
@@ -112,7 +124,7 @@ def send_job(db, job):
     if message is not None and message.content_blocks is not None:
         _send_rich_parts(db, job, message, config, recipient, attachments, reply, buttons)
         return
-    context = messenger_dialog.header(ticket) if message is not None and payload.get('ticket_context') else ''
+    context = _message_header(message) if message is not None and payload.get('ticket_context') else ''
     chunks = [context + text[index:index + 2400] for index in range(0, len(text), 2400)] if context else [text[index:index + 3000] for index in range(0, len(text), 3000)]
     if context and not chunks:
         chunks = [context.strip()]
@@ -178,7 +190,7 @@ def _send_rich_parts(db, job, message, config, recipient, attachments, reply, bu
     if not parts:
         raise PermanentChannelFailure("Сообщение пустое")
     if job.payload.get('ticket_context'):
-        context = messenger_dialog.header(message.ticket)
+        context = _message_header(message)
         parts = [(kind, context + value if kind == 'text' else value) for kind, value in parts]
         if parts[0][0] != 'text':
             parts.insert(0, ('context', context.strip()))
@@ -217,3 +229,17 @@ def _send_rich_parts(db, job, message, config, recipient, attachments, reply, bu
         if kind != 'context':
             _first_response(db, message)
         _checkpoint(db, job, content_parts_sent=index + 1)
+
+
+def _message_header(message):
+    text = messenger_dialog.header(message.ticket)
+    if message.ticket.resolution_message_id == message.id:
+        text += 'Результат работы. Проверьте описание и вложения ниже. '
+        if message.ticket.accepted_at:
+            text += 'Результат уже принят вами. Уточнения можно написать по кнопке ответа.'
+        elif message.ticket.status.value == 'resolved':
+            text += 'После проверки нажмите «Принять результат» или «Нужна доработка». Уточнения можно написать по кнопке ответа.'
+        else:
+            text += 'Заявка возвращена в работу; ожидайте обновлённый результат.'
+        text += '\n\n'
+    return text

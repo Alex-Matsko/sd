@@ -31,6 +31,7 @@ from app.models.user import User
 from app.schemas.message import MessageCreate
 from app.schemas.portal import (
     PortalAttachmentRead,
+    PortalAcceptance,
     PortalPasswordChange,
     PortalTicketUpdate,
     PortalUpdates,
@@ -199,6 +200,8 @@ def _to_read(ticket: Ticket, engineer_name: str | None = None) -> PortalTicketRe
         resolved_at=ticket.resolved_at,
         closed_at=ticket.closed_at,
         csat_rating=ticket.csat_rating,
+        resolution_message_id=ticket.resolution_message_id,
+        accepted_at=ticket.accepted_at,
         assigned_engineer_name=engineer_name,
         planned_due_at=ticket.planned_due_at,
         estimated_minutes=ticket.estimated_minutes,
@@ -318,26 +321,6 @@ def reply_to_my_ticket(
     ticket = portal.get_visible_ticket(db, contact, ticket_id)
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Заявка не найдена")
-
-    # Ответ в закрытую заявку раньше молча ложился в неё: она не
-    # переоткрывалась, новая не заводилась, никого не уведомляли — сообщение
-    # уходило в никуда. Email в этом случае заводит новую заявку, боты
-    # предлагают «поднять старую»; портал вёл себя иначе, чем оба канала.
-    # Теперь как в ботах: новая заявка, связанная с закрытой.
-    if TicketStatus(ticket.status) in (TicketStatus.CLOSED, TicketStatus.CANCELLED):
-        ticket = tickets_service.create_ticket(
-            db,
-            TicketCreate(
-                contact_id=contact.id,
-                type=TicketType(ticket.type),
-                channel=Channel.PORTAL,
-                subject=payload.body[:200] or f"Повторное обращение по {ticket.display_number}",
-                manual_priority=Priority.P3,
-                manual_priority_reason=f"Повторное обращение по закрытой заявке {ticket.display_number}",
-                parent_ticket_id=ticket.id,
-            ),
-            actor=None,
-        )
 
     message = messages_service.add_message(
         db,
@@ -672,3 +655,17 @@ def my_package_usage(
         package_remaining_hours=round(usage["package_remaining_minutes"] / 60, 2),
         overage_hours=round(usage["overage_minutes"] / 60, 2),
     )
+
+
+@router.post("/tickets/{ticket_id}/acceptance", response_model=PortalTicketRead)
+def decide_result(ticket_id: int, payload: PortalAcceptance, contact: Contact = Depends(get_current_contact),
+                  db: Session = Depends(get_db)):
+    from app.services import customer_acceptance
+    ticket = portal.get_visible_ticket(db, contact, ticket_id)
+    if ticket is None or ticket.contact_id != contact.id:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+    try:
+        customer_acceptance.decide(db, ticket, contact, payload.resolution_message_id, payload.accept)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _to_read(ticket, _engineer_names(db, [ticket]).get(ticket.assigned_engineer_id))

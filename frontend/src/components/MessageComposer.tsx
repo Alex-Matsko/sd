@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createMessage, getCustomerReplyOptions } from "../api/endpoints";
+import { createMessage, getCustomerReplyOptions, publishTicketResult } from "../api/endpoints";
 import type { Message, ResponseTemplate } from "../api/types";
 import { useDraftRequestId } from "../lib/useDraftRequestId";
 import { MessageEditor as RichMessageEditor } from "./MessageEditor";
 import { emptyMessageDraft, messageDraftPayload, draftIdentity } from "../lib/messageDraft";
 
-export function MessageComposer({ ticketId, direction, replyTo, clearReply, templates, recipient, channel }: {
+export function MessageComposer({ ticketId, direction, replyTo, clearReply, templates, recipient, channel, allowResolution = false }: {
   ticketId: number; direction: "outbound" | "internal_note"; replyTo: Message | null; clearReply: () => void;
-  templates: ResponseTemplate[]; recipient: string; channel: string;
+  templates: ResponseTemplate[]; recipient: string; channel: string; allowResolution?: boolean;
 }) {
   const qc = useQueryClient();
   const [draft, setDraft] = useState(emptyMessageDraft);
@@ -21,9 +21,11 @@ export function MessageComposer({ ticketId, direction, replyTo, clearReply, temp
   const channelNames: Record<string, string> = { max: "MAX", telegram: "Telegram", email: "Email", portal: "Личный кабинет" };
   const label = internal ? "Внутренний комментарий" : "Ответ клиенту";
   const requestId = useDraftRequestId(JSON.stringify([ticketId, direction, destination, replyTo?.id, draftIdentity(draft)]));
-  const mutation = useMutation({ mutationFn: () => {
+  const resolutionRequestId = useDraftRequestId(JSON.stringify(["resolution", ticketId, destination, draftIdentity(draft)]));
+  const mutation = useMutation({ mutationFn: async (asResolution: boolean) => {
     const { files, ...payload } = messageDraftPayload(draft);
-    return createMessage(ticketId, { ...payload, direction, ...(internal ? {} : { channel: destination }), reply_to_message_id: replyTo?.id ?? null, request_id: requestId }, files);
+    const send = asResolution ? publishTicketResult : createMessage;
+    await send(ticketId, { ...payload, direction, ...(internal ? {} : { channel: destination }), reply_to_message_id: replyTo?.id ?? null, request_id: asResolution ? resolutionRequestId : requestId }, files);
   }, onSuccess: () => {
     setDraft(emptyMessageDraft()); clearReply();
     qc.invalidateQueries({ queryKey: ["ticket", ticketId] });
@@ -46,13 +48,16 @@ export function MessageComposer({ ticketId, direction, replyTo, clearReply, temp
       <button type="button" aria-label={`Убрать цитату: ${label}`} onClick={clearReply}>×</button></div>}
     <RichMessageEditor value={draft} onChange={setDraft} disabled={mutation.isPending} label={label} />
     {mutation.isError && <p className="rich-editor-error" role="alert">{mutation.error.message}</p>}
+    {!internal && allowResolution && <p className="composer-result-hint">Для сдачи работы опишите, что сделано и где проверить результат. Приложите файлы или скриншоты. Клиент получит результат и кнопки приёмки.</p>}
     <footer>
     {!internal && templates.length > 0 && <select aria-label="Шаблон ответа клиенту" value="" disabled={mutation.isPending} onChange={(e) => {
       const text = templates.find((t) => t.id === Number(e.target.value))?.body;
       if (text) setDraft((d) => ({ ...d, blocks: [...d.blocks, { id: `template-${Date.now()}`, type: "text", text }] }));
     }}><option value="">Вставить шаблон ответа…</option>{templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}
       <span className="spacer" />
-      <button type="button" className={`btn ${internal ? "btn-ghost" : "btn-primary"}`} disabled={!canSend || mutation.isPending || draft.pending || (!payload.body.trim() && payload.files.length === 0)} onClick={() => mutation.mutate()}>
-        {mutation.isPending ? "Сохранение…" : internal ? "Добавить комментарий" : destination === "portal" ? "Сохранить в кабинете" : `Отправить в ${channelNames[destination] ?? "выбранный канал"}`}</button></footer>
+      <button type="button" className={`btn ${internal || allowResolution ? "btn-ghost" : "btn-primary"}`} disabled={!canSend || mutation.isPending || draft.pending || (!payload.body.trim() && payload.files.length === 0)} onClick={() => mutation.mutate(false)}>
+        {mutation.isPending ? "Сохранение…" : internal ? "Добавить комментарий" : destination === "portal" ? "Сохранить в кабинете" : `Отправить в ${channelNames[destination] ?? "выбранный канал"}`}</button>
+      {!internal && allowResolution && <button type="button" className="btn btn-primary" disabled={!canSend || mutation.isPending || draft.pending || !payload.body.trim()} onClick={() => mutation.mutate(true)}>Передать на приёмку</button>}
+    </footer>
   </section>;
 }

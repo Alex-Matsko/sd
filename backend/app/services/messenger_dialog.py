@@ -13,7 +13,7 @@ from app.models.message import Message
 from app.models.messenger_reply import MessengerReply
 from app.models.ticket import Ticket
 
-REPLYABLE = OPEN_TICKET_STATUSES | {TicketStatus.RESOLVED}
+REPLYABLE = OPEN_TICKET_STATUSES | {TicketStatus.RESOLVED, TicketStatus.CLOSED}
 
 
 def account(config):
@@ -29,7 +29,10 @@ def header(ticket):
 
 
 def buttons(ticket, existing=None):
-    result = list(existing or [])
+    from app.services.customer_acceptance import result_buttons
+    result = [[b for b in row if not (ticket.resolution_message_id and b.get('payload', '').startswith('close:'))] for row in (existing or [])]
+    result = [row for row in result if row]
+    result = result_buttons(ticket) + result
     if not any(b.get('payload') == f'reply:{ticket.id}' for row in result for b in row):
         result.insert(0, [{'type': 'callback', 'text': 'Ответить по этой заявке', 'payload': f'reply:{ticket.id}'}])
     return result
@@ -70,7 +73,7 @@ def reply_target(db, channel, config, contact, parsed):
             return ticket, ref.message_id
     # Existing replies sent before this release retain their first provider id.
     column = Message.max_message_id if channel == 'max' else Message.telegram_message_id
-    parent = db.query(Message).join(Ticket).filter(Ticket.contact_id == contact.id, Message.channel == Channel(channel),
+    parent = db.query(Message).join(Ticket, Message.ticket_id == Ticket.id).filter(Ticket.contact_id == contact.id, Message.channel == Channel(channel),
         column == parsed.reply_to_mid).order_by(Message.id.desc()).first()
     return (parent.ticket, parent.id) if parent else (None, None)
 
@@ -266,6 +269,14 @@ def route_text(db, channel, config, state, contact, parsed, module):
 
 def handle_callback(db, channel, config, state, contact, parsed, module):
     payload = parsed.callback_payload or ''
+    from app.services import customer_acceptance
+    if customer_acceptance.handle_callback(db, channel, config, state, contact, parsed, module):
+        return True
+    if payload.startswith('close:') and payload.split(':', 1)[1].isdigit():
+        closing = db.get(Ticket, int(payload.split(':', 1)[1]))
+        if closing and closing.contact_id == contact.id and closing.resolution_message_id:
+            module._send(config, state.chat_id, 'Для приёмки проверьте результат и нажмите «Принять результат».', buttons=buttons(closing))
+            return True
     if not payload.startswith(('reply:', 'continue:')):
         return False
     try:

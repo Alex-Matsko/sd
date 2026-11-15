@@ -203,11 +203,8 @@ def test_client_reply_reopens_a_resolved_ticket(db: Session, client_contact: Con
     assert TicketStatus(ticket.status) == TicketStatus.IN_PROGRESS
 
 
-def test_reply_to_a_closed_ticket_opens_a_linked_one(db: Session, contact: Contact):
-    """Раньше сообщение молча ложилось в закрытую заявку: она не
-    переоткрывалась, новая не заводилась, никого не уведомляли. Email в этом
-    случае заводит новую заявку, боты предлагают «поднять старую» — портал
-    вёл себя иначе, чем оба канала."""
+def test_reply_to_a_closed_ticket_stays_in_same_thread(db: Session, contact: Contact):
+    """Questions on a closed ticket remain visible to staff in the same thread."""
     from app.api.routers.portal import reply_to_my_ticket
     from app.core.enums import TicketStatus
     from app.schemas.portal import PortalMessageCreate
@@ -228,9 +225,9 @@ def test_reply_to_a_closed_ticket_opens_a_linked_one(db: Session, contact: Conta
     db.refresh(closed)
     assert TicketStatus(closed.status) == TicketStatus.CLOSED, "закрытая заявка не должна оживать"
 
-    fresh = db.query(Ticket).filter(Ticket.parent_ticket_id == closed.id).one()
-    assert fresh.subject == "Проблема вернулась"
-    assert [m.body for m in fresh.messages] == ["Проблема вернулась"]
+    assert db.query(Ticket).filter(Ticket.parent_ticket_id == closed.id).count() == 0
+    db.refresh(closed)
+    assert [m.body for m in closed.messages][-1] == "Проблема вернулась"
 
 
 def test_reply_to_an_open_ticket_still_lands_in_it(db: Session, contact: Contact):

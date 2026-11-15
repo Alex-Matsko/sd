@@ -567,7 +567,7 @@ def _handle_callback(db: Session, config: TelegramConfig, state: ChannelConversa
             config,
             parsed.chat_id,
             f"Переключено на {ticket.display_number} — {ticket.subject}. Пишите сюда." + messenger_common.planning_summary(ticket),
-            buttons=_menu_buttons_for(ticket),
+            buttons=messenger_dialog.buttons(ticket, _menu_buttons_for(ticket)),
         )
         return
 

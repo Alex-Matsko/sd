@@ -114,6 +114,8 @@ class TicketRead(BaseModel):
     # Client satisfaction captured by the messenger bots on closure - stored
     # since Stage 5 but previously not exposed here, so the rating a client
     # gave was invisible in the ticket card (only aggregated in Отчёты).
+    resolution_message_id: int | None = None
+    accepted_at: datetime | None = None
     csat_rating: int | None
     csat_rated_at: datetime | None
     created_at: datetime

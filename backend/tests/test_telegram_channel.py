@@ -183,14 +183,13 @@ def test_my_tickets_lists_subject_and_groups_open_first(db: Session, telegram_en
 # --- "поднять старую" -------------------------------------------------------
 
 
-def test_selecting_closed_ticket_prompts_revive_then_creates_linked_ticket(db: Session, telegram_enabled, contact: Contact, _fake_send):
+def test_selecting_cancelled_ticket_prompts_revive_then_creates_linked_ticket(db: Session, telegram_enabled, contact: Contact, _fake_send):
     contact.telegram_id = "14"
     db.commit()
     payload = TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.TELEGRAM, subject="Старая проблема", manual_priority=Priority.P3, manual_priority_reason="test")
     old_ticket = tickets_service.create_ticket(db, payload, actor=None)
     tickets_service.transition_status(db, old_ticket, TicketStatus.IN_PROGRESS, actor=None)
-    tickets_service.transition_status(db, old_ticket, TicketStatus.RESOLVED, actor=None)
-    tickets_service.transition_status(db, old_ticket, TicketStatus.CLOSED, actor=None)
+    tickets_service.transition_status(db, old_ticket, TicketStatus.CANCELLED, actor=None)
 
     telegram_channel.handle_update(db, _callback_for(old_ticket.id, user_id=14, chat_id=14))
     state = db.query(ChannelConversationState).filter(ChannelConversationState.external_user_id == "14").first()

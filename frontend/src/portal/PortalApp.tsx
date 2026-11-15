@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   consumeMagicLink,
+  decidePortalResult,
   createPortalTicket,
   fetchPortalMe,
   fetchPortalUsage,
@@ -32,7 +33,7 @@ const STATUS_LABELS: Record<string, string> = {
   in_progress: "В работе",
   waiting_customer: "Ждём вашего ответа",
   waiting_third_party: "Ждём третью сторону",
-  resolved: "Решена",
+  resolved: "На приёмке",
   closed: "Закрыта",
   cancelled: "Отменена",
 };
@@ -395,13 +396,18 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
     },
   });
 
+  const acceptanceMutation = useMutation({
+    mutationFn: (accept: boolean) => decidePortalResult(id, ticketQuery.data?.resolution_message_id ?? 0, accept),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["portal-ticket", id] }); qc.invalidateQueries({ queryKey: ["portal-tickets"] }); },
+  });
+
   const rateMutation = useMutation({
     mutationFn: (rating: number) => ratePortalTicket(id, rating),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["portal-ticket", id] }),
   });
 
   const ticket = ticketQuery.data;
-  const canRate = ticket && !ticket.csat_rating && ["resolved", "closed"].includes(ticket.status);
+  const canRate = ticket && !ticket.csat_rating && ticket.status === "closed";
 
   return (
     <PortalShell
@@ -447,6 +453,13 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
             {ticket.messages.length === 0 && <p className="portal-muted">Сообщений пока нет</p>}
           </div>
 
+          {ticket.status === "resolved" && <div className="portal-note"><strong>Проверьте результат в переписке выше.</strong><p>Можно принять работу или вернуть эту же заявку на доработку.</p>
+            <button className="portal-btn portal-btn-primary" disabled={!ticket.resolution_message_id || acceptanceMutation.isPending} onClick={() => acceptanceMutation.mutate(true)}>Принять результат</button>{" "}
+            <button className="portal-btn" disabled={acceptanceMutation.isPending} onClick={() => acceptanceMutation.mutate(false)}>Нужна доработка</button>
+          </div>}
+          {ticket.accepted_at && <p className="portal-note">Результат принят вами {formatDate(ticket.accepted_at)}.</p>}
+          {ticket.status === "closed" && <button className="portal-btn" disabled={acceptanceMutation.isPending} onClick={() => acceptanceMutation.mutate(false)}>Вернуть на доработку</button>}
+          {acceptanceMutation.isError && <p className="portal-error">{acceptanceMutation.error.message}</p>}
           {canRate && (
             <div className="portal-rate">
               <span>Оцените решение:</span>

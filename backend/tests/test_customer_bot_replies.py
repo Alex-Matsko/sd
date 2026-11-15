@@ -225,19 +225,18 @@ def test_explicit_new_button_materializes_buffered_messages_as_one_new_task(db, 
     assert db.query(ChannelJob).filter_by(channel=bot.channel, state='waiting').count() == 0
 
 
-def test_closed_quote_waits_for_explicit_followup_instead_of_creating_duplicates(db, bot, contact, actor):
+def test_cancelled_quote_waits_for_explicit_followup_instead_of_creating_duplicates(db, bot, contact, actor):
     ticket = make(db, contact)
     send(db, bot, ticket, actor)
     remote = bot.sent[0]['id']
     tickets.transition_status(db, ticket, TicketStatus.IN_PROGRESS, None)
-    tickets.transition_status(db, ticket, TicketStatus.RESOLVED, None)
-    tickets.transition_status(db, ticket, TicketStatus.CLOSED, None)
+    tickets.transition_status(db, ticket, TicketStatus.CANCELLED, None)
     waiting = bot.incoming(bot.event('Need more help', reply=remote))
     assert waiting.state == 'waiting' and db.query(Ticket).filter_by(contact_id=contact.id).count() == 1
     bot.incoming(bot.event(callback=f'continue:{ticket.id}'))
     followup = db.query(Ticket).filter_by(contact_id=contact.id, parent_ticket_id=ticket.id).one()
     assert db.query(Message).filter_by(ticket_id=followup.id, direction=MessageDirection.INBOUND).one().body == 'Need more help'
-    db.refresh(ticket); assert ticket.status == TicketStatus.CLOSED
+    db.refresh(ticket); assert ticket.status == TicketStatus.CANCELLED
 
 
 def test_reply_to_file_part_knows_ticket_and_original_message(db, bot, contact, actor):
@@ -366,7 +365,8 @@ def test_plain_reply_after_closure_does_not_jump_to_unrelated_open_ticket(db, bo
     other = make(db, contact, 'Unrelated')
     s = state(db, bot); s.active_ticket_id = closed.id; db.commit()
     job = bot.incoming(bot.event('One more question about this'))
-    assert job.state == 'waiting'
+    assert job.state == 'processed'
+    assert db.query(Message).filter_by(ticket_id=closed.id, body='One more question about this').one()
     assert db.query(Message).filter_by(ticket_id=other.id).count() == 0
     assert db.query(Ticket).filter_by(contact_id=contact.id).count() == 2
 

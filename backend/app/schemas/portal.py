@@ -76,6 +76,8 @@ class PortalTicketRead(BaseModel):
     created_at: datetime
     resolved_at: datetime | None
     closed_at: datetime | None
+    resolution_message_id: int | None = None
+    accepted_at: datetime | None = None
     csat_rating: int | None
     # Кто ведёт заявку. Боты об этом клиенту сообщают, а в кабинете было не
     # видно — клиент не знал, к кому обращаться. Имена инженеров скрыты
@@ -115,3 +117,8 @@ class PortalUsage(BaseModel):
     package_used_hours: float | None = None
     package_remaining_hours: float | None = None
     overage_hours: float | None = None
+
+
+class PortalAcceptance(BaseModel):
+    resolution_message_id: int = Field(ge=0)
+    accept: bool

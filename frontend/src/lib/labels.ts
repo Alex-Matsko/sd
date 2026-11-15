@@ -19,7 +19,7 @@ export const STATUS_LABELS: Record<TicketStatus, string> = {
   in_progress: "В работе",
   waiting_customer: "Ждём клиента",
   waiting_third_party: "Ждём третью сторону",
-  resolved: "Решена",
+  resolved: "На приёмке",
   closed: "Закрыта",
   cancelled: "Отменена",
 };

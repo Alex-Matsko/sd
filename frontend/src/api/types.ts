@@ -239,6 +239,8 @@ export interface Ticket {
   resolved_at: string | null;
   sla_resolution_met: boolean | null;
   closed_at: string | null;
+  resolution_message_id: number | null;
+  accepted_at: string | null;
   csat_rating: number | null;
   csat_rated_at: string | null;
   created_at: string;

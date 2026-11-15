@@ -39,7 +39,7 @@ def test_both_staff_channels_have_identical_cards_and_completion(db, contact, en
     db.commit()
     tickets.transition_status(db, ticket, TicketStatus.IN_PROGRESS, None)
     tickets.transition_status(db, ticket, TicketStatus.RESOLVED, None)
-    for status, heading in [('Решена', 'Работы завершены')]:
+    for status, heading in [('На приёмке', 'Результат готов к приёмке')]:
         jobs = db.query(ChannelJob).filter_by(ticket_id=ticket.id).all()
         matches = [j for j in jobs if j.payload['text'].startswith(heading)]
         assert len(matches) == 4

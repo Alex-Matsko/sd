@@ -556,7 +556,7 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
         if ticket is None or ticket.contact_id != contact.id:
             _send(config, parsed.chat_id, "Заявка не найдена.")
             return
-        if TicketStatus(ticket.status) not in OPEN_TICKET_STATUSES:
+        if TicketStatus(ticket.status) not in messenger_dialog.REPLYABLE:
             # Terminal ticket ("поднять старую"): CLOSED/CANCELLED never
             # transition back open (ALLOWED_TRANSITIONS), so the next message
             # becomes a new ticket linked to this one via parent_ticket_id.
@@ -581,7 +581,7 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
             config,
             parsed.chat_id,
             f"Переключено на {ticket.display_number} — {ticket.subject}. Пишите сюда." + messenger_common.planning_summary(ticket),
-            buttons=_menu_buttons_for(ticket),
+            buttons=messenger_dialog.buttons(ticket, _menu_buttons_for(ticket)),
         )
         return
 
