@@ -84,6 +84,5 @@ def test_automation_cannot_accept_unplanned_work(db,contact):
     t=make_ticket(db,contact);t.planned_due_at=t.estimated_minutes=None;db.commit()
     rule=AutomationRule(name='Start',trigger_type=AutomationTriggerType.STATUS_AGE,from_status=TicketStatus.NEW,
         to_status=TicketStatus.IN_PROGRESS,threshold_days=1,is_active=True)
-    db.add(rule);db.flush()
     db.add(rule); db.flush()
     assert 'укажите' in _preflight(db,rule,t)
