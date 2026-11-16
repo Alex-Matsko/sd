@@ -21,7 +21,7 @@ from app.services import tickets as tickets_service
 
 
 def _make(db: Session, contact: Contact, subject: str = "Заявка для таймера") -> Ticket:
-    return tickets_service.create_ticket(
+    ticket = tickets_service.create_ticket(
         db,
         TicketCreate(
             contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.PHONE, subject=subject,
@@ -29,6 +29,11 @@ def _make(db: Session, contact: Contact, subject: str = "Заявка для т�
         ),
         actor=None,
     )
+
+    ticket.planned_due_at = datetime.now(timezone.utc) + timedelta(days=2)
+    ticket.estimated_minutes = 60
+    db.commit()
+    return ticket
 
 
 def _backdate_timer(db: Session, engineer: User, seconds: int) -> None:

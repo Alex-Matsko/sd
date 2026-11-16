@@ -1,3 +1,5 @@
+import { WorkStartDialog } from "../components/WorkStartDialog";
+import type { WorkPlan } from "../components/WorkStartDialog";
 import { kanbanColumns } from "../lib/ticketFilters";
 import type { QueueScope } from "../lib/ticketFilters";
 import { useLayoutEffect, useRef, useState } from "react";
@@ -26,12 +28,14 @@ export function KanbanBoard({
 }) {
   const qc = useQueryClient();
   const columns = kanbanColumns(scope);
+  const [startingTicket, setStartingTicket] = useState<Ticket | null>(null);
   const [dragTicketId, setDragTicketId] = useState<number | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<TicketStatus | null>(null);
 
   const moveMutation = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: TicketStatus }) => updateTicket(id, { status }),
+    mutationFn: ({ id, status, plan }: { id: number; status: TicketStatus; plan?: WorkPlan }) => updateTicket(id, { ...plan, status }),
     onSuccess: (_data, variables) => {
+      setStartingTicket(null);
       qc.invalidateQueries({ queryKey: ["ticket", variables.id] });
       qc.invalidateQueries({ queryKey: ["ticket-stats"] });
     },
@@ -83,6 +87,7 @@ export function KanbanBoard({
 
   return (
     <>
+    {startingTicket && <WorkStartDialog key={startingTicket.id} ticket={startingTicket} pending={moveMutation.isPending} error={moveMutation.error?.message} onClose={() => setStartingTicket(null)} onConfirm={plan => moveMutation.mutate({ id: startingTicket.id, status: "in_progress", plan })} />}
     {moveMutation.isError && <ErrorBanner message={moveMutation.error.message} />}
     <div className="kanban-board" aria-label="Канбан заявок">
       {columns.map((column) => {
@@ -103,7 +108,8 @@ export function KanbanBoard({
               e.preventDefault();
               setDragOverColumn(null);
               if (draggedTicket && canDrop(draggedTicket, column)) {
-                moveMutation.mutate({ id: draggedTicket.id, status: column });
+                if (column === "in_progress") { moveMutation.reset(); setStartingTicket(draggedTicket); }
+                else moveMutation.mutate({ id: draggedTicket.id, status: column });
               }
             }}
           >

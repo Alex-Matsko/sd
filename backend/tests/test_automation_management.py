@@ -82,6 +82,9 @@ def test_engineer_cannot_create_or_modify(api, engineer_user):
 def old_waiting_ticket(db, contact):
     ticket = tickets.create_ticket(db, TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.PORTAL,
         subject='Ожидаем поставщика', manual_priority=Priority.P3, manual_priority_reason='test'), actor=None)
+    ticket.planned_due_at = datetime.now(timezone.utc) + timedelta(days=30)
+    ticket.estimated_minutes = 60
+    db.commit()
     tickets.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
     tickets.transition_status(db, ticket, TicketStatus.WAITING_THIRD_PARTY, actor=None)
     for row in db.query(AuditLog).filter_by(entity_type='ticket', entity_id=ticket.id, action='status_changed'):

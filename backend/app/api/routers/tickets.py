@@ -3,7 +3,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import Body, APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import ValidationError
 from fastapi.responses import FileResponse
 from sqlalchemy import and_, func, or_, select
@@ -21,7 +21,7 @@ from app.models.time_entry import TimeEntry
 from app.models.user import User
 from app.schemas.audit import AuditLogRead
 from app.schemas.message import AttachmentRead, MessageCreate, MessageRead
-from app.schemas.ticket import TicketClientChange, TicketCreate, TicketRead, TicketSlaView, TicketUpdate
+from app.schemas.ticket import TicketWorkPlan, TicketClientChange, TicketCreate, TicketRead, TicketSlaView, TicketUpdate
 from app.schemas.time_entry import TimeEntryCreate, TimeEntryRead, TimeEntryUpdate
 from app.services import attachments as attachments_service
 from app.services import audit as audit_service
@@ -577,11 +577,11 @@ def get_my_timer(db: Session = Depends(get_db), actor: User = Depends(get_curren
 
 @router.post("/{ticket_id}/timer/start")
 def start_timer(
-    ticket_id: int, db: Session = Depends(get_db), actor: User = Depends(get_current_user)
+    ticket_id: int, plan: TicketWorkPlan | None = Body(default=None), db: Session = Depends(get_db), actor: User = Depends(get_current_user)
 ) -> dict:
     ticket = _get_ticket_or_404(db, ticket_id, actor)
     try:
-        timer = time_entries_service.start_timer(db, ticket, actor)
+        timer = time_entries_service.start_timer(db, ticket, actor, plan)
     except time_entries_service.TimerTicketNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:

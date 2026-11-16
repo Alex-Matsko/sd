@@ -2,7 +2,7 @@
 rule (RESOLVED_WITHOUT_REPLY, 3 days) is used directly rather than creating a
 fresh one per test, matching how test_sla.py reuses the seeded default tariff."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -126,6 +126,9 @@ def test_custom_threshold_is_respected(db: Session, contact: Contact):
     _drain(db)
 
     ticket = _make_ticket(db, contact)
+    ticket.planned_due_at = datetime.now(timezone.utc) + timedelta(days=30)
+    ticket.estimated_minutes = 60
+    db.commit()
     _resolve_days_ago(db, ticket, 1.5)
 
     touched = automation.run_automation_rules(db)

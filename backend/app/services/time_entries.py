@@ -58,7 +58,7 @@ class TimerTicketNotFound(ValueError):
     pass
 
 
-def start_timer(db: Session, ticket: Ticket, engineer: User) -> ActiveTimer:
+def start_timer(db: Session, ticket: Ticket, engineer: User, plan=None) -> ActiveTimer:
     """Start work, bank the previous timer and change status atomically.
 
     A second click keeps elapsed time. User and ticket locks serialize timer
@@ -78,6 +78,11 @@ def start_timer(db: Session, ticket: Ticket, engineer: User) -> ActiveTimer:
         if status in (TicketStatus.CLOSED, TicketStatus.CANCELLED):
             raise ValueError("Нельзя начать работу по закрытой или отменённой заявке")
 
+        from app.services import work_planning
+        plan_changed = work_planning.apply(unit, current, plan, actor) if plan is not None else False
+        work_planning.require_plan(current)
+        if plan_changed and status == TicketStatus.IN_PROGRESS:
+            work_planning.notify_plan(unit, current)
         timer = unit.query(ActiveTimer).filter(ActiveTimer.user_id == user_id).first()
         if timer is not None and timer.ticket_id != ticket_id:
             stop_timer(unit, actor, comment="Автоматически остановлен при запуске таймера по другой заявке")

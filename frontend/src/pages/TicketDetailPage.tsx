@@ -1,3 +1,4 @@
+import { WorkStartDialog } from "../components/WorkStartDialog";
 import { TicketPlanning } from "../components/TicketPlanning";
 import { MessageComposer } from "../components/MessageComposer";
 import { MessageContent } from "../components/MessageContent";
@@ -53,6 +54,7 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
   const id = Number(ticketId);
   const qc = useQueryClient();
   const { user } = useAuth();
+  const [startingWork, setStartingWork] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [noteReplyTo, setNoteReplyTo] = useState<Message | null>(null);
 
@@ -111,6 +113,7 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
   const updateMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => updateTicket(id, payload),
     onSuccess: (updated) => {
+      setStartingWork(false);
       qc.setQueryData(["ticket", id], updated);
       qc.invalidateQueries({ queryKey: ["ticket", id] });
       qc.invalidateQueries({ queryKey: ["tickets"] });
@@ -162,7 +165,8 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
 
       {ticket.status === "resolved" && <div className="ticket-acceptance-note"><strong>Ожидаем приёмку клиента</strong><span>{ticket.resolution_message_id ? "Результат отправлен клиенту. Он сможет принять его или вернуть на доработку прямо в боте." : "Результат ещё не оформлен. Верните заявку в работу и передайте описание результата клиенту."}</span></div>}
       {ticket.accepted_at && <div className="ticket-acceptance-note"><strong>Результат принят клиентом</strong><span>{formatDateTime(ticket.accepted_at)}</span></div>}
-      <TicketTimer key={`work-${id}`} ticketId={id} status={ticket.status} />
+      <TicketTimer key={`work-${id}`} ticket={ticket} />
+      {startingWork && <WorkStartDialog key={id} ticket={ticket} pending={updateMutation.isPending} error={updateMutation.error?.message} onClose={() => setStartingWork(false)} onConfirm={plan => updateMutation.mutate({ ...plan, status: "in_progress" })} />}
 
       <div className="ticket-layout">
         <div className="ticket-main">
@@ -435,7 +439,7 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
             <StatusPipeline
               status={ticket.status}
               disabled={updateMutation.isPending}
-              onChange={(next) => next === "resolved" ? document.getElementById("compose-outbound")?.scrollIntoView({ behavior: "smooth", block: "center" }) : updateMutation.mutate({ status: next })}
+              onChange={(next) => next === "resolved" ? document.getElementById("compose-outbound")?.scrollIntoView({ behavior: "smooth", block: "center" }) : next === "in_progress" ? (updateMutation.reset(), setStartingWork(true)) : updateMutation.mutate({ status: next })}
             />
           </div>
 

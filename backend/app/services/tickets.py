@@ -210,6 +210,17 @@ def _follow_assignment(db: Session, ticket: Ticket, actor: User | None) -> None:
 
 
 def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: User | None) -> Ticket:
+    from app.services.channel_queue import DeferredCommitSession
+    with DeferredCommitSession(bind=db.connection(), join_transaction_mode="create_savepoint") as unit:
+        current = unit.query(Ticket).filter_by(id=ticket.id).with_for_update().one()
+        _update_ticket(unit, current, payload, unit.get(User, actor.id) if actor else None)
+        Session.commit(unit)
+    db.commit()
+    db.refresh(ticket)
+    return ticket
+
+
+def _update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: User | None) -> Ticket:
     provided = payload.model_fields_set
     _validate_references(
         db, ticket.organization_id,
@@ -224,6 +235,13 @@ def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: Use
         raise ValueError("Команда не найдена")
     if payload.manual_priority is not None and not (payload.manual_priority_reason or "").strip():
         raise ValueError("При ручном приоритете нужно указать manual_priority_reason")
+    from app.services import work_planning
+    plan_changed = work_planning.apply(db, ticket, payload, actor)
+    status_changed = payload.status is not None and payload.status != ticket.status
+    if payload.status == TicketStatus.IN_PROGRESS or (ticket.status == TicketStatus.IN_PROGRESS and plan_changed):
+        work_planning.require_plan(ticket, future=status_changed or plan_changed)
+    if plan_changed and not status_changed:
+        work_planning.notify_plan(db, ticket)
     if payload.status is not None and TicketStatus(payload.status) != TicketStatus(ticket.status):
         transition_status(db, ticket, TicketStatus(payload.status), actor)
 
@@ -272,13 +290,6 @@ def update_ticket(db: Session, ticket: Ticket, payload: TicketUpdate, actor: Use
             "to": payload.is_recurring_problem,
         }
         ticket.is_recurring_problem = bool(payload.is_recurring_problem)
-
-    for field in ("planned_due_at", "estimated_minutes"):
-        if field in provided and getattr(payload, field) != getattr(ticket, field):
-            before, after = getattr(ticket, field), getattr(payload, field)
-            changed[field] = {"from": before.isoformat() if isinstance(before, datetime) else before,
-                              "to": after.isoformat() if isinstance(after, datetime) else after}
-            setattr(ticket, field, after)
 
     if "category_id" in provided:
         ticket.category_id = payload.category_id

@@ -37,6 +37,10 @@ def ticket_notice(ticket, headline, *, client=False, detail=None):
     session = object_session(ticket)
     engineer = session.get(User, ticket.assigned_engineer_id) if session and ticket.assigned_engineer_id else None
     lines.append(f'Исполнитель: {engineer.full_name if engineer else "Не назначен"}')
+    from app.services.messenger_common import planning_summary
+    plan = planning_summary(ticket)
+    if plan:
+        lines.append(plan.strip())
     if detail:
         lines.extend(['', detail])
     url = ticket_url(ticket, client=client)

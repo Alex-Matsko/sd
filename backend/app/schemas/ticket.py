@@ -29,7 +29,8 @@ class TicketCreate(BaseModel):
         return self
 
 
-class TicketUpdate(BaseModel):
+class TicketWorkPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     planned_due_at: datetime | None = None
     estimated_minutes: int | None = Field(default=None, ge=0, le=600000)
 
@@ -40,6 +41,9 @@ class TicketUpdate(BaseModel):
             raise ValueError("Укажите срок с часовым поясом")
         return value
 
+
+
+class TicketUpdate(TicketWorkPlan):
     status: TicketStatus | None = None
     assigned_engineer_id: int | None = None
     team_id: int | None = None

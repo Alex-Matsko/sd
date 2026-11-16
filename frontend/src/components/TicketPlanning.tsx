@@ -24,14 +24,14 @@ export function TicketPlanning({ ticket }: { ticket: Ticket }) {
     } });
   function submit() {
     const amount = hours.trim() ? Number(hours.replace(",", ".")) : null;
-    if (amount !== null && (!Number.isFinite(amount) || amount < 0 || amount > 10000)) { setError("Укажите трудозатраты от 0 до 10 000 часов"); return; }
+    if (amount !== null && (!Number.isFinite(amount) || amount <= 0 || amount > 10000)) { setError("Укажите трудозатраты больше нуля, до 10 000 часов"); return; }
     if (due && !Number.isFinite(new Date(due).getTime())) { setError("Укажите корректные дату и время"); return; }
     setError(""); save.mutate({ planned_due_at: due ? new Date(due).toISOString() : null, estimated_minutes: amount === null ? null : Math.round(amount * 60) });
   }
-  return <section className="panel ticket-planning" aria-label="Планирование заявки"><div className="panel-head"><h2>Срок и трудозатраты</h2></div>
-    <p className="ticket-plan-hint">Срок и оценка будут видны клиенту в его заявке.</p>
+  return <section className="panel ticket-planning" id="ticket-planning" aria-label="Планирование заявки"><div className="panel-head"><h2>Срок и трудозатраты</h2></div>
+    <p className="ticket-plan-hint">Перед началом работы срок и оценка обязательны. Клиент получит их в уведомлении.</p>
     <label>Плановый срок решения<input aria-label="Плановый срок решения" type="datetime-local" value={due} disabled={save.isPending} onChange={(e) => { setDue(e.target.value); setEditing(true); }} /></label>
-    <label>Оценка трудозатрат, ч<input aria-label="Оценка трудозатрат, ч" type="number" min="0" max="10000" step="any" placeholder="Например, 1.5" value={hours} disabled={save.isPending} onChange={(e) => { setHours(e.target.value); setEditing(true); }} /></label>
+    <label>Оценка трудозатрат, ч<input aria-label="Оценка трудозатрат, ч" type="number" min="0.01" max="10000" step="any" placeholder="Например, 1.5" value={hours} disabled={save.isPending} onChange={(e) => { setHours(e.target.value); setEditing(true); }} /></label>
     <div className="ticket-plan-summary"><span>{ticket.planned_due_at ? formatDateTime(ticket.planned_due_at) : "Срок пока не назначен"}</span><strong>{ticket.estimated_minutes === null ? "Без оценки" : formatMinutes(ticket.estimated_minutes)}</strong></div>
     {(error || save.isError) && <p role="alert" className="ticket-plan-error">{error || save.error?.message}</p>}
     {save.isSuccess && !editing && <p role="status" className="ticket-plan-saved">План сохранён</p>}

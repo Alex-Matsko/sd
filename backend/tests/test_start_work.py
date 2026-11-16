@@ -30,6 +30,8 @@ def api(db, engineer_user):
 def make_ticket(db, contact, status=TicketStatus.NEW, engineer=None):
     ticket = tickets.create_ticket(db, TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT,
         channel=Channel.PORTAL, subject='Start work test', manual_priority='P3', manual_priority_reason='test'), actor=None)
+    ticket.planned_due_at = datetime.now(timezone.utc) + timedelta(days=2)
+    ticket.estimated_minutes = 90
     ticket.status = status
     if status == TicketStatus.ASSIGNED:
         ticket.assigned_engineer_id = engineer.id

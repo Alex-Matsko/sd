@@ -1,7 +1,9 @@
+import { WorkStartDialog } from "./WorkStartDialog";
+import type { WorkPlan } from "./WorkStartDialog";
+import type { Ticket } from "../api/types";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getActiveTimer, startTimer, stopTimer } from "../api/endpoints";
-import type { TicketStatus } from "../api/types";
 import { formatMinutes } from "../lib/labels";
 
 function elapsedLabel(startedAt: string, now: number): string {
@@ -15,7 +17,9 @@ function elapsedLabel(startedAt: string, now: number): string {
 
 /** Starting work changes the ticket status and starts one personal timer.
  * Switching tickets banks the previous timer in its original ticket. */
-export function TicketTimer({ ticketId, status }: { ticketId: number; status: TicketStatus }) {
+export function TicketTimer({ ticket }: { ticket: Ticket }) {
+  const { id: ticketId, status } = ticket;
+  const [planning, setPlanning] = useState(false);
   const qc = useQueryClient();
   const [now, setNow] = useState(() => Date.now());
   const [notice, setNotice] = useState<string | null>(null);
@@ -39,8 +43,8 @@ export function TicketTimer({ ticketId, status }: { ticketId: number; status: Ti
     qc.invalidateQueries({ queryKey: ["ticket-stats"] });
     qc.invalidateQueries({ queryKey: ["organization-usage"] });
   }
-  const startMutation = useMutation({ mutationFn: () => startTimer(ticketId),
-    onSuccess: () => { setNotice(null); stopMutation.reset(); refresh(); },
+  const startMutation = useMutation({ mutationFn: (plan: WorkPlan) => startTimer(ticketId, plan),
+    onSuccess: () => { setPlanning(false); setNotice(null); stopMutation.reset(); refresh(); },
     onError: () => { refresh(); } });
   const stopMutation = useMutation({ mutationFn: stopTimer,
     onSuccess: entry => {
@@ -57,14 +61,14 @@ export function TicketTimer({ ticketId, status }: { ticketId: number; status: Ti
     : !canStart ? "Новый таймер для этой заявки недоступен."
     : runningHere ? (status === "in_progress" ? "Время учитывается по этой заявке." : "Кнопка вернёт заявку в работу. Текущий таймер продолжит отсчёт.")
     : status === "resolved" ? "Возобновление вернёт заявку в работу."
-    : status === "in_progress" ? "Запустите таймер, чтобы учитывать время выполнения." : "Одно нажатие переведёт заявку в «В работе».";
-  return <section className={`ticket-workbar ${runningHere ? "ticket-workbar-running" : ""}`} aria-label="Работа по заявке" aria-busy={pending}>
+    : status === "in_progress" ? "Запустите таймер, чтобы учитывать время выполнения." : "Перед началом подтвердите срок и примерные трудозатраты для клиента.";
+  return <><section className={`ticket-workbar ${runningHere ? "ticket-workbar-running" : ""}`} aria-label="Работа по заявке" aria-busy={pending}>
     <div className="ticket-workbar-summary"><span className="ticket-workbar-icon" aria-hidden="true"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 1.5M9 2h6M12 2v3" /></svg></span><div><strong>{title}</strong><p>{description}</p></div></div>
     <div className="ticket-workbar-actions">
       {runningHere && <span className="timer-elapsed mono" aria-label="Время работы">{elapsedLabel(timer!.started_at!, now)}</span>}
       {runningHere && <button type="button" className="btn btn-ghost" disabled={!ready} onClick={() => stopMutation.mutate()}>
         {stopMutation.isPending ? "Остановка…" : "Остановить таймер"}</button>}
-      {canStart && (!runningHere || status !== "in_progress") && <button type="button" className="btn btn-primary ticket-start-work" disabled={!ready} onClick={() => startMutation.mutate()}>
+      {canStart && (!runningHere || status !== "in_progress") && <button type="button" className="btn btn-primary ticket-start-work" disabled={!ready} onClick={() => { startMutation.reset(); setPlanning(true); }}>
           <svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true" fill="currentColor"><path d="M6 3.5v13L16 10z" /></svg>
           {startMutation.isPending ? "Запуск…" : status === "in_progress" ? "Запустить таймер" : status === "resolved" || status === "waiting_customer" || status === "waiting_third_party" ? "Возобновить работу" : "Начать работу"}
         </button>}
@@ -72,6 +76,7 @@ export function TicketTimer({ ticketId, status }: { ticketId: number; status: Ti
     </div>
     {notice && <p className="ticket-workbar-notice" role="status">{notice}</p>}
     {timerQuery.isError && <div className="ticket-workbar-error" role="alert">Не удалось проверить таймер. <button type="button" className="btn-link" onClick={() => timerQuery.refetch()}>Повторить</button></div>}
+    {status === "in_progress" && (!ticket.planned_due_at || !ticket.estimated_minutes) && <p className="ticket-workbar-notice">У заявки не заполнены срок или оценка. <button type="button" className="btn-link" onClick={() => document.getElementById("ticket-planning")?.scrollIntoView({ behavior: "smooth", block: "center" })}>Заполнить план для клиента</button></p>}
     {(startMutation.isError || stopMutation.isError) && <p className="ticket-workbar-error" role="alert">{(startMutation.error ?? stopMutation.error)?.message}</p>}
-  </section>;
+  </section>{planning && <WorkStartDialog key={ticketId} ticket={ticket} pending={startMutation.isPending} error={startMutation.error?.message} onClose={() => setPlanning(false)} onConfirm={plan => startMutation.mutate(plan)} />}</>;
 }

@@ -90,6 +90,12 @@ def _preflight(db, rule, ticket):
     except ValueError:
         return 'Проверьте параметры правила'
     for action in _actions(rule):
+        if action['type'] == 'change_status' and rule.to_status == TicketStatus.IN_PROGRESS:
+            from app.services.work_planning import require_plan
+            try:
+                require_plan(ticket)
+            except ValueError as exc:
+                return str(exc)
         if action['type'] == 'change_status' and rule.to_status == TicketStatus.CLOSED and not ticket.accepted_at:
             return 'Заявка ждёт явной приёмки клиентом; автоматическое закрытие отключено'
         if action['type'] == 'change_status' and rule.to_status not in tickets_service.ALLOWED_TRANSITIONS.get(ticket.status, set()):

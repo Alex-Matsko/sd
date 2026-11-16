@@ -377,8 +377,8 @@ export interface ActiveTimer {
 export function getActiveTimer() {
   return apiRequest<ActiveTimer>("/tickets/timer/active");
 }
-export function startTimer(ticketId: number) {
-  return apiRequest<ActiveTimer>(`/tickets/${ticketId}/timer/start`, { method: "POST" });
+export function startTimer(ticketId: number, plan?: { planned_due_at: string; estimated_minutes: number }) {
+  return apiRequest<ActiveTimer>(`/tickets/${ticketId}/timer/start`, { method: "POST", body: plan });
 }
 export function stopTimer() {
   return apiRequest<TimeEntry | null>("/tickets/timer/stop", { method: "POST" });
