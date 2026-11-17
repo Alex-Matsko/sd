@@ -25,7 +25,8 @@ from app.services.ticket_messages import STATUS_LABELS_RU, ticket_notice
 WELCOME_TEXT = (
     "Здравствуйте! Это служба поддержки «Открытые Горизонты». "
     "Чтобы продолжить переписку, нажмите «Ответить по этой заявке» под сообщением или выберите обращение в «Мои заявки». "
-    "Для нового вопроса нажмите «Создать новую»."
+    "Для нового вопроса нажмите «Создать новую». "
+    "Помощь: /help. Отменить текущий ввод: /cancel."
 )
 
 NEW_TICKET_COMMANDS = {"/new", "новая заявка", "создать заявку", "создать новую"}
@@ -141,6 +142,7 @@ def my_tickets_buttons(tickets: list[Ticket], offset: int, total: int, scope: st
     for key, (label, _) in TICKET_SCOPES.items():
         result.append([{'type': 'callback', 'text': f'{"• " if key == scope else ""}{label} ({counts.get(key, 0)})', 'payload': f'mytickets:{key}:0'}])
     result.append([{'type': 'callback', 'text': 'Создать новую заявку', 'payload': 'cmd:new_ticket'}])
+    result.append([{'type': 'callback', 'text': 'Как пользоваться поддержкой', 'payload': 'cmd:help'}])
     return result
 
 

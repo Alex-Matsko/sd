@@ -552,6 +552,8 @@ def test_csat_callback_records_rating_once(db: Session, max_enabled, contact: Co
     db.commit()
     payload = TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.MAX, subject="Заявка", manual_priority=Priority.P3, manual_priority_reason="test")
     ticket = tickets_service.create_ticket(db, payload, actor=None)
+    ticket.status = TicketStatus.CLOSED
+    db.commit()
 
     max_channel.handle_update(db, _callback_update(user_id="u18", chat_id="c18", payload=f"csat:{ticket.id}:4"))
     db.refresh(ticket)

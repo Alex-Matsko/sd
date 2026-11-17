@@ -465,3 +465,6 @@
 .portal-error-inline {
   color: #b02a2a;
 }
+
+.portal-load-error {display:flex; flex-wrap:wrap; align-items:center; gap:10px;}
+.portal-load-error > span {flex:1 1 240px;}

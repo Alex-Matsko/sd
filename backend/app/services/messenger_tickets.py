@@ -9,7 +9,7 @@ from app.services import messenger_common as common
 DESCRIPTION_PAGE_SIZE = 1000
 
 
-def _send_list(config, chat_id, module, text, buttons):
+def send_navigation(config, chat_id, module, text, buttons):
     from app.services.channel_queue import defer_bot_reply
     channel = 'max' if module.__name__.endswith('max_channel') else 'telegram'
     if not defer_bot_reply(channel, chat_id, text, buttons, suppress_ticket_buttons=True):
@@ -22,7 +22,7 @@ def send_list(db, config, contact, chat_id, module, offset=0, scope='active'):
     last_page = max(0, (total - 1) // common.MY_TICKETS_PAGE_SIZE) * common.MY_TICKETS_PAGE_SIZE
     offset = min(max(0, offset) // common.MY_TICKETS_PAGE_SIZE * common.MY_TICKETS_PAGE_SIZE, last_page)
     items, total = common.my_tickets_page(db, contact, offset, scope)
-    _send_list(config, chat_id, module, common.my_tickets_caption(items, offset, total, scope, counts),
+    send_navigation(config, chat_id, module, common.my_tickets_caption(items, offset, total, scope, counts),
                common.my_tickets_buttons(items, offset, total, scope, counts))
 
 
@@ -60,7 +60,7 @@ def handle_callback(db, channel, config, state, contact, parsed, module):
                 if len(parts) not in (2, 3) or scope not in common.TICKET_SCOPES or offset < 0:
                     raise ValueError('Invalid list')
         except (ValueError, IndexError):
-            _send_list(config, parsed.chat_id, module, 'Список изменился. Нажмите «Мои заявки» ещё раз.', module._main_menu_buttons())
+            send_navigation(config, parsed.chat_id, module, 'Список изменился. Нажмите «Мои заявки» ещё раз.', module._main_menu_buttons())
             return True
         module._cancel_pending_ticket_flow(state)
         db.add(state); db.commit()

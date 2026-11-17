@@ -468,8 +468,11 @@ def rate_my_ticket(
     ticket = portal.get_visible_ticket(db, contact, ticket_id)
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Заявка не найдена")
-    if TicketStatus(ticket.status) not in (TicketStatus.RESOLVED, TicketStatus.CLOSED):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Оценить можно только решённую заявку")
+    ticket = portal.visible_tickets_query(db, contact).filter(Ticket.id == ticket.id).populate_existing().with_for_update().first()
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+    if TicketStatus(ticket.status) != TicketStatus.CLOSED:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Оценить можно после закрытия заявки. Сначала примите результат.")
     if ticket.csat_rating is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Оценка уже получена ранее")
 

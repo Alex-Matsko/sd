@@ -403,7 +403,7 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
 
   const rateMutation = useMutation({
     mutationFn: (rating: number) => ratePortalTicket(id, rating),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["portal-ticket", id] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["portal-ticket", id] }),
   });
 
   const ticket = ticketQuery.data;
@@ -419,6 +419,7 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
       }
     >
       {ticketQuery.isLoading && <p className="portal-muted">Загрузка…</p>}
+      {ticketQuery.isError && <div className="portal-error portal-load-error" role="alert"><span>{ticket ? "Не удалось обновить заявку. Показана последняя загруженная версия." : ticketQuery.error.message}</span><button className="portal-btn portal-btn-compact" onClick={() => ticketQuery.refetch()}>Повторить загрузку</button></div>}
       {ticket && (
         <>
           <h2 className="portal-subject">{ticket.subject}</h2>
@@ -465,13 +466,14 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
               <span>Оцените решение:</span>
               <div className="portal-stars">
                 {[1, 2, 3, 4, 5].map((n) => (
-                  <button key={n} onClick={() => rateMutation.mutate(n)} disabled={rateMutation.isPending}>
+                  <button key={n} aria-label={`Оценить на ${n} из 5`} title={`${n}/5`} onClick={() => rateMutation.mutate(n)} disabled={rateMutation.isPending}>
                     ★
                   </button>
                 ))}
               </div>
             </div>
           )}
+          {rateMutation.isError && <p className="portal-error" role="alert">{rateMutation.error.message}</p>}
           {ticket.csat_rating && (
             <p className="portal-note">Спасибо за оценку: {"★".repeat(ticket.csat_rating)} ({ticket.csat_rating}/5)</p>
           )}
@@ -484,8 +486,9 @@ function PortalTicketView({ id, onBack }: { id: number; onBack: () => void }) {
               disabled={(!draftPayload.body.trim() && draftPayload.files.length === 0) || replyMutation.isPending || draft.pending}
               onClick={() => replyMutation.mutate()}
             >
-              Отправить
+              {replyMutation.isPending ? "Отправка…" : "Отправить"}
             </button>
+            {replyMutation.isSuccess && !draftPayload.body.trim() && draftPayload.files.length === 0 && <p className="portal-note" role="status">Сообщение отправлено в поддержку.</p>}
           </div>
         </>
       )}

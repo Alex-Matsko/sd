@@ -352,6 +352,8 @@ def test_csat_callback_records_rating_once(db: Session, telegram_enabled, contac
     db.commit()
     payload = TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.TELEGRAM, subject="Заявка", manual_priority=Priority.P3, manual_priority_reason="test")
     ticket = tickets_service.create_ticket(db, payload, actor=None)
+    ticket.status = TicketStatus.CLOSED
+    db.commit()
 
     telegram_channel.handle_update(db, _callback_update(user_id=23, chat_id=23, payload=f"csat:{ticket.id}:4"))
     db.refresh(ticket)

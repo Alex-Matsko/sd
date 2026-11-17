@@ -440,6 +440,9 @@ def _cancel_pending_ticket_flow(state: ChannelConversationState) -> None:
 
 
 def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> None:
+    from app.services import messenger_controls
+    if messenger_controls.handle_text(db, "max", config, state, contact, parsed, sys.modules[__name__]):
+        return
     text_lower = parsed.text.strip().lower()
 
     # Recognized commands always win over a pending "describe the problem"
@@ -467,7 +470,7 @@ def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState
         state.updated_at = datetime.now(timezone.utc)
         db.add(state)
         db.commit()
-        _send(config, parsed.chat_id, "Опишите проблему одним сообщением - я создам заявку.")
+        messenger_controls.send_prompt(config, state, sys.modules[__name__])
         return
 
     if text_lower in messenger_common.LINK_PHONE_COMMANDS:
@@ -486,23 +489,9 @@ def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState
     messenger_dialog.route_text(db, "max", config, state, contact, parsed, sys.modules[__name__])
 
 
-def _record_csat(db: Session, config: MaxConfig, ticket_id: int, rating: int, chat_id: str) -> None:
-    ticket = db.get(Ticket, ticket_id)
-    if ticket is None:
-        return
-    if ticket.csat_rating is not None:
-        _send(config, chat_id, "Спасибо, оценка уже получена ранее.")
-        return
-    ticket.csat_rating = max(1, min(5, rating))
-    ticket.csat_rated_at = datetime.now(timezone.utc)
-    db.add(ticket)
-    db.commit()
-    _send(config, chat_id, "Спасибо за оценку!")
-
-
 def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> None:
     payload = parsed.callback_payload
-    from app.services import messenger_dialog
+    from app.services import messenger_dialog, messenger_controls
     if messenger_dialog.handle_callback(db, "max", config, state, contact, parsed, sys.modules[__name__]):
         return
 
@@ -526,13 +515,9 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
         state.updated_at = datetime.now(timezone.utc)
         db.add(state)
         db.commit()
-        _send(config, parsed.chat_id, "Опишите проблему одним сообщением - я создам заявку.")
+        messenger_controls.send_prompt(config, state, sys.modules[__name__])
         return
 
-    if payload.startswith("csat:"):
-        _, ticket_id_str, rating_str = payload.split(":")
-        _record_csat(db, config, int(ticket_id_str), int(rating_str), parsed.chat_id)
-        return
 
     logger.warning("MAX: неизвестный callback payload=%r", payload)
 

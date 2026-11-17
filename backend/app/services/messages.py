@@ -106,13 +106,12 @@ def add_message(
         sla.register_first_response(ticket, datetime.now(timezone.utc))
         db.add(ticket)
 
-    # Client reply glues the dialog back to work (section 4.2): from
-    # "Ожидает клиента" it returns to "В работе"; from "Решена" within the
-    # auto-close window it reopens the same way (docs/decisions.md), without
-    # recomputing SLA in either case.
-    if payload.direction == MessageDirection.INBOUND and TicketStatus(ticket.status) in (
-        TicketStatus.WAITING_CUSTOMER,
-        TicketStatus.RESOLVED,
+    # Published results have explicit accept/rework actions. Clarifying a result
+    # must not invalidate its acceptance button. Legacy resolutions keep their
+    # previous reopen-on-reply behavior until a result is actually published.
+    if payload.direction == MessageDirection.INBOUND and (
+        TicketStatus(ticket.status) == TicketStatus.WAITING_CUSTOMER or
+        (TicketStatus(ticket.status) == TicketStatus.RESOLVED and ticket.resolution_message_id is None)
     ):
         transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
 

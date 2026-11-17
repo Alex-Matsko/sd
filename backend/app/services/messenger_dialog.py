@@ -278,7 +278,9 @@ def route_text(db, channel, config, state, contact, parsed, module):
 
 def handle_callback(db, channel, config, state, contact, parsed, module):
     payload = parsed.callback_payload or ''
-    from app.services import customer_acceptance, messenger_tickets
+    from app.services import customer_acceptance, messenger_tickets, messenger_controls
+    if messenger_controls.handle_callback(db, channel, config, state, contact, parsed, module):
+        return True
     if messenger_tickets.handle_callback(db, channel, config, state, contact, parsed, module):
         return True
     if customer_acceptance.handle_callback(db, channel, config, state, contact, parsed, module):
@@ -304,7 +306,7 @@ def handle_callback(db, channel, config, state, contact, parsed, module):
             state.awaiting_revive_text, state.revive_parent_ticket_id = True, ticket.id
             state.updated_at = datetime.now(timezone.utc)
             db.add(state); db.commit()
-            module._send(config, state.chat_id, f'Опишите новое обращение — свяжем его с {ticket.display_number}.')
+            messenger_controls.send_prompt(config, state, module, f'Опишите новое обращение — свяжем его с {ticket.display_number}.')
         return True
     if TicketStatus(ticket.status) not in REPLYABLE:
         prompt(db, channel, config, state, contact, module, closed=ticket); return True
