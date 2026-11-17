@@ -11,7 +11,7 @@ cost more than it saves for two channels.
 import re
 from datetime import timezone
 
-from sqlalchemy import case
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.core.enums import OPEN_TICKET_STATUSES, TicketStatus
@@ -83,60 +83,91 @@ def find_contact_by_phone(db: Session, raw_phone: str) -> Contact | None:
     return None
 
 
-MY_TICKETS_PAGE_SIZE = 5
+# Full subjects live in the message, not in provider-truncated button labels.
+# Three 500-character subjects also fit when every character needs two UTF-16 units.
+MY_TICKETS_PAGE_SIZE = 3
+TICKET_SCOPES = {
+    'active': ("Активные", OPEN_TICKET_STATUSES),
+    'acceptance': ("На приёмке", {TicketStatus.RESOLVED}),
+    'completed': ("Завершённые", {TicketStatus.CLOSED, TicketStatus.CANCELLED}),
+}
+STAGE_DETAILS = {
+    TicketStatus.NEW: 'Ещё не взята в работу.',
+    TicketStatus.ASSIGNED: 'Исполнитель назначен, работа ещё не началась.',
+    TicketStatus.IN_PROGRESS: 'Исполнитель выполняет задачу.',
+    TicketStatus.WAITING_CUSTOMER: 'Работа приостановлена: нужен ваш ответ.',
+    TicketStatus.WAITING_THIRD_PARTY: 'Ожидаем подрядчика или поставщика.',
+    TicketStatus.RESOLVED: 'Работы завершены: проверьте и примите результат.',
+    TicketStatus.CLOSED: 'Заявка закрыта.',
+    TicketStatus.CANCELLED: 'Выполнение отменено.',
+}
 
 
-def my_tickets_page(db: Session, contact: Contact, offset: int = 0) -> tuple[list[Ticket], int]:
-    """One page of the client's "Мои заявки" list, plus the total count.
+def ticket_stage(ticket):
+    status = TicketStatus(ticket.status)
+    if status == TicketStatus.RESOLVED and not ticket.resolution_message_id:
+        return 'Отмечена решённой, но результат ещё не опубликован сотрудником.'
+    if status == TicketStatus.CLOSED and ticket.accepted_at:
+        return 'Результат принят, заявка закрыта.'
+    return STAGE_DETAILS[status]
 
-    Ordering happens in SQL - open tickets first, newest first within each
-    group - rather than by re-sorting a fetched window. The previous version
-    took the 10 newest and only then floated open ones to the top, so a
-    still-open ticket older than 10 closed ones dropped off the list
-    entirely: exactly the ticket the client most likely wanted."""
-    base = db.query(Ticket).filter(Ticket.contact_id == contact.id)
-    ordering = case((Ticket.status.in_(OPEN_TICKET_STATUSES), 0), else_=1)
-    items = (
-        base.order_by(ordering, Ticket.created_at.desc(), Ticket.id.desc())
-        .limit(MY_TICKETS_PAGE_SIZE)
-        .offset(max(0, offset))
-        .all()
-    )
+
+def my_tickets_counts(db: Session, contact: Contact) -> dict[str, int]:
+    rows = dict(db.query(Ticket.status, func.count(Ticket.id)).filter(Ticket.contact_id == contact.id).group_by(Ticket.status).all())
+    result = {scope: sum(rows.get(status, 0) for status in statuses) for scope, (_, statuses) in TICKET_SCOPES.items()}
+    result['working'] = rows.get(TicketStatus.IN_PROGRESS, 0)
+    return result
+
+
+def my_tickets_page(db: Session, contact: Contact, offset: int = 0, scope: str = 'active') -> tuple[list[Ticket], int]:
+    statuses = TICKET_SCOPES[scope][1]
+    base = db.query(Ticket).filter(Ticket.contact_id == contact.id, Ticket.status.in_(statuses))
+    ordering = case((Ticket.status == TicketStatus.IN_PROGRESS, 0), else_=1)
+    items = base.order_by(ordering, Ticket.updated_at.desc(), Ticket.id.desc()).limit(MY_TICKETS_PAGE_SIZE).offset(max(0, offset)).all()
     return items, base.count()
 
 
-def my_tickets_buttons(tickets: list[Ticket], offset: int, total: int) -> list[list[dict]]:
-    """Ticket buttons plus a "показать ещё" row when more pages remain. The
-    offset travels inside the callback payload, so no extra per-chat state is
-    needed to remember where the client is in the list."""
-    buttons = [
-        [
-            {
-                "type": "callback",
-                "text": f"{t.display_number} — {t.subject[:30]} ({STATUS_LABELS_RU.get(TicketStatus(t.status), t.status)})",
-                "payload": f"ticket:{t.id}",
-            }
-        ]
-        for t in tickets
-    ]
-    next_offset = offset + MY_TICKETS_PAGE_SIZE
-    if next_offset < total:
-        buttons.append([{"type": "callback", "text": "Показать ещё →", "payload": f"mytickets:{next_offset}"}])
+def my_tickets_buttons(tickets: list[Ticket], offset: int, total: int, scope: str = 'active', counts=None) -> list[list[dict]]:
+    counts = counts or {scope: total}
+    result = [[{'type': 'callback', 'text': f'Открыть {t.display_number} · {STATUS_LABELS_RU[TicketStatus(t.status)]}',
+                'payload': f'ticket:{t.id}'}] for t in tickets]
+    navigation = []
     if offset > 0:
-        previous = max(0, offset - MY_TICKETS_PAGE_SIZE)
-        buttons.append([{"type": "callback", "text": "← Назад", "payload": f"mytickets:{previous}"}])
-    return buttons
+        navigation.append({'type': 'callback', 'text': '← Назад', 'payload': f'mytickets:{scope}:{max(0, offset - MY_TICKETS_PAGE_SIZE)}'})
+    if offset + len(tickets) < total:
+        navigation.append({'type': 'callback', 'text': 'Далее →', 'payload': f'mytickets:{scope}:{offset + len(tickets)}'})
+    if navigation:
+        result.append(navigation)
+    for key, (label, _) in TICKET_SCOPES.items():
+        result.append([{'type': 'callback', 'text': f'{"• " if key == scope else ""}{label} ({counts.get(key, 0)})', 'payload': f'mytickets:{key}:0'}])
+    result.append([{'type': 'callback', 'text': 'Создать новую заявку', 'payload': 'cmd:new_ticket'}])
+    return result
 
 
-def my_tickets_caption(tickets: list[Ticket], offset: int, total: int) -> str:
+def my_tickets_caption(tickets: list[Ticket], offset: int, total: int, scope: str = 'active', counts=None) -> str:
+    counts = counts or {scope: total}
+    lines = ['Мои заявки · ' + TICKET_SCOPES[scope][0],
+             f'Активные: {counts.get("active", 0)} · На приёмке: {counts.get("acceptance", 0)} · Завершённые: {counts.get("completed", 0)}']
+    if 'working' in counts:
+        lines.append(f'Сейчас в работе: {counts["working"]}.')
     if not tickets:
-        return "У вас пока нет заявок."
-    shown_from = offset + 1
-    shown_to = offset + len(tickets)
-    open_count = sum(1 for t in tickets if TicketStatus(t.status) in OPEN_TICKET_STATUSES)
-    if total <= MY_TICKETS_PAGE_SIZE:
-        return f"Ваши заявки (открытых: {open_count} из {total}):"
-    return f"Ваши заявки {shown_from}–{shown_to} из {total} (сначала открытые):"
+        lines.append({'active': 'Активных заявок нет.', 'acceptance': 'Нет заявок, ожидающих вашей приёмки.', 'completed': 'Завершённых заявок пока нет.'}[scope])
+    for ticket in tickets:
+        status = TicketStatus(ticket.status)
+        lines.extend(['', f'{ticket.display_number} — {ticket.subject}',
+                      f'Статус: {STATUS_LABELS_RU[status]}. {ticket_stage(ticket)}'])
+        plan = planning_summary(ticket)
+        if plan:
+            lines.append(plan.strip())
+        if status in OPEN_TICKET_STATUSES:
+            if ticket.planned_due_at is None:
+                lines.append('Плановый срок решения: ещё не указан.')
+            if ticket.estimated_minutes is None:
+                lines.append('Оценка трудозатрат: ещё не указана.')
+    if tickets:
+        lines.extend(['', f'Показаны {offset + 1}–{offset + len(tickets)} из {total}.', 'Нажмите номер ниже — откроется карточка с описанием заявки.'])
+    lines.append('Закрытые и отменённые доступны в «Завершённые». Готовые работы ждут вас в «На приёмке».')
+    return '\n'.join(lines)
 
 
 def merge_contacts(db: Session, from_contact: Contact, into_contact: Contact) -> None:

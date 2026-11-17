@@ -409,23 +409,9 @@ def _create_ticket_from_text(
     return ticket
 
 
-def _send_ticket_choice(config: TelegramConfig, chat_id: str, open_tickets: list[Ticket]) -> None:
-    buttons = [[{"type": "callback", "text": f"{t.display_number} — {t.subject[:30]}", "payload": f"ticket:{t.id}"}] for t in open_tickets]
-    buttons.append([{"type": "callback", "text": "Создать новую", "payload": "new_ticket"}])
-    _send(config, chat_id, "У вас несколько открытых заявок. К какой относится сообщение?", buttons=buttons)
-
-
 def _send_my_tickets(db: Session, config: TelegramConfig, contact: Contact, chat_id: str, offset: int = 0) -> None:
-    tickets, total = messenger_common.my_tickets_page(db, contact, offset)
-    if not tickets:
-        _send(config, chat_id, messenger_common.my_tickets_caption(tickets, offset, total))
-        return
-    _send(
-        config,
-        chat_id,
-        messenger_common.my_tickets_caption(tickets, offset, total),
-        buttons=messenger_common.my_tickets_buttons(tickets, offset, total),
-    )
+    from app.services import messenger_tickets
+    messenger_tickets.send_list(db, config, contact, chat_id, sys.modules[__name__], offset)
 
 
 def _cancel_pending_ticket_flow(state: ChannelConversationState) -> None:
@@ -509,14 +495,6 @@ def _handle_callback(db: Session, config: TelegramConfig, state: ChannelConversa
     if messenger_dialog.handle_callback(db, "telegram", config, state, contact, parsed, sys.modules[__name__]):
         return
 
-    if payload == "cmd:my_tickets":
-        _send_my_tickets(db, config, contact, parsed.chat_id)
-        return
-
-    if payload.startswith("mytickets:"):
-        _send_my_tickets(db, config, contact, parsed.chat_id, offset=int(payload.split(":", 1)[1]))
-        return
-
     if payload.startswith("close:"):
         ticket = db.get(Ticket, int(payload.split(":", 1)[1]))
         if ticket is None or ticket.contact_id != contact.id:
@@ -538,37 +516,6 @@ def _handle_callback(db: Session, config: TelegramConfig, state: ChannelConversa
         db.add(state)
         db.commit()
         _send(config, parsed.chat_id, "Опишите проблему одним сообщением - я создам заявку.")
-        return
-
-    if payload.startswith("ticket:"):
-        ticket = db.get(Ticket, int(payload.split(":", 1)[1]))
-        if ticket is None or ticket.contact_id != contact.id:
-            _send(config, parsed.chat_id, "Заявка не найдена.")
-            return
-        if TicketStatus(ticket.status) not in messenger_dialog.REPLYABLE:
-            state.awaiting_ticket_choice = False
-            state.awaiting_revive_text = True
-            state.revive_parent_ticket_id = ticket.id
-            db.add(state)
-            db.commit()
-            _send(
-                config,
-                parsed.chat_id,
-                f"Заявка {ticket.display_number} закрыта. Опишите, что случилось - я создам новую заявку и свяжу её с {ticket.display_number}.",
-            )
-            return
-        _cancel_pending_ticket_flow(state)
-        state.active_ticket_id = ticket.id
-        state.updated_at = datetime.now(timezone.utc)
-        messenger_dialog.consume(db, "telegram", config, state, contact, ticket, sys.modules[__name__])
-        db.add(state)
-        db.commit()
-        _send(
-            config,
-            parsed.chat_id,
-            f"Переключено на {ticket.display_number} — {ticket.subject}. Пишите сюда." + messenger_common.planning_summary(ticket),
-            buttons=messenger_dialog.buttons(ticket, _menu_buttons_for(ticket)),
-        )
         return
 
     if payload.startswith("csat:"):

@@ -222,7 +222,7 @@ def test_my_tickets_selection_offers_result_and_reply_for_closed_ticket(db, cont
     tickets.transition_status(db, t, TicketStatus.CLOSED, None, notify_status=False)
     bot.incoming(bot.event(callback=f'ticket:{t.id}'))
     response = db.query(ChannelJob).filter(ChannelJob.event_key.like('event:%:reply:%'),
-        ChannelJob.payload['text'].as_string().contains('Переключено на')).order_by(ChannelJob.id.desc()).first()
+        ChannelJob.payload['text'].as_string().contains('Карточка заявки')).order_by(ChannelJob.id.desc()).first()
     payloads = {b['payload'] for row in response.payload['buttons'] for b in row}
     assert f'result:{t.id}' in payloads and f'reply:{t.id}' in payloads
     assert state(db, bot).awaiting_revive_text is False

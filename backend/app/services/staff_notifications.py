@@ -15,11 +15,12 @@ logger = logging.getLogger("app.notifications")
 def notify(db: Session, user_ids: set[int], type_: NotificationType, ticket: Ticket, title: str, *, telegram=True) -> None:
     from app.services import realtime
 
+    bell_title = title if len(title) <= 500 else title[:499] + "…"
     for user_id in user_ids:
-        db.add(Notification(user_id=user_id, ticket_id=ticket.id, type=type_, title=title))
+        db.add(Notification(user_id=user_id, ticket_id=ticket.id, type=type_, title=bell_title))
         # Срабатывает на коммите (семантика pg_notify), поэтому клиента
         # никогда не будят ради строки, которую откатил бы rollback.
-        realtime.publish_notification(db, user_id, type_.value, title, ticket.id)
+        realtime.publish_notification(db, user_id, type_.value, bell_title, ticket.id)
     if telegram:
         heading = {NotificationType.TICKET_ASSIGNED: "Назначен исполнитель",
                    NotificationType.CUSTOMER_REPLIED: "Ответ клиента"}.get(type_, title)

@@ -64,7 +64,7 @@ def test_my_tickets_page_returns_page_and_total(db: Session, contact: Contact):
     assert len(items) == messenger_common.MY_TICKETS_PAGE_SIZE
 
     second, _ = messenger_common.my_tickets_page(db, contact, offset=messenger_common.MY_TICKETS_PAGE_SIZE)
-    assert len(second) == 2
+    assert len(second) == min(messenger_common.MY_TICKETS_PAGE_SIZE, len(created) - messenger_common.MY_TICKETS_PAGE_SIZE)
     assert {t.id for t in items}.isdisjoint({t.id for t in second})
 
 
@@ -77,7 +77,7 @@ def test_open_tickets_come_first_even_when_older_than_closed_ones(db: Session, c
         _close(db, _make(db, contact, f"Свежая закрытая {i}"))
 
     items, total = messenger_common.my_tickets_page(db, contact, offset=0)
-    assert total == 7
+    assert total == 1
     assert items[0].id == old_open.id
 
 
@@ -87,32 +87,34 @@ def test_buttons_offer_next_page_only_when_more_remain(db: Session, contact: Con
 
     items, total = messenger_common.my_tickets_page(db, contact, offset=0)
     payloads = [row[0]["payload"] for row in messenger_common.my_tickets_buttons(items, 0, total)]
-    assert f"mytickets:{messenger_common.MY_TICKETS_PAGE_SIZE}" in payloads
-    assert not any(p == "mytickets:0" for p in payloads)  # no "back" on the first page
+    assert f"mytickets:active:{messenger_common.MY_TICKETS_PAGE_SIZE}" in payloads
+    assert not any(button["text"] == "← Назад" for row in messenger_common.my_tickets_buttons(items, 0, total) for button in row)
 
-    tail, _ = messenger_common.my_tickets_page(db, contact, offset=messenger_common.MY_TICKETS_PAGE_SIZE)
-    tail_payloads = [row[0]["payload"] for row in messenger_common.my_tickets_buttons(tail, 5, total)]
-    assert "mytickets:0" in tail_payloads  # back to the first page
-    assert not any(p.startswith("mytickets:10") for p in tail_payloads)  # nothing beyond the end
+    tail_offset = 2 * messenger_common.MY_TICKETS_PAGE_SIZE
+    tail, _ = messenger_common.my_tickets_page(db, contact, offset=tail_offset)
+    tail_payloads = [button['payload'] for row in messenger_common.my_tickets_buttons(tail, tail_offset, total) for button in row]
+    assert f"mytickets:active:{tail_offset - messenger_common.MY_TICKETS_PAGE_SIZE}" in tail_payloads
+    assert not any(p == f"mytickets:active:{tail_offset + len(tail)}" for p in tail_payloads)
 
 
 def test_caption_reports_the_window(db: Session, contact: Contact):
     for i in range(7):
         _make(db, contact, f"Заявка {i}")
     items, total = messenger_common.my_tickets_page(db, contact, offset=0)
-    assert "1–5 из 7" in messenger_common.my_tickets_caption(items, 0, total)
+    assert "1–3 из 7" in messenger_common.my_tickets_caption(items, 0, total)
 
 
 def test_caption_stays_simple_for_a_single_page(db: Session, contact: Contact):
     _make(db, contact, "Единственная")
     items, total = messenger_common.my_tickets_page(db, contact, offset=0)
-    assert messenger_common.my_tickets_caption(items, 0, total) == "Ваши заявки (открытых: 1 из 1):"
+    assert "Активные: 1" in messenger_common.my_tickets_caption(items, 0, total)
+    assert "Единственная" in messenger_common.my_tickets_caption(items, 0, total)
 
 
 def test_empty_list_has_its_own_caption(db: Session, contact: Contact):
     items, total = messenger_common.my_tickets_page(db, contact, offset=0)
     assert items == [] and total == 0
-    assert messenger_common.my_tickets_caption(items, 0, total) == "У вас пока нет заявок."
+    assert "Активных заявок нет." in messenger_common.my_tickets_caption(items, 0, total)
 
 
 def test_search_matches_message_body(db: Session, contact: Contact):

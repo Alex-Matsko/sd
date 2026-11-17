@@ -33,6 +33,10 @@ def buttons(ticket, existing=None):
     result = [[b for b in row if not (ticket.resolution_message_id and b.get('payload', '').startswith('close:'))] for row in (existing or [])]
     result = [row for row in result if row]
     result = result_buttons(ticket) + result
+    if TicketStatus(ticket.status) == TicketStatus.CANCELLED:
+        if not any(b.get('payload') == f'continue:{ticket.id}' for row in result for b in row):
+            result.insert(0, [{'type': 'callback', 'text': 'Создать связанное обращение', 'payload': f'continue:{ticket.id}'}])
+        return result
     if not any(b.get('payload') == f'reply:{ticket.id}' for row in result for b in row):
         result.insert(0, [{'type': 'callback', 'text': 'Ответить по этой заявке', 'payload': f'reply:{ticket.id}'}])
     return result
@@ -190,13 +194,18 @@ def create_from_waiting(db, channel, config, state, contact, module, parent_id=N
 
 
 def prompt(db, channel, config, state, contact, module, closed=None):
-    from app.services.messenger_common import STATUS_LABELS_RU
-    candidates = db.query(Ticket).filter(Ticket.contact_id == contact.id, Ticket.status.in_(REPLYABLE)).order_by(Ticket.updated_at.desc(), Ticket.id.desc()).limit(20).all()
-    rows = [[{'type': 'callback', 'text': f'{t.display_number} — {t.subject[:35]} ({STATUS_LABELS_RU[t.status]})', 'payload': f'reply:{t.id}'}] for t in candidates]
+    from app.services.messenger_common import STATUS_LABELS_RU, ticket_stage
+    candidates = db.query(Ticket).filter(Ticket.contact_id == contact.id,
+        Ticket.status.in_(OPEN_TICKET_STATUSES | {TicketStatus.RESOLVED})).order_by(Ticket.updated_at.desc(), Ticket.id.desc()).limit(3).all()
+    rows = [[{'type': 'callback', 'text': f'Ответить по {t.display_number} · {STATUS_LABELS_RU[t.status]}', 'payload': f'reply:{t.id}'}] for t in candidates]
     if closed:
         rows.append([{'type': 'callback', 'text': f'Продолжить {closed.display_number} новой заявкой', 'payload': f'continue:{closed.id}'}])
+    rows.append([{'type': 'callback', 'text': 'Все мои заявки и завершённые', 'payload': 'cmd:my_tickets'}])
     rows.append([{'type': 'callback', 'text': 'Создать новую заявку', 'payload': 'new_ticket'}])
-    text = (f'Заявка {closed.display_number} закрыта. ' if closed else '') + ('Сообщение и вложения сохранены. ' if waiting(db, channel, config, state) else '') + 'Выберите, к какой заявке относится ответ, или создайте новую кнопкой ниже.'
+    text = (f'Заявка {closed.display_number}: {STATUS_LABELS_RU[TicketStatus(closed.status)]}. ' if closed else '') + ('Сообщение и вложения сохранены. ' if waiting(db, channel, config, state) else '') + 'Выберите, к какой заявке относится ответ, или создайте новую кнопкой ниже.'
+    for ticket in candidates:
+        text += f'\n\n{ticket.display_number} — {ticket.subject}\nСтатус: {STATUS_LABELS_RU[ticket.status]}. {ticket_stage(ticket)}'
+    text += '\n\nОстальные обращения доступны в «Все мои заявки и завершённые».'
     module._send(config, state.chat_id, text, buttons=rows)
 
 
@@ -269,7 +278,9 @@ def route_text(db, channel, config, state, contact, parsed, module):
 
 def handle_callback(db, channel, config, state, contact, parsed, module):
     payload = parsed.callback_payload or ''
-    from app.services import customer_acceptance
+    from app.services import customer_acceptance, messenger_tickets
+    if messenger_tickets.handle_callback(db, channel, config, state, contact, parsed, module):
+        return True
     if customer_acceptance.handle_callback(db, channel, config, state, contact, parsed, module):
         return True
     if payload.startswith('close:') and payload.split(':', 1)[1].isdigit():

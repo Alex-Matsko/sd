@@ -107,7 +107,7 @@ def queued_bot_replies(db: Session, event_id: int):
         _current.reset(token)
 
 
-def defer_bot_reply(channel: str, chat_id: str, text: str, buttons=None, reply_to=None) -> bool:
+def defer_bot_reply(channel: str, chat_id: str, text: str, buttons=None, reply_to=None, *, suppress_ticket_buttons=False) -> bool:
     context = _current.get()
     if context is None:
         return False
@@ -115,7 +115,7 @@ def defer_bot_reply(channel: str, chat_id: str, text: str, buttons=None, reply_t
     counter[0] += 1
     db.add(ChannelJob(kind="outbound", channel=channel,
                       event_key=f"event:{event_id}:reply:{counter[0]}", stream_key=f"{channel}:chat:{chat_id}",
-                      payload={"recipient": chat_id, "text": text, "buttons": buttons, "reply_to": reply_to}))
+                      payload={"recipient": chat_id, "text": text, "buttons": buttons, "reply_to": reply_to, "suppress_ticket_buttons": suppress_ticket_buttons}))
     return True
 
 
@@ -220,7 +220,8 @@ def process_inbound(db: Session, job_id: int, lease_token: str):
                         job.ticket_id = state.active_ticket_id if state and not unit.info.get("waiting_inbound_event") else None
                         if job.ticket_id:
                             for reply in unit.query(ChannelJob).filter(ChannelJob.event_key.like(f"event:{job.id}:reply:%")):
-                                reply.ticket_id = job.ticket_id
+                                if not reply.payload.get("suppress_ticket_buttons"):
+                                    reply.ticket_id = job.ticket_id
             job.state = "waiting" if unit.info.get("waiting_inbound_event") else "processed"
             job.completed_at, job.last_error = (None if job.state == "waiting" else now()), None
             job.lease_until, job.lease_token = None, None

@@ -281,6 +281,7 @@ def test_my_tickets_command_cancels_pending_revive_flow(db: Session, max_enabled
 
     max_channel.handle_update(db, max_channel_callback_for(old_ticket.id, user_id="u-cancel2", chat_id="c-cancel2"))
     state = db.query(ChannelConversationState).filter(ChannelConversationState.external_user_id == "u-cancel2").first()
+    max_channel.handle_update(db, _callback_update(user_id="u-cancel2", chat_id="c-cancel2", payload=f"continue:{old_ticket.id}"))
     assert state.awaiting_revive_text is True
 
     max_channel.handle_update(db, _text_update(user_id="u-cancel2", chat_id="c-cancel2", text="мои заявки"))
@@ -429,8 +430,8 @@ def test_my_tickets_command_lists_tickets(db: Session, max_enabled, contact: Con
     max_channel.handle_update(db, _text_update(user_id="u14", chat_id="c14", text="Мои заявки"))
 
     assert any(s["buttons"] for s in _fake_send)
-    button_text = _fake_send[-1]["buttons"][0][0]["text"]
-    assert "Не работает 1С" in button_text  # subject visible, not just the number
+    last = _fake_send[-1]
+    assert "Не работает 1С" in last["text"]  # full subject is outside the narrow button
 
 
 def test_my_tickets_lists_open_before_closed_with_count(db: Session, max_enabled, contact: Contact, _fake_send):
@@ -448,9 +449,11 @@ def test_my_tickets_lists_open_before_closed_with_count(db: Session, max_enabled
     max_channel.handle_update(db, _text_update(user_id="u-order", chat_id="c-order", text="Мои заявки"))
 
     last = _fake_send[-1]
-    assert "открытых: 1 из 2" in last["text"]
+    assert "Активные: 1" in last["text"] and "Завершённые: 1" in last["text"]
     payloads_in_order = [row[0]["payload"] for row in last["buttons"]]
-    assert payloads_in_order == [f"ticket:{open_ticket.id}", f"ticket:{closed.id}"]
+    assert payloads_in_order[0] == f"ticket:{open_ticket.id}"
+    assert f"ticket:{closed.id}" not in payloads_in_order
+    assert "mytickets:completed:0" in payloads_in_order
 
 
 def test_explicit_new_ticket_command_then_description(db: Session, max_enabled, contact: Contact, _fake_send):
@@ -496,9 +499,11 @@ def test_selecting_cancelled_ticket_prompts_revive_then_creates_linked_ticket(db
 
     max_channel.handle_update(db, max_channel_callback_for(old_ticket.id, user_id="u-revive", chat_id="c-revive"))
     state = db.query(ChannelConversationState).filter(ChannelConversationState.external_user_id == "u-revive").first()
+    assert state.awaiting_revive_text is False
+    max_channel.handle_update(db, _callback_update(user_id="u-revive", chat_id="c-revive", payload=f"continue:{old_ticket.id}"))
     assert state.awaiting_revive_text is True
     assert state.revive_parent_ticket_id == old_ticket.id
-    assert state.active_ticket_id is None  # not switched onto the terminal ticket
+    assert state.active_ticket_id == old_ticket.id  # viewing alone does not create a follow-up
 
     max_channel.handle_update(db, _text_update(user_id="u-revive", chat_id="c-revive", text="Проблема повторилась"))
     db.refresh(state)

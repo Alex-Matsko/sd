@@ -175,9 +175,11 @@ def test_my_tickets_lists_subject_and_groups_open_first(db: Session, telegram_en
     telegram_channel.handle_update(db, _text_update(user_id=13, chat_id=13, text="Мои заявки"))
 
     last = _fake_send[-1]
-    assert "открытых: 1 из 2" in last["text"]
+    assert "Активные: 1" in last["text"] and "Завершённые: 1" in last["text"]
     payloads_in_order = [row[0]["payload"] for row in last["buttons"]]
-    assert payloads_in_order == [f"ticket:{open_ticket.id}", f"ticket:{closed.id}"]
+    assert payloads_in_order[0] == f"ticket:{open_ticket.id}"
+    assert f"ticket:{closed.id}" not in payloads_in_order
+    assert "mytickets:completed:0" in payloads_in_order
 
 
 # --- "поднять старую" -------------------------------------------------------
@@ -193,6 +195,8 @@ def test_selecting_cancelled_ticket_prompts_revive_then_creates_linked_ticket(db
 
     telegram_channel.handle_update(db, _callback_for(old_ticket.id, user_id=14, chat_id=14))
     state = db.query(ChannelConversationState).filter(ChannelConversationState.external_user_id == "14").first()
+    assert state.awaiting_revive_text is False
+    telegram_channel.handle_update(db, _callback_update(user_id=14, chat_id=14, payload=f"continue:{old_ticket.id}"))
     assert state.awaiting_revive_text is True
     assert state.revive_parent_ticket_id == old_ticket.id
 
