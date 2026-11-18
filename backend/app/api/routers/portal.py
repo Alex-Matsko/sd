@@ -18,7 +18,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.enums import OPEN_TICKET_STATUSES, Channel, MessageDirection, Priority, TicketStatus, TicketType
-from app.core.security import create_portal_access_token, decode_access_token, verify_password
+from app.core.security import create_portal_access_token, decode_access_token, verify_password, session_version_matches
 from app.db import get_db
 from app.api.deps import check_login_allowed
 from app.services import login_guard
@@ -80,7 +80,11 @@ def get_current_contact(
         raise error
 
     contact = db.get(Contact, contact_id)
-    if contact is None:
+    if contact is None or contact.portal_access_revoked or not session_version_matches(payload, contact.portal_auth_version):
+        raise error
+    # Every real portal login creates this row. Its absence also rejects JWTs
+    # belonging to accounts revoked by releases predating auth generations.
+    if db.query(PortalCredential.id).filter_by(contact_id=contact.id).first() is None:
         raise error
     return contact
 
@@ -95,12 +99,14 @@ def portal_login(
     client_ip = request.client.host if request.client else ""
     check_login_allowed("portal", payload.email, client_ip)
     try:
-        contact = portal.authenticate_with_password(db, payload.email, payload.password)
+        contact = portal.authenticate_with_password(db, payload.email, payload.password, commit=False)
     except portal.PortalAuthError as exc:
         login_guard.guard.register_failure("portal", payload.email, client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
     login_guard.guard.register_success("portal", payload.email, client_ip)
-    return PortalTokenResponse(access_token=create_portal_access_token(contact.id))
+    token = create_portal_access_token(contact.id, contact.portal_auth_version)
+    db.commit()
+    return PortalTokenResponse(access_token=token)
 
 
 @router.post("/auth/magic-link", status_code=status.HTTP_202_ACCEPTED)
@@ -158,10 +164,12 @@ def _send_magic_link(db: Session, contact: Contact, link: str) -> None:
 @router.post("/auth/magic-link/consume", response_model=PortalTokenResponse)
 def consume_magic_link(token: str, db: Session = Depends(get_db)) -> PortalTokenResponse:
     try:
-        contact = portal.consume_magic_link(db, token)
+        contact = portal.consume_magic_link(db, token, commit=False)
     except portal.PortalAuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    return PortalTokenResponse(access_token=create_portal_access_token(contact.id))
+    access_token = create_portal_access_token(contact.id, contact.portal_auth_version)
+    db.commit()
+    return PortalTokenResponse(access_token=access_token)
 
 
 @router.get("/me", response_model=PortalMe)
@@ -562,12 +570,12 @@ def mark_updates_seen(
     db.commit()
 
 
-@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/me/password", response_model=PortalTokenResponse)
 def change_my_password(
     payload: PortalPasswordChange,
     contact: Contact = Depends(get_current_contact),
     db: Session = Depends(get_db),
-) -> None:
+) -> PortalTokenResponse:
     """Клиент меняет пароль сам.
 
     Раньше пароль навсегда оставался тем, что продиктовал диспетчер: он
@@ -575,6 +583,10 @@ def change_my_password(
     спрашивается, чтобы чужой, добравшийся до открытой вкладки, не сменил
     его и не заперся внутри.
     """
+    version = contact.portal_auth_version
+    contact = db.query(Contact).filter_by(id=contact.id).populate_existing().with_for_update().one()
+    if contact.portal_access_revoked or contact.portal_auth_version != version:
+        raise HTTPException(status_code=401, detail="Сессия завершена. Войдите снова.")
     credential = db.query(PortalCredential).filter(PortalCredential.contact_id == contact.id).first()
     if credential is None or not credential.password_hash:
         raise HTTPException(
@@ -584,7 +596,10 @@ def change_my_password(
     if not verify_password(payload.current_password, credential.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Текущий пароль указан неверно")
 
-    portal.set_password(db, contact, payload.new_password)
+    portal.set_password(db, contact, payload.new_password, commit=False)
+    token = create_portal_access_token(contact.id, contact.portal_auth_version)
+    db.commit()
+    return PortalTokenResponse(access_token=token)
 
 
 @router.get("/reports/{year}/{month}.pdf")

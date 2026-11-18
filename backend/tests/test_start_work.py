@@ -133,17 +133,20 @@ def test_failure_rolls_back_status_notifications_banking_and_timer_switch(db, co
     assert db.query(ChannelJob).filter_by(ticket_id=second.id).count() == 0
 
 
-def test_resuming_while_the_same_timer_is_running_keeps_elapsed_and_resumes_sla(api, db, contact, engineer_user):
+def test_waiting_banks_old_timer_and_resuming_starts_a_new_one(api, db, contact, engineer_user):
     ticket = make_ticket(db, contact)
     timer = time_entries.start_timer(db, ticket, engineer_user)
-    timer.started_at -= timedelta(minutes=2); db.commit()
+    timer.started_at -= timedelta(minutes=2, seconds=5); db.commit()
     started = timer.started_at
     tickets.transition_status(db, ticket, TicketStatus.WAITING_CUSTOMER, engineer_user)
+    assert time_entries.get_active_timer(db, engineer_user) is None
+    assert db.query(TimeEntry).filter_by(ticket_id=ticket.id).one().duration_minutes == 3
     ticket.sla_paused_at = datetime.now(timezone.utc) - timedelta(minutes=10); db.commit()
     assert api.post(f'/tickets/{ticket.id}/timer/start').status_code == 200
-    db.refresh(ticket); db.refresh(timer)
+    db.refresh(ticket)
+    resumed = time_entries.get_active_timer(db, engineer_user)
     assert ticket.status == TicketStatus.IN_PROGRESS and ticket.sla_paused_at is None
-    assert ticket.sla_paused_minutes_total >= 10 and timer.started_at == started
+    assert ticket.sla_paused_minutes_total >= 10 and resumed.started_at > started
 
 
 def test_stop_does_not_mark_work_as_completed(api, db, contact, engineer_user):

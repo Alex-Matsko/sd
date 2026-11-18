@@ -13,7 +13,7 @@ from app.core.security import (
     generate_refresh_token,
     hash_password,
     hash_refresh_token,
-    revoke_refresh_tokens,
+    revoke_user_sessions,
     verify_password,
 )
 from app.db import get_db
@@ -29,7 +29,7 @@ TELEGRAM_LINK_CODE_TTL_MINUTES = 15
 
 
 def _issue_tokens(user: User, db: Session) -> TokenResponse:
-    access_token = create_access_token(user.id, user.role)
+    access_token = create_access_token(user.id, user.role, user.auth_version)
     raw_refresh, refresh_hash, expires_at = generate_refresh_token()
     db.add(
         RefreshToken(
@@ -52,7 +52,7 @@ def login(
     client_ip = request.client.host if request.client else ""
     check_login_allowed("staff", form_data.username, client_ip)
 
-    user = db.query(User).filter(User.email == form_data.username).first()
+    user = db.query(User).filter(User.email == form_data.username).with_for_update().first()
     invalid = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный email или пароль")
     # Пароль проверяется даже для несуществующего адреса. Иначе ответ для
     # неизвестного пользователя приходит заметно быстрее — bcrypt не
@@ -73,13 +73,14 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResp
     invalid = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Недействительный refresh-токен")
     token_hash = hash_refresh_token(payload.refresh_token)
     stored = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
-    if stored is None or stored.revoked_at is not None:
+    if stored is None:
         raise invalid
-    if stored.expires_at < datetime.now(timezone.utc):
-        raise invalid
-
-    user = db.get(User, stored.user_id)
+    # All credential operations lock the user before its refresh rows.
+    user = db.query(User).filter_by(id=stored.user_id).with_for_update().first()
     if user is None or not user.is_active:
+        raise invalid
+    stored = db.query(RefreshToken).filter_by(id=stored.id).populate_existing().with_for_update().one()
+    if stored.revoked_at is not None or stored.expires_at < datetime.now(timezone.utc):
         raise invalid
 
     stored.revoked_at = datetime.now(timezone.utc)
@@ -102,21 +103,22 @@ def me(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/me/password", response_model=TokenResponse)
 def change_own_password(
     payload: PasswordChangeRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)
-) -> None:
+) -> TokenResponse:
     """Self-service password change. Previously only a manager/admin could set
     anyone's password via PATCH /users/{id}, which left an engineer with no way
     to rotate their own - including off the seeded default (found in audit).
     Revokes this user's refresh tokens so a stolen session can't outlive the
     password it was issued against."""
+    user = db.query(User).filter_by(id=user.id).populate_existing().with_for_update().one()
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Текущий пароль указан неверно")
     user.password_hash = hash_password(payload.new_password)
     db.add(user)
-    revoke_refresh_tokens(db, user)
-    db.commit()
+    revoke_user_sessions(db, user)
+    return _issue_tokens(user, db)
 
 
 @router.post("/me/telegram-link-code", response_model=TelegramLinkCodeRead)

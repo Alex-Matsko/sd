@@ -362,13 +362,16 @@ def reply(db: Session, key: str, number: int, text: str) -> Ticket:
 
 
 def close_by_client(db: Session, key: str, number: int) -> Ticket:
-    """«Вопрос решён» из окна продукта — та же цепочка, что у мессенджеров."""
-    from app.services.messenger_common import close_ticket_chain
+    """The product's close action accepts a published result, never invents one."""
+    from app.services.customer_acceptance import decide
 
     ticket = _ticket_of(db, key, number)
     if TicketStatus(ticket.status) in FINAL_STATUSES:
         return ticket
-    return close_ticket_chain(db, ticket)
+    if ticket.status != TicketStatus.RESOLVED or not ticket.resolution_message_id:
+        raise ValueError('Дождитесь опубликованного результата перед приёмкой заявки')
+    decide(db, ticket, db.get(Contact, ticket.contact_id), ticket.resolution_message_id, True)
+    return ticket
 
 
 def _summary(db: Session, ticket: Ticket) -> dict:

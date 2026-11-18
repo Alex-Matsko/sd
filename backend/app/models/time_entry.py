@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import Boolean, Date, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, Date, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -16,6 +16,8 @@ class TimeEntry(Base, TimestampMixin):
 
     # Списания за период — основа отчёта и биллинга.
     __table_args__ = (
+        CheckConstraint("duration_minutes > 0", name="ck_time_entries_positive_duration"),
+        CheckConstraint("billed_package_minutes >= 0 AND billed_overage_minutes >= 0", name="ck_time_entries_nonnegative_billing"),
         Index("ix_time_entries_entry_date", "entry_date"),
         Index("ix_time_entries_ticket_id", "ticket_id"),
     )

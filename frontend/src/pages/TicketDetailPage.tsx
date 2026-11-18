@@ -118,6 +118,8 @@ export function TicketDetailPage({ embedded = false }: { embedded?: boolean }) {
       qc.invalidateQueries({ queryKey: ["ticket", id] });
       qc.invalidateQueries({ queryKey: ["tickets"] });
       qc.invalidateQueries({ queryKey: ["ticket-stats"] });
+      qc.invalidateQueries({ queryKey: ["active-timer"] });
+      qc.invalidateQueries({ queryKey: ["organization-usage"] });
     },
   });
 

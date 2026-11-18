@@ -7,7 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.core.enums import UserRole
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token, session_version_matches
 from app.db import get_db
 from app.models.user import User
 from app.services import login_guard, settings_audit
@@ -32,7 +32,7 @@ def get_current_user(
         raise credentials_error
 
     user = db.get(User, user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or not session_version_matches(payload, user.auth_version):
         raise credentials_error
     # Автор запроса для автоматического аудита настроек. Кладётся в сессию,
     # а не в contextvar: синхронные зависимости FastAPI идут в отдельном

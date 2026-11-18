@@ -108,6 +108,7 @@ export const SLA_STATE_LABELS: Record<SlaTimerState, string> = {
 };
 
 export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
+  contact_link_request: "Привязка каналов клиента",
   work_assigned: "Назначение в проект",
   work_approval: "Согласование проекта",
   work_updated: "Изменение проекта",

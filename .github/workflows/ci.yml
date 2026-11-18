@@ -57,6 +57,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
 
   # Auto-deploy to staging only after both test jobs pass, and only for the
   # staging branch - production is a separate, manually-triggered workflow

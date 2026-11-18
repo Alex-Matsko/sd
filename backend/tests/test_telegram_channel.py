@@ -1,3 +1,4 @@
+from tests.ticket_fixtures import accepted_result
 from app.services import channel_queue
 """Telegram channel tests, mirroring test_max_channel.py's coverage for the
 shared feature set (dialog gluing, ticket menu incl. revive/close, reply
@@ -138,7 +139,7 @@ def test_second_message_attaches_and_acknowledges(db: Session, telegram_enabled,
     # Unlike MAX, no main-menu buttons here - Telegram's persistent command
     # menu already covers "Мои заявки"/"Создать новую" (docs/decisions.md).
     payloads = {row[0]["payload"] for row in _fake_send[0]["buttons"]}
-    assert payloads == {f"close:{tickets[0].id}"}
+    assert payloads == {f"cancel_ticket:{tickets[0].id}"}
 
 
 def test_multiple_open_tickets_prompts_choice_then_switches(db: Session, telegram_enabled, contact: Contact, _fake_send):
@@ -168,6 +169,7 @@ def test_my_tickets_lists_subject_and_groups_open_first(db: Session, telegram_en
     closed = tickets_service.create_ticket(db, closed_payload, actor=None)
     tickets_service.transition_status(db, closed, TicketStatus.IN_PROGRESS, actor=None)
     tickets_service.transition_status(db, closed, TicketStatus.RESOLVED, actor=None)
+    accepted_result(db, closed)
     tickets_service.transition_status(db, closed, TicketStatus.CLOSED, actor=None)
     open_payload = TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.TELEGRAM, subject="Новая", manual_priority=Priority.P3, manual_priority_reason="test")
     open_ticket = tickets_service.create_ticket(db, open_payload, actor=None)
@@ -267,13 +269,13 @@ def test_try_send_outbound_with_reply_passes_parent_mid_and_stores_own_mid(db: S
     # Only the close button here, not the full main menu - see
     # test_second_message_attaches_and_acknowledges for why.
     payloads = {row[0]["payload"] for row in _fake_send[0]["buttons"]}
-    assert payloads == {f"close:{ticket.id}", f"reply:{ticket.id}"}
+    assert payloads == {f"cancel_ticket:{ticket.id}", f"reply:{ticket.id}"}
 
 
 # --- client-initiated close -------------------------------------------------------
 
 
-def test_close_callback_chains_new_ticket_all_the_way_to_closed(db: Session, telegram_enabled, contact: Contact, _fake_send):
+def test_old_close_button_only_prompts_then_confirmation_cancels(db: Session, telegram_enabled, contact: Contact, _fake_send):
     contact.telegram_id = "18"
     db.commit()
     telegram_channel.handle_update(db, _text_update(user_id=18, chat_id=18, text="Проблема"))
@@ -283,8 +285,12 @@ def test_close_callback_chains_new_ticket_all_the_way_to_closed(db: Session, tel
     telegram_channel.handle_update(db, _callback_update(user_id=18, chat_id=18, payload=f"close:{ticket.id}"))
 
     db.refresh(ticket)
-    assert TicketStatus(ticket.status) == TicketStatus.CLOSED
-    assert ticket.csat_requested_at is not None
+    assert TicketStatus(ticket.status) == TicketStatus.NEW
+    assert ticket.resolved_at is None and ticket.closed_at is None
+    telegram_channel.handle_update(db, _callback_update(user_id=18, chat_id=18, payload=f"cancel_ticket_confirm:{ticket.id}"))
+    db.refresh(ticket)
+    assert TicketStatus(ticket.status) == TicketStatus.CANCELLED
+    assert ticket.resolved_at is None and ticket.closed_at is None and ticket.csat_requested_at is None
 
 
 def test_close_callback_on_already_closed_ticket_is_a_no_op(db: Session, telegram_enabled, contact: Contact, _fake_send):
@@ -294,6 +300,7 @@ def test_close_callback_on_already_closed_ticket_is_a_no_op(db: Session, telegra
     ticket = tickets_service.create_ticket(db, payload, actor=None)
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
     tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
+    accepted_result(db, ticket)
     tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
 
     telegram_channel.handle_update(db, _callback_update(user_id=19, chat_id=19, payload=f"close:{ticket.id}"))
@@ -412,7 +419,7 @@ def test_try_send_outbound_without_known_chat_does_not_raise(db: Session, telegr
 # --- cross-channel identity matching ("связать телефон") -------------------------------------------------------
 
 
-def test_link_phone_merges_when_existing_contact_matches(db: Session, telegram_enabled, contact: Contact, _fake_send):
+def test_link_phone_requests_staff_review_without_merging(db: Session, telegram_enabled, contact: Contact, _fake_send):
     from app.models.contact import ContactPhone
 
     db.add(ContactPhone(contact_id=contact.id, phone="+7 916 123-45-67", is_primary=True))
@@ -426,15 +433,15 @@ def test_link_phone_merges_when_existing_contact_matches(db: Session, telegram_e
     telegram_channel.handle_update(db, _text_update(user_id=30, chat_id=30, text="связать телефон"))
     telegram_channel.handle_update(db, _text_update(user_id=30, chat_id=30, text="89161234567"))
 
-    assert db.get(Contact, new_contact.id) is None
+    assert db.get(Contact, new_contact.id) is not None
     db.refresh(ticket)
-    assert ticket.contact_id == contact.id
+    assert ticket.contact_id == new_contact.id
     db.refresh(contact)
-    assert contact.telegram_id == "30"
-    assert any("объединены" in s["text"] for s in _fake_send)
+    assert contact.telegram_id is None
+    assert any("передан сотруднику" in s["text"] for s in _fake_send)
 
 
-def test_link_phone_saves_number_when_no_match(db: Session, telegram_enabled, _fake_send):
+def test_link_phone_does_not_register_unverified_number(db: Session, telegram_enabled, _fake_send):
     telegram_channel.handle_update(db, _text_update(user_id=31, chat_id=31, text="Проблема"))
     contact = db.query(Contact).filter(Contact.telegram_id == "31").first()
 
@@ -442,5 +449,5 @@ def test_link_phone_saves_number_when_no_match(db: Session, telegram_enabled, _f
     telegram_channel.handle_update(db, _text_update(user_id=31, chat_id=31, text="+7 999 000-00-00"))
 
     db.refresh(contact)
-    assert len(contact.phones) == 1
-    assert any("сохранили номер" in s["text"] for s in _fake_send)
+    assert len(contact.phones) == 0
+    assert any("передан сотруднику" in s["text"] for s in _fake_send)

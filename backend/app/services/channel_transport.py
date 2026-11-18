@@ -118,7 +118,7 @@ def send_job(db, job):
     parent = db.get(Message, message.reply_to_message_id) if message and message.reply_to_message_id else None
     reply = (parent.max_message_id if job.channel == "max" else parent.telegram_message_id) if parent else payload.get("reply_to")
     buttons = payload.get("buttons") if message is None else (
-        max_channel._menu_buttons_for(message.ticket) if job.channel == "max" else telegram_channel._close_button_for(message.ticket))
+        max_channel._menu_buttons_for(message.ticket) if job.channel == "max" else telegram_channel._cancel_button_for(message.ticket))
     if ticket is not None and not payload.get('staff_notice') and not payload.get('suppress_ticket_buttons'):
         buttons = messenger_dialog.buttons(ticket, buttons)
     if message is not None and message.content_blocks is not None:

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_manager_or_above
 from app.core.enums import UserRole
-from app.core.security import hash_password, revoke_refresh_tokens
+from app.core.security import hash_password, revoke_user_sessions
 from app.db import get_db
 from app.models.user import User
 from app.schemas.user import UserCreate, UserRead, UserUpdate
@@ -80,16 +80,15 @@ def update_user(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Нельзя деактивировать собственную учётную запись"
         )
 
+    active_changed = payload.is_active is not None and payload.is_active != user.is_active
     data = payload.model_dump(exclude_unset=True, exclude={"password"})
     for field, value in data.items():
         setattr(user, field, value)
     if payload.password:
         user.password_hash = hash_password(payload.password)
-        # Пароль сбрасывают ровно тогда, когда учётку увели или сотрудник
-        # уволился — и именно тогда чужой refresh-токен обязан умереть.
-        # Самостоятельная смена пароля сессии гасила, а сброс администратором
-        # оставлял их жить ещё месяц.
-        revoke_refresh_tokens(db, user)
+    # Access/refresh tokens and live notification sessions share revocation.
+    if payload.password or active_changed:
+        revoke_user_sessions(db, user)
 
     db.add(user)
     db.commit()

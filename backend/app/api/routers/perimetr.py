@@ -139,4 +139,6 @@ def close(key: str, number: int, db: Session = Depends(get_db)) -> dict:
         perimetr_channel.close_by_client(db, key, number)
     except perimetr_channel.TicketGone:
         raise _gone()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return perimetr_channel.ticket_detail(db, key, number)

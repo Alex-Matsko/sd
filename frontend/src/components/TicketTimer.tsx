@@ -42,6 +42,8 @@ export function TicketTimer({ ticket }: { ticket: Ticket }) {
     qc.invalidateQueries({ queryKey: ["tickets"] });
     qc.invalidateQueries({ queryKey: ["ticket-stats"] });
     qc.invalidateQueries({ queryKey: ["organization-usage"] });
+    qc.invalidateQueries({ queryKey: ["ticket", ticketId, "time"] });
+    if (timer?.ticket_id && timer.ticket_id !== ticketId) qc.invalidateQueries({ queryKey: ["ticket", timer.ticket_id, "time"] });
   }
   const startMutation = useMutation({ mutationFn: (plan: WorkPlan) => startTimer(ticketId, plan),
     onSuccess: () => { setPlanning(false); setNotice(null); stopMutation.reset(); refresh(); },
@@ -53,7 +55,9 @@ export function TicketTimer({ ticket }: { ticket: Ticket }) {
       refresh();
     } });
   const pending = startMutation.isPending || stopMutation.isPending;
-  const ready = timerQuery.isSuccess && !pending;
+  // Starting work checks and switches timers on the server atomically.
+  // A failed polling request must not permanently disable this action.
+  const ready = !pending;
   const title = !canStart ? (status === "closed" ? "Заявка закрыта" : "Заявка отменена")
     : status === "resolved" ? "Работы завершены" : status === "waiting_customer" || status === "waiting_third_party" ? "Работа ожидает возобновления"
     : runningHere ? "Работа по заявке начата" : status === "in_progress" ? "Заявка в работе" : "Можно начать работу";

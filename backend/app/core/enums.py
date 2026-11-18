@@ -95,6 +95,7 @@ class OrganizationStatus(str, Enum):
 
 
 class NotificationType(str, Enum):
+    CONTACT_LINK_REQUEST = "contact_link_request"
     WORK_ASSIGNED = "work_assigned"
     WORK_APPROVAL = "work_approval"
     WORK_UPDATED = "work_updated"

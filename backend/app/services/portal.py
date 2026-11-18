@@ -48,17 +48,22 @@ def get_or_create_credential(db: Session, contact: Contact) -> PortalCredential:
     return credential
 
 
-def set_password(db: Session, contact: Contact, password: str) -> PortalCredential:
+def set_password(db: Session, contact: Contact, password: str, *, commit=True) -> PortalCredential:
+    contact = db.query(Contact).filter_by(id=contact.id).populate_existing().with_for_update().one()
     credential = get_or_create_credential(db, contact)
     credential.password_hash = hash_password(password)
     db.add(credential)
-    db.commit()
+    contact.portal_auth_version += 1
+    contact.portal_access_revoked = False
+    db.query(PortalLoginToken).filter_by(contact_id=contact.id, used_at=None).delete()
+    if commit:
+        db.commit()
     return credential
 
 
 def has_access(db: Session, contact: Contact) -> bool:
     credential = db.query(PortalCredential).filter(PortalCredential.contact_id == contact.id).first()
-    return credential is not None and bool(credential.password_hash)
+    return not contact.portal_access_revoked and credential is not None and bool(credential.password_hash)
 
 
 def revoke_access(db: Session, contact: Contact) -> None:
@@ -71,6 +76,9 @@ def revoke_access(db: Session, contact: Contact) -> None:
     Убирается и пароль, и невыпользованные ссылки для входа: живая ссылка
     из почты — такой же ключ, как пароль.
     """
+    contact = db.query(Contact).filter_by(id=contact.id).populate_existing().with_for_update().one()
+    contact.portal_access_revoked = True
+    contact.portal_auth_version += 1
     credential = db.query(PortalCredential).filter(PortalCredential.contact_id == contact.id).first()
     if credential is not None:
         db.delete(credential)
@@ -80,13 +88,16 @@ def revoke_access(db: Session, contact: Contact) -> None:
     db.commit()
 
 
-def authenticate_with_password(db: Session, email: str, password: str) -> Contact:
+def authenticate_with_password(db: Session, email: str, password: str, *, commit=True) -> Contact:
     """Deliberately returns the same error whether the address is unknown or
     the password is wrong - distinguishing them would let anyone enumerate
     which of a client's staff have portal accounts."""
     invalid = PortalAuthError("Неверный email или пароль")
     contact = find_contact_by_email(db, email)
-    if contact is None:
+    if contact is None or contact.portal_access_revoked:
+        raise invalid
+    contact = db.query(Contact).filter_by(id=contact.id).populate_existing().with_for_update().one()
+    if contact.portal_access_revoked:
         raise invalid
     credential = db.query(PortalCredential).filter(PortalCredential.contact_id == contact.id).first()
     if credential is None or not credential.password_hash:
@@ -95,7 +106,8 @@ def authenticate_with_password(db: Session, email: str, password: str) -> Contac
         raise invalid
     credential.last_login_at = datetime.now(timezone.utc)
     db.add(credential)
-    db.commit()
+    if commit:
+        db.commit()
     return contact
 
 
@@ -110,7 +122,7 @@ def issue_magic_link(db: Session, email: str, ticket_id: int | None = None) -> t
     an unknown address turns this endpoint into a directory of who works at
     the client."""
     contact = find_contact_by_email(db, email)
-    if contact is None:
+    if contact is None or contact.portal_access_revoked:
         return None
 
     raw = secrets.token_urlsafe(32)
@@ -130,7 +142,7 @@ def issue_magic_link(db: Session, email: str, ticket_id: int | None = None) -> t
     return contact, f"{settings.portal_base_url.rstrip('/')}/login?{urlencode(params)}"
 
 
-def consume_magic_link(db: Session, raw_token: str) -> Contact:
+def consume_magic_link(db: Session, raw_token: str, *, commit=True) -> Contact:
     token = (
         db.query(PortalLoginToken)
         .filter(PortalLoginToken.token_hash == _hash_token(raw_token))
@@ -138,18 +150,20 @@ def consume_magic_link(db: Session, raw_token: str) -> Contact:
     )
     if token is None or token.used_at is not None:
         raise PortalAuthError("Ссылка недействительна или уже использована")
+    contact = db.query(Contact).filter_by(id=token.contact_id).populate_existing().with_for_update().first()
+    token = db.query(PortalLoginToken).filter_by(id=token.id).populate_existing().with_for_update().first()
+    if contact is None or contact.portal_access_revoked or token is None or token.used_at is not None:
+        raise PortalAuthError("Ссылка недействительна или уже использована")
     if token.expires_at < datetime.now(timezone.utc):
         raise PortalAuthError("Срок действия ссылки истёк")
 
     token.used_at = datetime.now(timezone.utc)
     db.add(token)
-    contact = db.get(Contact, token.contact_id)
-    if contact is None:
-        raise PortalAuthError("Ссылка недействительна или уже использована")
     credential = get_or_create_credential(db, contact)
     credential.last_login_at = datetime.now(timezone.utc)
     db.add(credential)
-    db.commit()
+    if commit:
+        db.commit()
     return contact
 
 

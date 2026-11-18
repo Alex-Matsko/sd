@@ -30,7 +30,7 @@ def header(ticket):
 
 def buttons(ticket, existing=None):
     from app.services.customer_acceptance import result_buttons
-    result = [[b for b in row if not (ticket.resolution_message_id and b.get('payload', '').startswith('close:'))] for row in (existing or [])]
+    result = [[b for b in row if not b.get('payload', '').startswith('close:')] for row in (existing or [])]
     result = [row for row in result if row]
     result = result_buttons(ticket) + result
     if TicketStatus(ticket.status) == TicketStatus.CANCELLED:
@@ -276,6 +276,44 @@ def route_text(db, channel, config, state, contact, parsed, module):
         module._create_ticket_from_text(db, config, state, contact, parsed)
 
 
+def _handle_cancellation(db, config, state, contact, parsed, module):
+    payload = parsed.callback_payload or ''
+    if not payload.startswith(('close:', 'cancel_ticket:', 'cancel_ticket_confirm:', 'keep_ticket:')):
+        return False
+    try:
+        ticket_id = int(payload.split(':', 1)[1])
+    except (ValueError, IndexError):
+        module._send(config, state.chat_id, 'Некорректная кнопка заявки.')
+        return True
+    ticket = db.query(Ticket).filter_by(id=ticket_id).populate_existing().with_for_update().first()
+    if ticket is None or ticket.contact_id != contact.id:
+        module._send(config, state.chat_id, 'Заявка не найдена.')
+        return True
+    if payload.startswith('keep_ticket:'):
+        module._send(config, state.chat_id, header(ticket) + 'Статус заявки не изменён.', buttons=buttons(ticket))
+    elif ticket.status not in OPEN_TICKET_STATUSES:
+        text = ('Для приёмки проверьте результат и нажмите «Принять результат».'
+                if ticket.status == TicketStatus.RESOLVED and ticket.resolution_message_id
+                else 'Заявка уже закрыта. Уточнения можно писать по этой заявке.' if ticket.status == TicketStatus.CLOSED
+                else 'Отмена сейчас недоступна. Напишите сотруднику по этой заявке, если нужно уточнение.')
+        module._send(config, state.chat_id, header(ticket) + text, buttons=buttons(ticket))
+    elif payload.startswith('cancel_ticket_confirm:'):
+        from app.services import audit, staff_notifications, tickets
+        audit.record(db, entity_type='ticket', entity_id=ticket.id, action='customer_cancelled', user_id=None,
+                     changes={'contact_id': contact.id})
+        tickets.transition_status(db, ticket, TicketStatus.CANCELLED, actor=None, notify_status=False)
+        staff_notifications.notify_status_change(db, ticket, TicketStatus.CANCELLED)
+        db.commit()
+        module._send(config, state.chat_id, header(ticket) + 'Заявка отменена по вашему запросу. История и файлы сохранены.', buttons=buttons(ticket))
+    else:
+        # Old close buttons are safe too: they only open this confirmation.
+        module._send(config, state.chat_id, header(ticket) + 'Отменить заявку? Это завершит обращение без приёмки результата. История и файлы сохранятся.', buttons=[
+            [{'type': 'callback', 'text': 'Да, отменить заявку', 'payload': f'cancel_ticket_confirm:{ticket.id}'}],
+            [{'type': 'callback', 'text': 'Не отменять', 'payload': f'keep_ticket:{ticket.id}'}],
+        ])
+    return True
+
+
 def handle_callback(db, channel, config, state, contact, parsed, module):
     payload = parsed.callback_payload or ''
     from app.services import customer_acceptance, messenger_tickets, messenger_controls
@@ -285,11 +323,8 @@ def handle_callback(db, channel, config, state, contact, parsed, module):
         return True
     if customer_acceptance.handle_callback(db, channel, config, state, contact, parsed, module):
         return True
-    if payload.startswith('close:') and payload.split(':', 1)[1].isdigit():
-        closing = db.get(Ticket, int(payload.split(':', 1)[1]))
-        if closing and closing.contact_id == contact.id and closing.resolution_message_id:
-            module._send(config, state.chat_id, 'Для приёмки проверьте результат и нажмите «Принять результат».', buttons=buttons(closing))
-            return True
+    if _handle_cancellation(db, config, state, contact, parsed, module):
+        return True
     if not payload.startswith(('reply:', 'continue:')):
         return False
     try:

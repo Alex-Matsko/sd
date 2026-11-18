@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.core.enums import Channel, MessageDirection, OPEN_TICKET_STATUSES, Priority, TicketStatus, TicketType
 from app.models.channel_conversation_state import ChannelConversationState
-from app.models.contact import Contact, ContactPhone
+from app.models.contact import Contact
 from app.models.message import Message
 from app.models.ticket import Ticket
 from app.models.user import User
@@ -77,25 +77,17 @@ def _main_menu_buttons() -> list[list[dict]]:
 
 
 def _menu_buttons_for(ticket: Ticket | None) -> list[list[dict]]:
-    """Main menu plus a "Закрыть заявку" row when there's a concrete
-    still-open ticket in context - see max_channel._menu_buttons_for. Used
-    only for the one-off ticket-created/ticket-switched confirmations below,
-    not for routine per-message sends - see _close_button_for."""
+    """Main menu plus a cancellation request for unfinished work."""
     buttons = _main_menu_buttons()
-    if ticket is not None and TicketStatus(ticket.status) in messenger_common.CLOSEABLE_STATUSES:
-        buttons.append([{"type": "callback", "text": "Закрыть заявку", "payload": f"close:{ticket.id}"}])
+    if ticket is not None and TicketStatus(ticket.status) in OPEN_TICKET_STATUSES:
+        buttons.append([{"type": "callback", "text": "Отменить заявку", "payload": f"cancel_ticket:{ticket.id}"}])
     return buttons
 
 
-def _close_button_for(ticket: Ticket) -> list[list[dict]] | None:
-    """Telegram's persistent "/" command menu (setMyCommands) reliably shows
-    "Мои заявки"/"Создать новую" (unlike MAX's /me/commands, confirmed live
-    not to render - docs/decisions.md) - repeating those as inline buttons
-    on every routine message is just noise the customer explicitly asked to
-    drop. Only "Закрыть заявку" still needs an inline button here: it
-    targets one specific ticket and can't be a static command."""
-    if TicketStatus(ticket.status) in messenger_common.CLOSEABLE_STATUSES:
-        return [[{"type": "callback", "text": "Закрыть заявку", "payload": f"close:{ticket.id}"}]]
+def _cancel_button_for(ticket: Ticket) -> list[list[dict]] | None:
+    """A ticket-specific cancellation request, followed by confirmation."""
+    if TicketStatus(ticket.status) in OPEN_TICKET_STATUSES:
+        return [[{"type": "callback", "text": "Отменить заявку", "payload": f"cancel_ticket:{ticket.id}"}]]
     return None
 
 
@@ -260,21 +252,9 @@ def _resolve_contact(db: Session, state: ChannelConversationState, parsed: Parse
 
 
 def _handle_link_phone_reply(db: Session, config: TelegramConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> None:
-    """See max_channel._handle_link_phone_reply - identical, non-blocking
-    cross-channel identity matching, Telegram side."""
-    state.awaiting_phone_confirmation = False
-    db.add(state)
-    matched = messenger_common.find_contact_by_phone(db, parsed.text)
-    if matched is not None and matched.id != contact.id:
-        messenger_common.merge_contacts(db, from_contact=contact, into_contact=matched)
-        state.contact_id = matched.id
-        db.add(state)
-        db.commit()
-        _send(config, parsed.chat_id, "Готово! Ваши предыдущие обращения объединены с этой перепиской.")
-        return
-    db.add(ContactPhone(contact_id=contact.id, phone=parsed.text.strip(), is_primary=not contact.phones))
-    db.commit()
-    _send(config, parsed.chat_id, "Спасибо, сохранили номер. Если найдём совпадение с другим каналом — объединим обращения.")
+    # Also handles conversations left waiting for a phone by an older release.
+    text = messenger_common.request_contact_link(db, "telegram", state, contact)
+    _send(config, parsed.chat_id, text)
 
 
 def _list_open_tickets(db: Session, contact: Contact) -> list[Ticket]:
@@ -327,8 +307,8 @@ def _resolve_reply_target(db: Session, ticket_id: int, reply_to_mid: int | None)
 def _acknowledge_gluing(config: TelegramConfig, chat_id: str, ticket: Ticket) -> None:
     """See max_channel._acknowledge_gluing for why this ack exists at all.
     Unlike MAX, the main menu itself doesn't need repeating here - Telegram's
-    persistent command menu already covers it (see _close_button_for)."""
-    _send(config, chat_id, f"Принято по заявке {ticket.display_number} — {ticket.subject}.", buttons=_close_button_for(ticket))
+    persistent command menu already covers it (see _cancel_button_for)."""
+    _send(config, chat_id, f"Принято по заявке {ticket.display_number} — {ticket.subject}.", buttons=_cancel_button_for(ticket))
 
 
 def _append_message(db: Session, config: TelegramConfig, ticket: Ticket, contact: Contact, parsed: ParsedUpdate, ambiguous: bool = False) -> Message:
@@ -457,11 +437,7 @@ def _handle_text(db: Session, config: TelegramConfig, state: ChannelConversation
         return
 
     if text_lower in messenger_common.LINK_PHONE_COMMANDS:
-        _cancel_pending_ticket_flow(state)
-        state.awaiting_phone_confirmation = True
-        db.add(state)
-        db.commit()
-        _send(config, parsed.chat_id, "Укажите, пожалуйста, номер телефона, под которым вы писали нам ранее.")
+        _handle_link_phone_reply(db, config, state, contact, parsed)
         return
 
     if state.awaiting_phone_confirmation:
@@ -482,17 +458,6 @@ def _handle_callback(db: Session, config: TelegramConfig, state: ChannelConversa
     payload = parsed.callback_payload
     from app.services import messenger_dialog, messenger_controls
     if messenger_dialog.handle_callback(db, "telegram", config, state, contact, parsed, sys.modules[__name__]):
-        return
-
-    if payload.startswith("close:"):
-        ticket = db.get(Ticket, int(payload.split(":", 1)[1]))
-        if ticket is None or ticket.contact_id != contact.id:
-            _send(config, parsed.chat_id, "Заявка не найдена.")
-            return
-        if TicketStatus(ticket.status) not in messenger_common.CLOSEABLE_STATUSES:
-            _send(config, parsed.chat_id, f"Заявка {ticket.display_number} уже закрыта.")
-            return
-        messenger_common.close_ticket_chain(db, ticket)
         return
 
     if payload in ("new_ticket", "cmd:new_ticket"):

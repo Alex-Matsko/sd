@@ -29,6 +29,10 @@ export function MessageComposer({ ticketId, direction, replyTo, clearReply, temp
   }, onSuccess: () => {
     setDraft(emptyMessageDraft()); clearReply();
     qc.invalidateQueries({ queryKey: ["ticket", ticketId] });
+    qc.invalidateQueries({ queryKey: ["active-timer"] });
+    qc.invalidateQueries({ queryKey: ["tickets"] });
+    qc.invalidateQueries({ queryKey: ["ticket-stats"] });
+    qc.invalidateQueries({ queryKey: ["organization-usage"] });
   } });
   const payload = messageDraftPayload(draft);
   return <section id={`compose-${direction}`} className={`message-composer ${internal ? "composer-internal" : "composer-customer"}`} aria-label={label}>

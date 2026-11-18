@@ -1,4 +1,5 @@
 """Канал «Периметр»: окно «Поддержка» в продуктах (по запросу заказчика)."""
+from tests.ticket_fixtures import accepted_result
 
 import pytest
 from fastapi import HTTPException
@@ -59,6 +60,8 @@ def test_ответ_инженера_виден_продукту_а_заметк
 def test_после_закрытия_следующее_сообщение_открывает_новую(db: Session, default_tariff):
     first = perimetr_channel.post_message(db, _inbound("Раз"))
     for status in (TicketStatus.IN_PROGRESS, TicketStatus.RESOLVED, TicketStatus.CLOSED):
+        if status == TicketStatus.CLOSED:
+            accepted_result(db, db.get(Ticket, first.id))
         tickets_service.transition_status(db, db.get(Ticket, first.id), status, actor=None)
     second = perimetr_channel.post_message(db, _inbound("Два"))
     assert second.id != first.id
@@ -159,6 +162,11 @@ def test_лента_показывает_исполнителя_статусы_�
 def test_ответ_в_закрытое_обращение_не_принимается(db: Session, default_tariff):
     ticket = perimetr_channel.create_ticket(db, _new("Раз"))
     perimetr_channel.reply(db, "vms:tickets00000001", ticket.number, "Дополнение")
+    with pytest.raises(ValueError):
+        perimetr_channel.close_by_client(db, "vms:tickets00000001", ticket.number)
+    tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, None)
+    tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, None)
+    accepted_result(db, ticket)
     closed = perimetr_channel.close_by_client(db, "vms:tickets00000001", ticket.number)
     assert TicketStatus(closed.status) == TicketStatus.CLOSED
     with pytest.raises(perimetr_channel.TicketFinal):

@@ -1,3 +1,4 @@
+from tests.ticket_fixtures import accepted_result
 from app.services import channel_queue
 """Stage 5 MAX channel tests: update parsing, sender/thread resolution rules
 mirroring the email channel's, "Мои заявки" ticket switching, explicit
@@ -368,7 +369,7 @@ def test_second_message_attaches_to_active_ticket(db: Session, max_enabled, _fak
     assert len(_fake_send) == 1
     assert tickets[0].display_number in _fake_send[0]["text"]
     payloads = {row[0]["payload"] for row in _fake_send[0]["buttons"]}
-    assert payloads == {"cmd:my_tickets", "cmd:new_ticket", f"close:{tickets[0].id}"}
+    assert payloads == {"cmd:my_tickets", "cmd:new_ticket", f"cancel_ticket:{tickets[0].id}"}
 
 
 def test_multiple_open_tickets_prompts_choice_then_switches(db: Session, max_enabled, contact: Contact, _fake_send):
@@ -441,6 +442,7 @@ def test_my_tickets_lists_open_before_closed_with_count(db: Session, max_enabled
     closed = tickets_service.create_ticket(db, closed_payload, actor=None)
     tickets_service.transition_status(db, closed, TicketStatus.IN_PROGRESS, actor=None)
     tickets_service.transition_status(db, closed, TicketStatus.RESOLVED, actor=None)
+    accepted_result(db, closed)
     tickets_service.transition_status(db, closed, TicketStatus.CLOSED, actor=None)
 
     open_payload = TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.MAX, subject="Новая", manual_priority=Priority.P3, manual_priority_reason="test")
@@ -590,6 +592,7 @@ def test_transition_to_closed_does_not_duplicate_with_csat_message(db: Session, 
 
     channel_queue.run_batch(db, "outbound")
     _fake_send.clear()
+    accepted_result(db, ticket)
     tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
 
     # Only the CSAT request goes out, not a second "status changed" message.
@@ -622,6 +625,7 @@ def test_transition_to_closed_triggers_csat_request(db: Session, max_enabled, co
 
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
     tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
+    accepted_result(db, ticket)
     tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
 
     db.refresh(ticket)
@@ -652,7 +656,7 @@ def test_try_send_outbound_uses_known_chat(db: Session, max_enabled, contact: Co
     # Menu buttons ride along on every engineer reply - the /me/commands
     # menu isn't visible on every MAX client (docs/decisions.md).
     payloads = {row[0]["payload"] for row in _fake_send[0]["buttons"]}
-    assert payloads == {"cmd:my_tickets", "cmd:new_ticket", f"close:{ticket.id}", f"reply:{ticket.id}"}
+    assert payloads == {"cmd:my_tickets", "cmd:new_ticket", f"cancel_ticket:{ticket.id}", f"reply:{ticket.id}"}
 
 
 def test_inbound_reply_resolves_to_local_message(db: Session, max_enabled, _fake_send):
@@ -712,26 +716,28 @@ def test_try_send_outbound_without_known_chat_does_not_raise(db: Session, max_en
 # --- client-initiated close ("Закрыть заявку") -------------------------------------------------------
 
 
-def test_menu_buttons_offer_close_only_for_closeable_tickets(db: Session, contact: Contact):
+def test_menu_buttons_offer_cancel_only_for_unfinished_tickets(db: Session, contact: Contact):
     payload = TicketCreate(contact_id=contact.id, type=TicketType.INCIDENT, channel=Channel.MAX, subject="Заявка", manual_priority=Priority.P3, manual_priority_reason="test")
     ticket = tickets_service.create_ticket(db, payload, actor=None)
 
     payloads = {row[0]["payload"] for row in max_channel._menu_buttons_for(ticket)}
-    assert f"close:{ticket.id}" in payloads
+    assert f"cancel_ticket:{ticket.id}" in payloads
 
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
     tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
     payloads = {row[0]["payload"] for row in max_channel._menu_buttons_for(ticket)}
-    assert f"close:{ticket.id}" in payloads  # RESOLVED isn't in OPEN_TICKET_STATUSES but is still closeable
+    assert f"cancel_ticket:{ticket.id}" not in payloads  # A result must be accepted, not cancelled.
+
+    accepted_result(db, ticket)
 
     tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
     payloads = {row[0]["payload"] for row in max_channel._menu_buttons_for(ticket)}
-    assert f"close:{ticket.id}" not in payloads
+    assert f"cancel_ticket:{ticket.id}" not in payloads
 
     assert max_channel._menu_buttons_for(None) == max_channel._main_menu_buttons()
 
 
-def test_close_callback_chains_new_ticket_all_the_way_to_closed(db: Session, max_enabled, contact: Contact, _fake_send):
+def test_old_close_button_only_prompts_then_confirmation_cancels(db: Session, max_enabled, contact: Contact, _fake_send):
     contact.max_id = "u-close1"
     db.commit()
     max_channel.handle_update(db, _text_update(user_id="u-close1", chat_id="c-close1", text="Проблема"))
@@ -741,10 +747,12 @@ def test_close_callback_chains_new_ticket_all_the_way_to_closed(db: Session, max
     max_channel.handle_update(db, _callback_update(user_id="u-close1", chat_id="c-close1", payload=f"close:{ticket.id}"))
 
     db.refresh(ticket)
-    assert TicketStatus(ticket.status) == TicketStatus.CLOSED
-    assert ticket.resolved_at is not None
-    assert ticket.closed_at is not None
-    assert ticket.csat_requested_at is not None  # request_csat fires on the final hop, same as a staff-driven close
+    assert TicketStatus(ticket.status) == TicketStatus.NEW
+    assert ticket.resolved_at is None and ticket.closed_at is None
+    max_channel.handle_update(db, _callback_update(user_id="u-close1", chat_id="c-close1", payload=f"cancel_ticket_confirm:{ticket.id}"))
+    db.refresh(ticket)
+    assert TicketStatus(ticket.status) == TicketStatus.CANCELLED
+    assert ticket.resolved_at is None and ticket.closed_at is None and ticket.csat_requested_at is None
 
 
 def test_close_callback_on_already_closed_ticket_is_a_no_op(db: Session, max_enabled, contact: Contact, _fake_send):
@@ -754,6 +762,7 @@ def test_close_callback_on_already_closed_ticket_is_a_no_op(db: Session, max_ena
     ticket = tickets_service.create_ticket(db, payload, actor=None)
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
     tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
+    accepted_result(db, ticket)
     tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
 
     max_channel.handle_update(db, _callback_update(user_id="u-close2", chat_id="c-close2", payload=f"close:{ticket.id}"))
@@ -764,7 +773,7 @@ def test_close_callback_on_already_closed_ticket_is_a_no_op(db: Session, max_ena
 # --- cross-channel identity matching ("связать телефон") -------------------------------------------------------
 
 
-def test_link_phone_merges_when_existing_contact_matches(db: Session, max_enabled, contact: Contact, _fake_send):
+def test_link_phone_requests_staff_review_without_merging(db: Session, max_enabled, contact: Contact, _fake_send):
     from app.models.contact import ContactPhone
 
     contact.full_name = "Известный клиент"
@@ -779,15 +788,15 @@ def test_link_phone_merges_when_existing_contact_matches(db: Session, max_enable
     max_channel.handle_update(db, _text_update(user_id="u-link1", chat_id="c-link1", text="связать телефон"))
     max_channel.handle_update(db, _text_update(user_id="u-link1", chat_id="c-link1", text="89161234567"))
 
-    assert db.get(Contact, new_contact.id) is None  # merged away
+    assert db.get(Contact, new_contact.id) is not None
     db.refresh(ticket)
-    assert ticket.contact_id == contact.id
+    assert ticket.contact_id == new_contact.id
     db.refresh(contact)
-    assert contact.max_id == "u-link1"
-    assert any("объединены" in s["text"] for s in _fake_send)
+    assert contact.max_id is None
+    assert any("передан сотруднику" in s["text"] for s in _fake_send)
 
 
-def test_link_phone_saves_number_when_no_match(db: Session, max_enabled, _fake_send):
+def test_link_phone_does_not_register_unverified_number(db: Session, max_enabled, _fake_send):
     max_channel.handle_update(db, _text_update(user_id="u-link2", chat_id="c-link2", text="Проблема"))
     contact = db.query(Contact).filter(Contact.max_id == "u-link2").first()
 
@@ -795,5 +804,5 @@ def test_link_phone_saves_number_when_no_match(db: Session, max_enabled, _fake_s
     max_channel.handle_update(db, _text_update(user_id="u-link2", chat_id="c-link2", text="+7 999 000-00-00"))
 
     db.refresh(contact)
-    assert len(contact.phones) == 1
-    assert any("сохранили номер" in s["text"] for s in _fake_send)
+    assert len(contact.phones) == 0
+    assert any("передан сотруднику" in s["text"] for s in _fake_send)

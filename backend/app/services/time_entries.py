@@ -13,7 +13,9 @@ from app.schemas.time_entry import TimeEntryCreate, TimeEntryUpdate
 from app.services import audit, billing
 
 
-def create_time_entry(db: Session, ticket: Ticket, payload: TimeEntryCreate, engineer: User) -> TimeEntry:
+def create_time_entry(db: Session, ticket: Ticket, payload: TimeEntryCreate, engineer: User, *, commit=True) -> TimeEntry:
+    if payload.duration_minutes <= 0:
+        raise ValueError("Трудозатраты должны быть больше нуля")
     contract = db.get(Contract, ticket.contract_id) if ticket.contract_id else None
     package_minutes, overage_minutes = billing.split_time_entry(
         db, contract, payload.entry_date, payload.duration_minutes, payload.is_billable
@@ -38,8 +40,9 @@ def create_time_entry(db: Session, ticket: Ticket, payload: TimeEntryCreate, eng
         user_id=engineer.id,
         changes={"duration_minutes": payload.duration_minutes, "is_billable": payload.is_billable},
     )
-    db.commit()
-    db.refresh(entry)
+    if commit:
+        db.commit()
+        db.refresh(entry)
     return entry
 
 
@@ -68,9 +71,16 @@ def start_timer(db: Session, ticket: Ticket, engineer: User, plan=None) -> Activ
     from app.services.channel_queue import DeferredCommitSession
 
     ticket_id, user_id = ticket.id, engineer.id
-    db.query(User.id).filter(User.id == user_id).with_for_update().one()
+    # NO KEY UPDATE serializes this user's timer actions while allowing the
+    # FK checks needed to bank their timer during a concurrent status change.
+    db.query(User.id).filter(User.id == user_id).with_for_update(key_share=True).one()
     with DeferredCommitSession(bind=db.connection(), join_transaction_mode="create_savepoint") as unit:
-        current = unit.query(Ticket).filter(Ticket.id == ticket_id).with_for_update().first()
+        previous = unit.query(ActiveTimer).filter_by(user_id=user_id).first()
+        # Lock both tickets in a stable order when switching. No timer row is
+        # locked before its ticket: automatic stop follows the same order.
+        ids = {ticket_id} | ({previous.ticket_id} if previous else set())
+        locked = unit.query(Ticket).filter(Ticket.id.in_(ids)).order_by(Ticket.id).with_for_update().all()
+        current = next((t for t in locked if t.id == ticket_id), None)
         actor = unit.get(User, user_id)
         if current is None or not ticket_access.can_see(unit, actor, current):
             raise TimerTicketNotFound("Заявка не найдена")
@@ -83,7 +93,7 @@ def start_timer(db: Session, ticket: Ticket, engineer: User, plan=None) -> Activ
         work_planning.require_plan(current)
         if plan_changed and status == TicketStatus.IN_PROGRESS:
             work_planning.notify_plan(unit, current)
-        timer = unit.query(ActiveTimer).filter(ActiveTimer.user_id == user_id).first()
+        timer = unit.query(ActiveTimer).filter(ActiveTimer.user_id == user_id).populate_existing().with_for_update().first()
         if timer is not None and timer.ticket_id != ticket_id:
             stop_timer(unit, actor, comment="Автоматически остановлен при запуске таймера по другой заявке")
             timer = None
@@ -107,32 +117,44 @@ def stop_timer(db: Session, engineer: User, comment: str | None = None) -> TimeE
     entry - a mis-click shouldn't leave a row in the client's billing report.
     Elapsed time is rounded up, so 90 seconds of work bills as 2 minutes
     rather than 1."""
-    db.query(User.id).filter(User.id == engineer.id).with_for_update().one()
-    timer = db.query(ActiveTimer).filter(ActiveTimer.user_id == engineer.id).populate_existing().first()
+    db.query(User.id).filter(User.id == engineer.id).with_for_update(key_share=True).one()
+    timer = db.query(ActiveTimer).filter_by(user_id=engineer.id).first()
     if timer is None:
         return None
-
-    ticket = db.get(Ticket, timer.ticket_id)
-    elapsed_seconds = (datetime.now(timezone.utc) - timer.started_at).total_seconds()
-    db.delete(timer)
-
-    if ticket is None or elapsed_seconds < MIN_TIMER_SECONDS:
-        db.commit()
+    ticket = db.query(Ticket).filter_by(id=timer.ticket_id).with_for_update().first()
+    timer = db.query(ActiveTimer).filter_by(user_id=engineer.id).populate_existing().with_for_update().first()
+    if timer is None or ticket is None:
         return None
-
-    minutes = math.ceil(elapsed_seconds / 60)
-
-    entry = create_time_entry(
-        db,
-        ticket,
-        TimeEntryCreate(
-            entry_date=datetime.now(timezone.utc).date(),
-            duration_minutes=minutes,
-            comment=comment or TIMER_COMMENT,
-        ),
-        engineer,
-    )
+    entry = _bank_timer(db, ticket, timer, datetime.now(timezone.utc), comment or TIMER_COMMENT)
+    db.commit()
+    if entry is not None:
+        db.refresh(entry)
     return entry
+
+
+def _bank_timer(db, ticket, timer, stopped_at, comment):
+    # Old releases could leave timers on completed tickets. Never bill time
+    # after their recorded completion when such a timer is eventually stopped.
+    if ticket.status in (TicketStatus.RESOLVED, TicketStatus.CLOSED):
+        cutoff = ticket.resolved_at or ticket.closed_at
+        if cutoff is not None:
+            stopped_at = min(stopped_at, cutoff)
+    seconds = (stopped_at - timer.started_at).total_seconds()
+    db.delete(timer)
+    if seconds < MIN_TIMER_SECONDS:
+        db.flush()
+        return None
+    return create_time_entry(db, ticket, TimeEntryCreate(
+        entry_date=stopped_at.date(), duration_minutes=math.ceil(seconds / 60), comment=comment,
+    ), db.get(User, timer.user_id), commit=False)
+
+
+def stop_ticket_timers(db, ticket, stopped_at):
+    """Bank every participant's timer in the status transaction, without an
+    inner commit. The caller holds the ticket lock; no user lock is needed."""
+    timers = db.query(ActiveTimer).filter_by(ticket_id=ticket.id).order_by(ActiveTimer.user_id).populate_existing().with_for_update().all()
+    for timer in timers:
+        _bank_timer(db, ticket, timer, stopped_at, "По таймеру — автоматически при смене статуса")
 
 
 def get_active_timer(db: Session, engineer: User) -> ActiveTimer | None:
@@ -144,6 +166,8 @@ def update_time_entry(db: Session, entry: TimeEntry, payload: TimeEntryUpdate, a
     contract = db.get(Contract, ticket.contract_id) if ticket.contract_id else None
 
     duration_minutes = payload.duration_minutes if payload.duration_minutes is not None else entry.duration_minutes
+    if duration_minutes <= 0:
+        raise ValueError("Трудозатраты должны быть больше нуля")
     entry_date = payload.entry_date if payload.entry_date is not None else entry.entry_date
     is_billable = payload.is_billable if payload.is_billable is not None else entry.is_billable
 

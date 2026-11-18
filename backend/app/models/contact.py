@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -15,6 +15,8 @@ class Contact(Base, TimestampMixin):
     max_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     can_view_org_tickets: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    portal_auth_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    portal_access_revoked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     organization: Mapped["Organization"] = relationship(back_populates="contacts")
     emails: Mapped[list["ContactEmail"]] = relationship(back_populates="contact", cascade="all, delete-orphan")
@@ -30,7 +32,7 @@ class Contact(Base, TimestampMixin):
     def has_portal_access(self) -> bool:
         """Выдан ли доступ в кабинет. Без этого признака диспетчер не видит
         в списке, кому доступ уже дан, — и выдаёт повторно или не выдаёт."""
-        return self.portal_credential is not None and bool(self.portal_credential.password_hash)
+        return not self.portal_access_revoked and self.portal_credential is not None and bool(self.portal_credential.password_hash)
 
 
 class ContactEmail(Base):

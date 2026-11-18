@@ -1,18 +1,18 @@
 from datetime import date
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TimeEntryCreate(BaseModel):
     entry_date: date
-    duration_minutes: int
+    duration_minutes: int = Field(gt=0, le=600000)
     comment: str | None = None
     is_billable: bool = True
 
 
 class TimeEntryUpdate(BaseModel):
     entry_date: date | None = None
-    duration_minutes: int | None = None
+    duration_minutes: int | None = Field(default=None, gt=0, le=600000)
     comment: str | None = None
     is_billable: bool | None = None
 

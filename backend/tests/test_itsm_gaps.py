@@ -4,6 +4,7 @@
 переоткрытых заявок нигде не считалась, а метки «повторяющаяся проблема» из
 ТЗ р. 4 не существовало (при том что связь parent/child была сделана).
 """
+from tests.ticket_fixtures import accepted_result
 
 from datetime import date
 
@@ -155,6 +156,8 @@ def test_reopening_is_counted(db: Session, contact: Contact):
 def test_a_straight_path_to_closed_counts_no_reopens(db: Session, contact: Contact):
     ticket = _ticket(db, contact, "Решено с первого раза")
     for step in (TicketStatus.IN_PROGRESS, TicketStatus.RESOLVED, TicketStatus.CLOSED):
+        if step == TicketStatus.CLOSED:
+            accepted_result(db, ticket)
         tickets_service.transition_status(db, ticket, step, actor=None)
 
     db.refresh(ticket)

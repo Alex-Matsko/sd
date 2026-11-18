@@ -4,6 +4,7 @@ The portal is the only surface an outsider touches, so most of these tests
 are about what a client must *not* be able to reach: another organization's
 tickets, a colleague's tickets without the org-wide flag, internal notes, or
 the staff API with a portal token."""
+from tests.ticket_fixtures import accepted_result
 
 from datetime import datetime, timedelta, timezone
 
@@ -213,6 +214,8 @@ def test_reply_to_a_closed_ticket_stays_in_same_thread(db: Session, contact: Con
 
     closed = _ticket(db, contact, "Старая проблема")
     for step in (TicketStatus.IN_PROGRESS, TicketStatus.RESOLVED, TicketStatus.CLOSED):
+        if step == TicketStatus.CLOSED:
+            accepted_result(db, closed)
         tickets_service.transition_status(db, closed, step, actor=None)
 
     reply_to_my_ticket(

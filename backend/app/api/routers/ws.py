@@ -3,7 +3,7 @@ import logging
 import jwt
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token, session_version_matches
 from app.db import SessionLocal
 from app.models.user import User
 from app.services.realtime import hub
@@ -31,7 +31,7 @@ def _authenticate(token: str) -> int | None:
     db = SessionLocal()
     try:
         user = db.get(User, user_id)
-        return user.id if user is not None and user.is_active else None
+        return user.id if user is not None and user.is_active and session_version_matches(payload, user.auth_version) else None
     finally:
         db.close()
 

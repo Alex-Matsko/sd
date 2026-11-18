@@ -31,6 +31,7 @@ export type OrganizationStatus = "active" | "suspended" | "archived";
 export type SlaTimerState = "no_rule" | "ok" | "warning" | "breached" | "met" | "paused";
 
 export type NotificationType =
+  | "contact_link_request"
   | "work_assigned"
   | "work_approval"
   | "work_updated"

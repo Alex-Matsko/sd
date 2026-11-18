@@ -59,6 +59,10 @@ class NotificationHub:
         dead = []
         for websocket in list(self._connections.get(user_id, ())):
             try:
+                if payload.get("type") == "session_revoked":
+                    await websocket.close(code=1008)
+                    dead.append(websocket)
+                    continue
                 await websocket.send_json(payload)
             except Exception:
                 dead.append(websocket)

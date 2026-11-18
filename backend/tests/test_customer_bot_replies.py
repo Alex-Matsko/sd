@@ -1,4 +1,5 @@
 """Customer routing, explicit delivery and durable file selection. All providers mocked."""
+from tests.ticket_fixtures import accepted_result
 import hashlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -361,6 +362,7 @@ def test_plain_reply_after_closure_does_not_jump_to_unrelated_open_ticket(db, bo
     closed = make(db, contact, 'Closed')
     tickets.transition_status(db, closed, TicketStatus.IN_PROGRESS, None)
     tickets.transition_status(db, closed, TicketStatus.RESOLVED, None)
+    accepted_result(db, closed)
     tickets.transition_status(db, closed, TicketStatus.CLOSED, None)
     other = make(db, contact, 'Unrelated')
     s = state(db, bot); s.active_ticket_id = closed.id; db.commit()

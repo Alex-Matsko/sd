@@ -16,12 +16,13 @@ def verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
 
 
-def create_access_token(user_id: int, role: str) -> str:
+def create_access_token(user_id: int, role: str, session_version: int = 1) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "role": role,
         "type": "access",
+        "sv": session_version,
         "iat": now,
         "exp": now + timedelta(minutes=settings.access_token_expire_minutes),
     }
@@ -32,7 +33,7 @@ def decode_access_token(token: str) -> dict:
     return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
 
 
-def create_portal_access_token(contact_id: int) -> str:
+def create_portal_access_token(contact_id: int, session_version: int = 1) -> str:
     """Token for a client-portal session. `type: "portal"` is what keeps the
     two populations apart: `get_current_user` rejects anything that isn't
     `type: "access"`, so a client's token can never authenticate against the
@@ -41,6 +42,7 @@ def create_portal_access_token(contact_id: int) -> str:
     payload = {
         "sub": str(contact_id),
         "type": "portal",
+        "sv": session_version,
         "iat": now,
         "exp": now + timedelta(minutes=settings.portal_token_expire_minutes),
     }
@@ -75,6 +77,25 @@ def revoke_refresh_tokens(db, user) -> int:
         .filter(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
         .update({RefreshToken.revoked_at: datetime.now(timezone.utc)})
     )
+
+
+def session_version_matches(payload: dict, version: int) -> bool:
+    # Pre-migration tokens belong to the initial generation only.
+    return payload.get("sv", 1) == version
+
+
+def revoke_user_sessions(db, user) -> None:
+    """Revoke access, refresh and connected notification sessions atomically."""
+    from app.models.user import User
+    from app.services.realtime import publish_notification
+
+    db.flush()
+    db.query(User).filter(User.id == user.id).update(
+        {User.auth_version: User.auth_version + 1}, synchronize_session="fetch"
+    )
+    db.refresh(user, attribute_names=["auth_version"])
+    revoke_refresh_tokens(db, user)
+    publish_notification(db, user.id, "session_revoked", "Сессия завершена", None)
 
 
 # Хеш заведомо неподходящего пароля. Нужен, чтобы для несуществующего адреса

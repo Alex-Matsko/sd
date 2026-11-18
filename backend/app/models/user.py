@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import UserRole
@@ -16,6 +16,7 @@ class User(Base, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(SAEnum(UserRole, native_enum=False, length=20, validate_strings=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    auth_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     telegram_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     telegram_notification_scope: Mapped[str] = mapped_column(String(16), default="assigned", server_default="assigned")
     # Self-service linking (section 8: "инженер привязывает свой TG в профиле"):

@@ -58,11 +58,12 @@ export function unlinkTelegram() {
   return apiRequest<User>("/auth/me/telegram-unlink", { method: "POST" });
 }
 
-export function changeOwnPassword(currentPassword: string, newPassword: string) {
-  return apiRequest<void>("/auth/me/password", {
+export async function changeOwnPassword(currentPassword: string, newPassword: string) {
+  const data = await apiRequest<TokenResponse>("/auth/me/password", {
     method: "POST",
     body: { current_password: currentPassword, new_password: newPassword },
   });
+  setTokens(data.access_token, data.refresh_token);
 }
 
 

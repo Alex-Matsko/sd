@@ -4,6 +4,7 @@
 именно граничные случаи: мис-клик по таймеру, переключение между заявками,
 и то, что счётчики считают по всей очереди, а не по видимой странице.
 """
+from tests.ticket_fixtures import accepted_result
 
 from datetime import date, datetime, timedelta, timezone
 
@@ -195,6 +196,7 @@ def test_closed_ticket_leaves_the_risk_counters(db: Session, contact: Contact, s
     with_open = stats()["at_risk_today"]
 
     tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
+    accepted_result(db, ticket)
     tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
 
     assert stats()["at_risk_today"] == with_open - 1
@@ -222,6 +224,7 @@ def test_week_flow_counts_created_and_closed(db: Session, contact: Contact, stat
 
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
     tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
+    accepted_result(db, ticket)
     tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
 
     after_close = stats()["week_flow"][-1]
@@ -242,6 +245,7 @@ def test_workload_counts_only_open_tickets(db: Session, contact: Contact, engine
 
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
     tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
+    accepted_result(db, ticket)
     tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
 
     # Закрытая заявка перестаёт быть нагрузкой — иначе список загрузки

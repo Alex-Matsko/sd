@@ -1,6 +1,7 @@
 """Pagination across the ticket queue (SD interface) and the bots' "Мои
 заявки" list. Both were previously unbounded - the queue returned every
 ticket, the bots took a fixed newest-10 window."""
+from tests.ticket_fixtures import accepted_result
 
 from sqlalchemy.orm import Session
 
@@ -27,6 +28,7 @@ def _make(db: Session, contact: Contact, subject: str) -> Ticket:
 def _close(db: Session, ticket: Ticket) -> None:
     tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None)
     tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None)
+    accepted_result(db, ticket)
     tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
 
 

@@ -128,15 +128,20 @@ def create_ticket(db: Session, payload: TicketCreate, actor: User | None) -> Tic
 
 
 def transition_status(db: Session, ticket: Ticket, new_status: TicketStatus, actor: User | None, *, notify_status: bool = True) -> Ticket:
+    db.flush()
+    ticket = db.query(Ticket).filter_by(id=ticket.id).populate_existing().with_for_update().one()
     old_status = TicketStatus(ticket.status)
     allowed = ALLOWED_TRANSITIONS.get(old_status, set())
     if new_status not in allowed:
         raise ValueError(f"Переход {old_status.value} -> {new_status.value} не разрешён")
 
-    if new_status == TicketStatus.CLOSED and ticket.resolution_message_id and not ticket.accepted_at:
+    if new_status == TicketStatus.CLOSED and (not ticket.resolution_message_id or not ticket.accepted_at):
         raise ValueError('Сначала клиент должен принять опубликованный результат')
 
     now = datetime.now(timezone.utc)
+    if new_status != TicketStatus.IN_PROGRESS:
+        from app.services.time_entries import stop_ticket_timers
+        stop_ticket_timers(db, ticket, now)
 
     was_paused = old_status in SLA_PAUSING_STATUSES
     will_be_paused = new_status in SLA_PAUSING_STATUSES

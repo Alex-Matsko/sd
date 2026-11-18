@@ -169,8 +169,10 @@ export const listPortalTickets = (filters: TicketFilters = {}) => {
 export const fetchPortalUpdates = () => request<PortalUpdates>("/updates");
 export const markPortalUpdatesSeen = () => request<void>("/updates/seen", { method: "POST" });
 
-export const changePortalPassword = (current_password: string, new_password: string) =>
-  request<void>("/me/password", { method: "POST", body: { current_password, new_password } });
+export async function changePortalPassword(current_password: string, new_password: string) {
+  const data = await request<{ access_token: string }>("/me/password", { method: "POST", body: { current_password, new_password } });
+  setPortalToken(data.access_token);
+}
 
 /** Файл к своему сообщению: скриншот — самое частое, что нужно приложить. */
 export async function uploadPortalAttachment(ticketId: number, messageId: number, file: File) {

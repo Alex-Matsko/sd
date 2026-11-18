@@ -1,6 +1,6 @@
 """Shared business rules between the messenger bot channels (MAX, Telegram) -
-the parts that must never drift between them: ITSM status labels, the
-client-initiated close chain, and the bot's Russian command vocabulary. Wire
+the parts that must never drift between them: ITSM status labels, safe
+contact-link requests, and the bot's Russian command vocabulary. Wire
 format and per-update parsing stay separate per channel (max_channel.py /
 telegram_channel.py) - genuinely different enough (MAX's `link` object vs
 Telegram's flat `reply_to_message_id`, MAX's opaque `mid` vs Telegram's
@@ -9,7 +9,7 @@ cost more than it saves for two channels.
 """
 
 import re
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
@@ -36,27 +36,36 @@ MY_TICKETS_COMMANDS = {"/tickets", "мои заявки", "мои обращен
 # "/start" as a perfectly ordinary text message the same way) - so a
 # returning client needs a text command to bring the menu back up too.
 START_COMMANDS = {"/start", "start", "старт", "меню", "/menu"}
-# Cross-channel identity matching, opt-in (see find_contact_by_phone /
-# merge_contacts): the client explicitly asks to link their history from
-# another channel, rather than every first contact being gated on a phone
-# number (tried and reverted as too much friction for the common case of a
-# genuinely new contact - docs/decisions.md).
+# A client may request linking; only staff can confirm identity and merge.
 LINK_PHONE_COMMANDS = {"/link", "связать телефон", "привязать телефон", "объединить обращения"}
 
 
+def request_contact_link(db, channel, state, contact):
+    """A typed phone number proves no identity. Only staff may merge contacts,
+    after confirming through an already trusted customer channel."""
+    from app.core.enums import NotificationType, UserRole
+    from app.models.audit import AuditLog
+    from app.models.notification import Notification
+    from app.models.user import User
+    from app.services import audit, realtime
 
-# RESOLVED is deliberately not in OPEN_TICKET_STATUSES (it's not "open" for
-# gluing/routing purposes - see messages.add_message's reopen check), but
-# it's very much still closeable - in fact the one state CLOSED is directly
-# reachable from, so a client-initiated close needs its own, wider set here.
-CLOSEABLE_STATUSES = OPEN_TICKET_STATUSES | {TicketStatus.RESOLVED}
+    state.awaiting_phone_confirmation = False
+    db.add(state)
+    recent = db.query(AuditLog.id).filter(
+        AuditLog.entity_type == "contact", AuditLog.entity_id == contact.id,
+        AuditLog.action == "contact_link_requested",
+        AuditLog.created_at >= datetime.now(timezone.utc) - timedelta(minutes=15),
+    ).first()
+    if recent is None:
+        audit.record(db, entity_type="contact", entity_id=contact.id, action="contact_link_requested",
+                     user_id=None, changes={"channel": channel})
+        title = f"Контакт #{contact.id} — {contact.full_name}: запрос объединения каналов ({channel}). Подтвердите личность через прежний канал перед объединением в «Контактах»."[:500]
+        for user_id, in db.query(User.id).filter(User.is_active.is_(True), User.role.in_([UserRole.DISPATCHER, UserRole.MANAGER, UserRole.ADMIN])):
+            db.add(Notification(user_id=user_id, type=NotificationType.CONTACT_LINK_REQUEST, title=title))
+            realtime.publish_notification(db, user_id, NotificationType.CONTACT_LINK_REQUEST.value, title, None)
+    db.commit()
+    return "Запрос на объединение обращений передан сотруднику поддержки. Он подтвердит привязку через ваш прежний канал связи. До подтверждения история других контактов недоступна. Вы можете продолжать писать в этот чат."
 
-PRE_RESOLUTION_STATUSES = (
-    TicketStatus.NEW,
-    TicketStatus.ASSIGNED,
-    TicketStatus.WAITING_CUSTOMER,
-    TicketStatus.WAITING_THIRD_PARTY,
-)
 
 
 def normalize_phone_digits(raw: str) -> str:
@@ -68,13 +77,8 @@ def normalize_phone_digits(raw: str) -> str:
 
 
 def find_contact_by_phone(db: Session, raw_phone: str) -> Contact | None:
-    """Cross-channel identity matching (по запросу заказчика): a client who
-    already has a Contact record with a phone on file, messaging via a new
-    channel for the first time, gets linked onto that same Contact instead
-    of a duplicate with its own separate ticket history. Scans all phones
-    rather than a DB-side match - fine at MSP-contact-list scale, and
-    normalization has to happen on both sides anyway since the stored
-    format isn't guaranteed consistent."""
+    """Directory lookup only. A match is never proof of identity and must
+    not authorize a messenger link or a merge of customer histories."""
     normalized = normalize_phone_digits(raw_phone)
     if not normalized:
         return None
@@ -237,22 +241,11 @@ def merge_contacts(db: Session, from_contact: Contact, into_contact: Contact) ->
 
 
 def close_ticket_chain(db: Session, ticket: Ticket) -> Ticket:
-    """Client-initiated close ("Закрыть заявку", по запросу заказчика).
-    CLOSED is reachable only from RESOLVED (ALLOWED_TRANSITIONS), so this
-    chains the same one-hop transitions transition_status already validates
-    - IN_PROGRESS -> RESOLVED -> CLOSED, hopping through IN_PROGRESS first
-    if needed - rather than a special-cased jump that would bypass SLA/audit
-    bookkeeping. Intermediate transitions retain SLA/audit bookkeeping; only the final
-    closure sends a message."""
-    status = TicketStatus(ticket.status)
-    if status in PRE_RESOLUTION_STATUSES:
-        ticket = tickets_service.transition_status(db, ticket, TicketStatus.IN_PROGRESS, actor=None, notify_status=False)
-        status = TicketStatus.IN_PROGRESS
-    if status == TicketStatus.IN_PROGRESS:
-        ticket = tickets_service.transition_status(db, ticket, TicketStatus.RESOLVED, actor=None, notify_status=False)
-    if TicketStatus(ticket.status) == TicketStatus.RESOLVED:
-        ticket = tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
-    return ticket
+    """Compatibility entry point: closing requires an explicitly accepted result.
+    Never manufacture work/resolution transitions for a client's old button."""
+    if ticket.status != TicketStatus.RESOLVED or not ticket.resolution_message_id or not ticket.accepted_at:
+        raise ValueError("Сначала клиент должен принять опубликованный результат")
+    return tickets_service.transition_status(db, ticket, TicketStatus.CLOSED, actor=None)
 
 
 def planning_summary(ticket: Ticket) -> str:

@@ -1,3 +1,4 @@
+from tests.ticket_fixtures import accepted_result
 # coding: utf-8
 from types import SimpleNamespace
 
@@ -46,6 +47,7 @@ def test_both_staff_channels_have_identical_cards_and_completion(db, contact, en
         assert len({j.payload['text'] for j in matches}) == 1
         assert f'Статус: {status}' in matches[0].payload['text']
         assert f'https://service.o-horizons.com/tickets/{ticket.id}' in matches[0].payload['text']
+    accepted_result(db, ticket)
     tickets.transition_status(db, ticket, TicketStatus.CLOSED, None)
     assert len([j for j in db.query(ChannelJob).filter_by(ticket_id=ticket.id) if j.payload['text'].startswith('Заявка закрыта')]) == 4
 
@@ -55,6 +57,9 @@ def test_client_close_has_one_final_card_and_portal_link(db, contact, monkeypatc
     monkeypatch.setattr(module, '_find_chat_state', lambda db, contact_id: SimpleNamespace(chat_id='customer-chat'))
     ticket = tickets.create_ticket(db, TicketCreate(contact_id=contact.id, channel=channel,
         type=TicketType.INCIDENT, manual_priority="P3", manual_priority_reason="test", subject='Проверка закрытия'), actor=None)
+    tickets.transition_status(db, ticket, TicketStatus.IN_PROGRESS, None, notify_status=False)
+    tickets.transition_status(db, ticket, TicketStatus.RESOLVED, None, notify_status=False)
+    accepted_result(db, ticket)
     messenger_common.close_ticket_chain(db, ticket)
     jobs = db.query(ChannelJob).filter_by(ticket_id=ticket.id, channel=channel.value).all()
     assert len(jobs) == 1

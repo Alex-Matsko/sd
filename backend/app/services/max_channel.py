@@ -31,7 +31,7 @@ from app.core.enums import (
     TicketType,
 )
 from app.models.channel_conversation_state import ChannelConversationState
-from app.models.contact import Contact, ContactPhone
+from app.models.contact import Contact
 from app.models.message import Message
 from app.models.ticket import Ticket
 from app.models.user import User
@@ -84,13 +84,10 @@ def _main_menu_buttons() -> list[list[dict]]:
 
 
 def _menu_buttons_for(ticket: Ticket | None) -> list[list[dict]]:
-    """Main menu plus a "Закрыть заявку" row when there's a concrete
-    still-open ticket in context (client-initiated close, section 2
-    request) - the bare welcome message and the "Мои заявки" listing have
-    no single ticket to close, so they stay with `_main_menu_buttons()`."""
+    """Main menu plus a cancellation request for unfinished work."""
     buttons = _main_menu_buttons()
-    if ticket is not None and TicketStatus(ticket.status) in messenger_common.CLOSEABLE_STATUSES:
-        buttons.append([{"type": "callback", "text": "Закрыть заявку", "payload": f"close:{ticket.id}"}])
+    if ticket is not None and TicketStatus(ticket.status) in OPEN_TICKET_STATUSES:
+        buttons.append([{"type": "callback", "text": "Отменить заявку", "payload": f"cancel_ticket:{ticket.id}"}])
     return buttons
 
 
@@ -256,27 +253,9 @@ def _resolve_contact(db: Session, state: ChannelConversationState, parsed: Parse
 
 
 def _handle_link_phone_reply(db: Session, config: MaxConfig, state: ChannelConversationState, contact: Contact, parsed: ParsedUpdate) -> None:
-    """Cross-channel identity matching (по запросу заказчика), non-blocking
-    variant: unlike gating every first message on a phone number (tried and
-    reverted - would add friction to the overwhelmingly common case of a
-    genuinely new contact, see docs/decisions.md), this only runs when the
-    client explicitly opts in via LINK_PHONE_COMMANDS. A match merges this
-    (possibly already ticket-bearing) contact into the existing one instead
-    of the other way round - the client's current conversation continues
-    against whichever contact survives."""
-    state.awaiting_phone_confirmation = False
-    db.add(state)
-    matched = messenger_common.find_contact_by_phone(db, parsed.text)
-    if matched is not None and matched.id != contact.id:
-        messenger_common.merge_contacts(db, from_contact=contact, into_contact=matched)
-        state.contact_id = matched.id
-        db.add(state)
-        db.commit()
-        _send(config, parsed.chat_id, "Готово! Ваши предыдущие обращения объединены с этой перепиской.")
-        return
-    db.add(ContactPhone(contact_id=contact.id, phone=parsed.text.strip(), is_primary=not contact.phones))
-    db.commit()
-    _send(config, parsed.chat_id, "Спасибо, сохранили номер. Если найдём совпадение с другим каналом — объединим обращения.")
+    # Also handles conversations left waiting for a phone by an older release.
+    text = messenger_common.request_contact_link(db, "max", state, contact)
+    _send(config, parsed.chat_id, text)
 
 
 def _list_open_tickets(db: Session, contact: Contact) -> list[Ticket]:
@@ -474,11 +453,7 @@ def _handle_text(db: Session, config: MaxConfig, state: ChannelConversationState
         return
 
     if text_lower in messenger_common.LINK_PHONE_COMMANDS:
-        _cancel_pending_ticket_flow(state)
-        state.awaiting_phone_confirmation = True
-        db.add(state)
-        db.commit()
-        _send(config, parsed.chat_id, "Укажите, пожалуйста, номер телефона, под которым вы писали нам ранее.")
+        _handle_link_phone_reply(db, config, state, contact, parsed)
         return
 
     if state.awaiting_phone_confirmation:
@@ -493,17 +468,6 @@ def _handle_callback(db: Session, config: MaxConfig, state: ChannelConversationS
     payload = parsed.callback_payload
     from app.services import messenger_dialog, messenger_controls
     if messenger_dialog.handle_callback(db, "max", config, state, contact, parsed, sys.modules[__name__]):
-        return
-
-    if payload.startswith("close:"):
-        ticket = db.get(Ticket, int(payload.split(":", 1)[1]))
-        if ticket is None or ticket.contact_id != contact.id:
-            _send(config, parsed.chat_id, "Заявка не найдена.")
-            return
-        if TicketStatus(ticket.status) not in messenger_common.CLOSEABLE_STATUSES:
-            _send(config, parsed.chat_id, f"Заявка {ticket.display_number} уже закрыта.")
-            return
-        messenger_common.close_ticket_chain(db, ticket)
         return
 
     if payload in ("new_ticket", "cmd:new_ticket"):

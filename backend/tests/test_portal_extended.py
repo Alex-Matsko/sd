@@ -5,6 +5,7 @@
 списком за год пользоваться невозможно; пароль навсегда оставался тем, что
 продиктовал диспетчер.
 """
+from tests.ticket_fixtures import accepted_result
 
 from datetime import date, datetime, timedelta, timezone
 
@@ -162,6 +163,8 @@ def test_open_only_filter(db: Session, contact: Contact):
     open_ticket = _ticket(db, contact, "Открытая")
     closed = _ticket(db, contact, "Закрытая")
     for step in (TicketStatus.IN_PROGRESS, TicketStatus.RESOLVED, TicketStatus.CLOSED):
+        if step == TicketStatus.CLOSED:
+            accepted_result(db, closed)
         tickets_service.transition_status(db, closed, step, actor=None)
 
     ids = {t.id for t in _list(db, contact, open_only=True)}
