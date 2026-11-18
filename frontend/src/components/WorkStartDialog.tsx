@@ -43,13 +43,12 @@ export function WorkStartDialog({ ticket, pending, error, onClose, onConfirm }: 
     }}>
       <div className="modal-head"><h3 id="work-start-title">План перед началом работы</h3><button type="button" className="btn btn-ghost" aria-label="Закрыть план начала работы" disabled={pending} onClick={onClose}>×</button></div>
       <div className="modal-body">
-        <p><strong>{ticket.display_number}</strong> — {ticket.subject}</p>
         <strong>{ticket.display_number} — {ticket.subject}</strong>
-        <p className="muted">Срок и оценка будут доступны клиенту в заявке и в уведомлении через подключённый канал. Фактическое время учитывается отдельно.</p>
+        <p className="muted">Клиент увидит срок и оценку в заявке и уведомлении. Фактическое время учитывается отдельно.</p>
         {expired && <p className="muted" role="status">Предыдущий срок истёк. Укажите новый срок перед началом работы.</p>}
-        <label>Выполнить до *<input type="datetime-local" autoFocus required value={due} disabled={pending} onChange={e=>setDue(e.target.value)} /></label>
-        <label>Примерные трудозатраты, ч *<input type="number" required min="0.01" max="10000" step="any" placeholder="Например, 1.5" value={hours} disabled={pending} onChange={e=>setHours(e.target.value)} /></label>
-        <p className="muted">Время указано в часовом поясе вашего устройства. Например, 1,5 ч — это 1 ч 30 мин работы, а не срок ожидания.</p>
+        <label className="form-row">Выполнить до *<input type="datetime-local" autoFocus required value={due} disabled={pending} onChange={e=>setDue(e.target.value)} /></label>
+        <label className="form-row">Примерные трудозатраты, ч *<input type="number" required min="0.01" max="10000" step="any" placeholder="Например, 1.5" value={hours} disabled={pending} onChange={e=>setHours(e.target.value)} /></label>
+        <p className="muted">Срок — в часовом поясе вашего устройства. 1,5 ч — это 1 ч 30 мин работы.</p>
         {(validation || error) && <p role="alert" className="rich-editor-error">{validation || error}</p>}
       </div>
       <div className="modal-foot"><button type="button" className="btn btn-ghost" disabled={pending} onClick={onClose}>Отмена</button><button className="btn btn-primary" disabled={pending}>{pending ? "Начинаем работу…" : "Подтвердить и начать"}</button></div>

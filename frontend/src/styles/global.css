@@ -783,6 +783,8 @@ a.list-row:hover {
 .work-start-dialog { border: 0; padding: 0; background: transparent; color: var(--text); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); }
 .work-start-dialog::backdrop { background: rgb(10 14 24 / 48%); }
 .work-start-dialog .modal { max-height: calc(100dvh - 32px); overflow-y: auto; }
+.work-start-dialog .form-row input { width: 100%; min-width: 0; min-height: 42px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-elevated); color: var(--text); font: inherit; }
+.work-start-dialog .modal-body p { margin: 0; }
 .modal-backdrop {
   position: fixed;
   inset: 0;
